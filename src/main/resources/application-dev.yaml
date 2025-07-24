@@ -1,0 +1,9 @@
+quarkus:
+  log:
+    category:
+      "com.github.letsrokk":
+        level: DEBUG
+  kubernetes:
+    image-pull-policy: if-not-present
+    remote-debug:
+      enabled: true

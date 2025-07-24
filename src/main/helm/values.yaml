@@ -1,0 +1,4 @@
+---
+hazelcast:
+  cluster:
+    memberCount: 1

@@ -1,0 +1,62 @@
+quarkus:
+  #
+  # Cache
+  #
+  cache:
+      pod-ip-cache:
+        expire-after-write: 10s
+  #
+  # Container image
+  #
+  container-image:
+    registry: docker.io
+    group: letsrokk
+    name: mock-fleet
+    build: true
+  #
+  # Kubernetes
+  #
+  kubernetes:
+    idempotent: true
+    ingress:
+      expose: true
+    rbac:
+      service-accounts:
+        mock-fleet-pod-manager:
+          name: mock-fleet-pod-manager
+          use-as-default: true
+      roles:
+        mock-fleet-pod-manager-role:
+          name: mock-fleet-pod-manager-role
+          policy-rules:
+            mock-fleet-pod-manager-policy:
+              api-groups: ""
+              resources: pods
+              verbs: "*"
+      role-bindings:
+        mock-fleet-pod-manager-role-binding:
+          name: mock-fleet-pods-manager-role-binding
+          role-name: mock-fleet-pod-manager-role
+          subjects:
+            mock-fleet-pod-manager:
+              kind: ServiceAccount
+              name: mock-fleet-pod-manager
+    mounts:
+      hazelcast-config:
+        name: hazelcast-config
+        path: /etc/hazelcast
+        read-only: true
+    config-map-volumes:
+      hazelcast-config:
+        config-map-name: hazelcast-client-configmap
+        default-mode: 0644
+    env:
+      vars:
+        hazelcast-host: mock-fleet-hazelcast
+        java-opts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
+  helm:
+    dependencies:
+      hazelcast:
+        alias: hazelcast
+        version: 5.10.1
+        repository: https://hazelcast-charts.s3.amazonaws.com/
