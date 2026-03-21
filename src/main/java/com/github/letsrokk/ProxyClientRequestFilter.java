@@ -12,7 +12,7 @@ import java.io.IOException;
 @RequestScoped
 public class ProxyClientRequestFilter implements ClientRequestFilter {
 
-    HttpHeaders headers;
+    private final HttpHeaders headers;
 
     public ProxyClientRequestFilter(@Context HttpHeaders headers) {
         this.headers = headers;
@@ -21,6 +21,9 @@ public class ProxyClientRequestFilter implements ClientRequestFilter {
     @SuppressWarnings("unchecked")
     @Override
     public void filter(ClientRequestContext requestContext) throws IOException {
+        if (headers == null) {
+            return;
+        }
         MultivaluedMap<String, Object> incomingHeaders =
                 (MultivaluedMap<String, Object>) (MultivaluedMap<?, ?>) headers.getRequestHeaders();
         requestContext.getHeaders().putAll(incomingHeaders);

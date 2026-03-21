@@ -1,21 +1,9 @@
 quarkus:
-  #
-  # Cache
-  #
-  cache:
-      pod-ip-cache:
-        expire-after-write: 10s
-  #
-  # Container image
-  #
   container-image:
     registry: docker.io
     group: letsrokk
     name: mock-fleet
     build: true
-  #
-  # Kubernetes
-  #
   kubernetes:
     idempotent: true
     ingress:
@@ -60,3 +48,8 @@ quarkus:
         alias: hazelcast
         version: 5.10.1
         repository: https://hazelcast-charts.s3.amazonaws.com/
+
+mock-fleet:
+  inactivity-threshold: 1M
+  pod-creation-timeout: 1M
+  wiremock-image: wiremock/wiremock:3.9.2

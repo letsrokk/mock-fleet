@@ -1,62 +1,60 @@
 # mock-fleet
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+`mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. The target pod is selected from the request `Host` header: the first hostname label becomes the mock ID, and the service creates or reuses a WireMock pod for that ID.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+## How routing works
 
-## Running the application in dev mode
+- `demo.example.test` routes to mock ID `demo`
+- `demo.example.test:8080` also routes to mock ID `demo`
+- invalid or empty `Host` headers are rejected with HTTP `400`
 
-You can run your application in dev mode that enables live coding using:
+The proxy forwards method, path, query string, request body, and incoming headers to the selected WireMock pod on port `8080`.
 
-```shell script
+## Requirements
+
+- Java 21
+- Maven, or the checked-in Maven wrapper with working network access to download wrapper dependencies
+- Access to a Kubernetes cluster for real pod management
+- Hazelcast available through the configured client config map when running in Kubernetes
+
+## Local development
+
+Run the app in dev mode:
+
+```bash
 ./mvnw quarkus:dev
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
+Important runtime expectations:
 
-## Packaging and running the application
+- requests must include a `Host` header that contains the mock ID in the first label
+- Kubernetes credentials must be available to the Fabric8 client
+- Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments
 
-The application can be packaged using:
+## Configuration
 
-```shell script
-./mvnw package
+Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/projects/github/mock-fleet/src/main/resources/application.yaml).
+
+- `mock-fleet.inactivity-threshold`: how long an inactive mock pod may live before cleanup
+- `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
+- `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
+
+## Tests
+
+The test suite now covers:
+
+- host-header parsing and validation
+- proxy dispatch and nested path forwarding
+- request-header forwarding
+- idle/orphan pod cleanup decisions
+- pod deletion result handling
+
+Run tests with:
+
+```bash
+./mvnw test
 ```
 
-It produces the `quarkus-run.jar` file in the `target/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `target/quarkus-app/lib/` directory.
+## Minikube helper
 
-The application is now runnable using `java -jar target/quarkus-app/quarkus-run.jar`.
-
-If you want to build an _über-jar_, execute the following command:
-
-```shell script
-./mvnw package -Dquarkus.package.jar.type=uber-jar
-```
-
-The application, packaged as an _über-jar_, is now runnable using `java -jar target/*-runner.jar`.
-
-## Creating a native executable
-
-You can create a native executable using:
-
-```shell script
-./mvnw package -Dnative
-```
-
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
-
-```shell script
-./mvnw package -Dnative -Dquarkus.native.container-build=true
-```
-
-You can then execute your native executable with: `./target/mock-fleet-1.0.0-SNAPSHOT-runner`
-
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/maven-tooling>.
-
-## Provided Code
-
-### REST
-
-Easily start your REST Web Services
-
-[Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
+The local helper script at [`debug-minikube.sh`](/C:/Users/Dmitry%20Mayer/projects/github/mock-fleet/bin/local/debug-minikube.sh) builds the app with Maven, updates the generated Helm chart, deploys it into Minikube, then tails logs and opens remote debugging on port `5005`.

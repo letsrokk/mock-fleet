@@ -6,7 +6,6 @@ import io.fabric8.kubernetes.api.model.Pod;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.List;
 import java.util.function.Function;
 
 @ApplicationScoped
@@ -33,17 +32,19 @@ public class PodState {
         return this.podMap;
     }
 
-    public Long getLastAccessTime1(String podName) {
+    public Long getLastAccessTime(String podName) {
         return this.lastAccessTimeMap.get(podName);
     }
 
-    public void setLastAccessTime1(String podName, Long lastAccessTime) {
+    public void setLastAccessTime(String podName, Long lastAccessTime) {
         this.lastAccessTimeMap.put(podName, lastAccessTime);
     }
 
     public void removePod(String mockId) {
         Pod pod = this.podMap.remove(mockId);
-        this.lastAccessTimeMap.remove(pod.getMetadata().getName());
+        if (pod != null && pod.getMetadata() != null) {
+            this.lastAccessTimeMap.remove(pod.getMetadata().getName());
+        }
     }
 
 }

@@ -7,51 +7,50 @@ import jakarta.ws.rs.core.Response;
 public interface ProxyClient {
 
     @GET
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardGet(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams);
 
     @POST
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardPost(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams,
             byte[] requestBody);
 
     @PUT
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardPut(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams,
             byte[] requestBody);
 
     @PATCH
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardPatch(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams,
             byte[] requestBody);
 
     @DELETE
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardDelete(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams,
             byte[] requestBody);
 
     @HEAD
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardHead(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams);
 
     @OPTIONS
-    @Path("{path}")
+    @Path("{path: .*}")
     Response forwardOptions(
             @Encoded @PathParam("path") String path,
             @Encoded @QueryParam("") MultivaluedMap<String, String> queryParams,
             byte[] requestBody);
 
 }
-

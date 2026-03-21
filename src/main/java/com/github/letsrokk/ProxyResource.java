@@ -1,5 +1,6 @@
 package com.github.letsrokk;
 
+import com.github.letsrokk.exceptions.MockIdNotFound;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -53,23 +54,27 @@ public class ProxyResource {
         return proxyRequest(requestContext, body);
     }
 
-    private Response proxyRequest(ContainerRequestContext requestContext, byte[] body) {
+    Response proxyRequest(ContainerRequestContext requestContext, byte[] body) {
         String method = requestContext.getMethod();
-        String host =  requestContext.getHeaderString("Host");
+        String host = requestContext.getHeaderString(HttpHeaders.HOST);
         String podIp = podManager.getPodIP(host);
         MultivaluedMap<String, String> params = requestContext.getUriInfo().getQueryParameters();
-        String path = requestContext.getUriInfo().getPath();
-        if (path.startsWith("/")) {
+        String path = requestContext.getUriInfo().getRequestUri().getRawPath();
+        if (path == null) {
+            path = "";
+        } else if (path.startsWith("/")) {
             path = path.substring(1);
         }
+
+        LOG.debugf("Proxying %s %s for host '%s' to pod %s.", method, path, host, podIp);
         return proxyRequest(method, podIp, path, params, body);
     }
 
-    private Response proxyRequest(String method,
-                                  String podIp,
-                                  String path,
-                                  MultivaluedMap<String, String> params,
-                                  byte[] body) {
+    Response proxyRequest(String method,
+                          String podIp,
+                          String path,
+                          MultivaluedMap<String, String> params,
+                          byte[] body) {
         String targetBaseUrl = String.format("http://%s:8080", podIp);
 
         ProxyClient dynamicProxyClient =
@@ -78,17 +83,24 @@ public class ProxyResource {
         Response mockResponse;
         try {
             mockResponse = switch (method) {
-                case "GET", "ssd" -> dynamicProxyClient.forwardGet(path, params);
+                case HttpMethod.GET -> dynamicProxyClient.forwardGet(path, params);
                 case "POST" -> dynamicProxyClient.forwardPost(path, params, body);
                 case "PUT" -> dynamicProxyClient.forwardPut(path, params, body);
                 case "PATCH" -> dynamicProxyClient.forwardPatch(path, params, body);
                 case "DELETE" -> dynamicProxyClient.forwardDelete(path, params, body);
-                case "HEAD" -> dynamicProxyClient.forwardHead(path, params);
-                case "OPTIONS" -> dynamicProxyClient.forwardOptions(path, params, body);
+                case HttpMethod.HEAD -> dynamicProxyClient.forwardHead(path, params);
+                case HttpMethod.OPTIONS -> dynamicProxyClient.forwardOptions(path, params, body);
                 default -> Response.status(Response.Status.METHOD_NOT_ALLOWED).build();
             };
+            LOG.debugf("Received upstream status %d for %s %s.", mockResponse.getStatus(), method, path);
         } catch (ClientWebApplicationException e) {
+            LOG.debugf("Upstream returned error status %d for %s %s.", e.getResponse().getStatus(), method, path);
             mockResponse = e.getResponse();
+        } catch (MockIdNotFound e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorf(e, "Failed to proxy %s %s to %s.", method, path, targetBaseUrl);
+            return Response.serverError().build();
         }
 
         return Response.fromResponse(mockResponse).build();
