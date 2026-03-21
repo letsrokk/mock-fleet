@@ -7,3 +7,12 @@ quarkus:
     image-pull-policy: if-not-present
     remote-debug:
       enabled: true
+
+"%local-k8s":
+  mock-fleet:
+    local-debug:
+      enabled: true
+      bind-address: 127.0.0.1
+      start-port: 18080
+      end-port: 18180
+      service-port: 8080

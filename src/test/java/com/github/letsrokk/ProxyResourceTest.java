@@ -38,7 +38,8 @@ class ProxyResourceTest {
 
     @Test
     void proxiesNestedGetRequestsWithPathAndQueryParameters() {
-        when(podManager.getPodIP("demo.example.test")).thenReturn("10.0.0.5");
+        when(podManager.getUpstreamBaseUrl("demo.example.test"))
+                .thenReturn("http://mock-fleet-demo.test.svc.cluster.local:8080");
         when(proxyClient.forwardGet(any(), any())).thenReturn(Response.ok("ok").build());
 
         given()
@@ -54,7 +55,7 @@ class ProxyResourceTest {
         ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<MultivaluedMap<String, String>> paramsCaptor = ArgumentCaptor.forClass(MultivaluedMap.class);
-        verify(proxyClientFactory).createClient("http://10.0.0.5:8080");
+        verify(proxyClientFactory).createClient("http://mock-fleet-demo.test.svc.cluster.local:8080");
         verify(proxyClient).forwardGet(pathCaptor.capture(), paramsCaptor.capture());
 
         assertEquals("nested/path", pathCaptor.getValue());
@@ -64,7 +65,8 @@ class ProxyResourceTest {
 
     @Test
     void returnsControlledBadRequestForInvalidHostHeader() {
-        when(podManager.getPodIP("!!!:8080")).thenThrow(new MockIdNotFound("Unable to extract mock id from host '!!!:8080'."));
+        when(podManager.getUpstreamBaseUrl("!!!:8080"))
+                .thenThrow(new MockIdNotFound("Unable to extract mock id from host '!!!:8080'."));
 
         given()
                 .header("Host", "!!!:8080")
@@ -80,14 +82,20 @@ class ProxyResourceTest {
         ProxyResource resource = new ProxyResource();
         resource.proxyClientFactory = proxyClientFactory;
 
-        Response response = resource.proxyRequest("TRACE", "10.0.0.7", "test", new jakarta.ws.rs.core.MultivaluedHashMap<>(), null);
+        Response response = resource.proxyRequest(
+                "TRACE",
+                "http://mock-fleet-demo.test.svc.cluster.local:8080",
+                "test",
+                new jakarta.ws.rs.core.MultivaluedHashMap<>(),
+                null);
 
         assertEquals(405, response.getStatus());
     }
 
     @Test
     void forwardsUpstreamClientErrorsWithoutMaskingThem() {
-        when(podManager.getPodIP("demo.example.test")).thenReturn("10.0.0.5");
+        when(podManager.getUpstreamBaseUrl("demo.example.test"))
+                .thenReturn("http://mock-fleet-demo.test.svc.cluster.local:8080");
         when(proxyClient.forwardGet(eq("missing"), any())).thenReturn(Response.status(404).entity("missing").build());
 
         given()

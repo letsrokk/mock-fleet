@@ -13,4 +13,18 @@ public interface MockFleetConfig {
 
     String wiremockImage();
 
+    LocalDebugConfig localDebug();
+
+    interface LocalDebugConfig {
+        boolean enabled();
+
+        String bindAddress();
+
+        int startPort();
+
+        int endPort();
+
+        int servicePort();
+    }
+
 }

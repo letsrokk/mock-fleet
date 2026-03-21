@@ -21,6 +21,10 @@ quarkus:
               api-groups: ""
               resources: pods
               verbs: "*"
+            mock-fleet-service-manager-policy:
+              api-groups: ""
+              resources: services
+              verbs: "*"
       role-bindings:
         mock-fleet-pod-manager-role-binding:
           name: mock-fleet-pods-manager-role-binding
@@ -53,3 +57,9 @@ mock-fleet:
   inactivity-threshold: 1M
   pod-creation-timeout: 1M
   wiremock-image: wiremock/wiremock:3.9.2
+  local-debug:
+    enabled: false
+    bind-address: 127.0.0.1
+    start-port: 18080
+    end-port: 18180
+    service-port: 8080

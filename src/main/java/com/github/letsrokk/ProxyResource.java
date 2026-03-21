@@ -57,7 +57,7 @@ public class ProxyResource {
     Response proxyRequest(ContainerRequestContext requestContext, byte[] body) {
         String method = requestContext.getMethod();
         String host = requestContext.getHeaderString(HttpHeaders.HOST);
-        String podIp = podManager.getPodIP(host);
+        String targetBaseUrl = podManager.getUpstreamBaseUrl(host);
         MultivaluedMap<String, String> params = requestContext.getUriInfo().getQueryParameters();
         String path = requestContext.getUriInfo().getRequestUri().getRawPath();
         if (path == null) {
@@ -66,17 +66,15 @@ public class ProxyResource {
             path = path.substring(1);
         }
 
-        LOG.debugf("Proxying %s %s for host '%s' to pod %s.", method, path, host, podIp);
-        return proxyRequest(method, podIp, path, params, body);
+        LOG.debugf("Proxying %s %s for host '%s' to upstream %s.", method, path, host, targetBaseUrl);
+        return proxyRequest(method, targetBaseUrl, path, params, body);
     }
 
     Response proxyRequest(String method,
-                          String podIp,
+                          String targetBaseUrl,
                           String path,
                           MultivaluedMap<String, String> params,
                           byte[] body) {
-        String targetBaseUrl = String.format("http://%s:8080", podIp);
-
         ProxyClient dynamicProxyClient =
                 proxyClientFactory.createClient(targetBaseUrl);
 
