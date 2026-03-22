@@ -25,10 +25,10 @@ Run the app in dev mode:
 ./mvnw quarkus:dev
 ```
 
-Run the app against a real local Kubernetes cluster from your IDE with the dedicated profile:
+Run the app against a real local Kubernetes cluster from your IDE with the dedicated profile override:
 
 ```bash
-./mvnw quarkus:dev -Dquarkus.profile=local-k8s
+./mvnw quarkus:dev -Dquarkus.profile=dev,local-k8s
 ```
 
 Important runtime expectations:
@@ -36,6 +36,7 @@ Important runtime expectations:
 - requests must include a `Host` header that contains the mock ID in the first label
 - Kubernetes credentials must be available to the Fabric8 client
 - Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments
+- include both `dev` and `local-k8s` in `quarkus.profile`; `%local-k8s` augments the dev configuration rather than replacing it
 - in `%local-k8s`, upstream mock access uses localhost service port-forwards and an embedded Hazelcast instance
 
 ## Configuration
