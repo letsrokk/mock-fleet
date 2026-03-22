@@ -12,14 +12,13 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServiceList;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.LocalPortForward;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.NamespaceableResource;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.PodResource;
 import io.fabric8.kubernetes.client.dsl.ServiceResource;
 import org.junit.jupiter.api.Test;
 
-import java.net.InetAddress;
 import java.time.Duration;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -32,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -271,6 +271,91 @@ class PodManagerTest {
     }
 
     @Test
+    void spawnPodCreatesPodWaitsForRunningStateAndCreatesService() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodFactory podFactory = mock(PodFactory.class);
+        ServiceFactory serviceFactory = new ServiceFactory();
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Service> serviceHandle = mock(NamespaceableResource.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Service, ServiceList, ServiceResource<Service>> serviceOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Service, ServiceList, ServiceResource<Service>> namespacedServices = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        ServiceResource<Service> serviceResource = mock(ServiceResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podFactory = podFactory;
+        podManager.serviceFactory = serviceFactory;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+
+        Pod podSpec = podWithGenerateName("mock-fleet-demo-");
+        Pod createdPod = pod("mock-fleet-demo-1", "Pending");
+        Pod runningPod = pod("mock-fleet-demo-1", "Running");
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo")).thenReturn(podSpec);
+        when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
+        when(podHandle.inNamespace("test")).thenReturn(podHandle);
+        when(podHandle.create()).thenReturn(createdPod);
+        when(kubernetesClient.resource(createdPod)).thenReturn(podHandle);
+        when(podHandle.get()).thenReturn(runningPod);
+        when(kubernetesClient.services()).thenReturn(serviceOperations);
+        when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
+        when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
+        when(serviceResource.get()).thenReturn(null);
+        when(kubernetesClient.resource(any(Service.class))).thenReturn(serviceHandle);
+        when(serviceHandle.inNamespace("test")).thenReturn(serviceHandle);
+        when(serviceHandle.create()).thenReturn(service("mock-fleet-demo"));
+
+        Pod spawnedPod = podManager.spawnPod("demo");
+
+        assertEquals(runningPod, spawnedPod);
+        verify(podFactory).createPodSpec("mock-fleet-demo-", "demo");
+        verify(podHandle).create();
+        verify(serviceHandle).create();
+    }
+
+    @Test
+    void deleteServiceReturnsTrueWhenServiceIsAlreadyMissing() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        ServiceFactory serviceFactory = new ServiceFactory();
+        @SuppressWarnings("unchecked")
+        MixedOperation<Service, ServiceList, ServiceResource<Service>> serviceOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Service, ServiceList, ServiceResource<Service>> namespacedServices = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        ServiceResource<Service> serviceResource = mock(ServiceResource.class);
+        LocalServicePortForwardManager localServicePortForwardManager = mock(LocalServicePortForwardManager.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.serviceFactory = serviceFactory;
+        podManager.localServicePortForwardManager = localServicePortForwardManager;
+
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.services()).thenReturn(serviceOperations);
+        when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
+        when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
+        when(serviceResource.get()).thenReturn(null);
+
+        assertTrue(podManager.deleteService("demo"));
+        verify(localServicePortForwardManager).closeForMock("demo");
+        verify(kubernetesClient, never()).resource(any(Service.class));
+    }
+
+    @Test
+    void currentNamespaceFallsBackToDefaultWhenClientHasNoNamespace() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+
+        when(kubernetesClient.getNamespace()).thenReturn(null);
+
+        assertEquals("default", podManager.currentNamespace());
+    }
+
+    @Test
     void wasDeleteSuccessfulMatchesReturnedDeleteDetails() {
         PodManager podManager = new PodManager();
 
@@ -297,6 +382,12 @@ class PodManagerTest {
         return new PodBuilder()
                 .withMetadata(new ObjectMetaBuilder().withName(name).build())
                 .withStatus(new PodStatusBuilder().withPhase(phase).withPodIP("10.0.0.1").build())
+                .build();
+    }
+
+    private Pod podWithGenerateName(String generateName) {
+        return new PodBuilder()
+                .withMetadata(new ObjectMetaBuilder().withGenerateName(generateName).build())
                 .build();
     }
 

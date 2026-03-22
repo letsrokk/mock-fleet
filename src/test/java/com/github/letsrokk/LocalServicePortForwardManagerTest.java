@@ -144,6 +144,55 @@ class LocalServicePortForwardManagerTest {
     }
 
     @Test
+    void createForwardSkipsUnhealthyForwardAndUsesNextPort() throws Exception {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Service, ServiceList, ServiceResource<Service>> serviceOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Service, ServiceList, ServiceResource<Service>> namespacedServices = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        ServiceResource<Service> serviceResource = mock(ServiceResource.class);
+        MockFleetConfig config = localDebugConfig(true, "127.0.0.1", 18080, 18081, 8080);
+        LocalPortForward unhealthyForward = mock(LocalPortForward.class);
+        LocalPortForward healthyForward = mock(LocalPortForward.class);
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+
+        LocalServicePortForwardManager manager = new LocalServicePortForwardManager() {
+            @Override
+            boolean isPortAvailable(InetAddress bindAddress, int port) {
+                return true;
+            }
+        };
+        manager.config = config;
+        manager.serviceFactory = new ServiceFactory();
+        manager.kubernetesClient = kubernetesClient;
+
+        when(kubernetesClient.services()).thenReturn(serviceOperations);
+        when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
+        when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
+        when(serviceResource.portForward(8080, loopback, 18080)).thenReturn(unhealthyForward);
+        when(serviceResource.portForward(8080, loopback, 18081)).thenReturn(healthyForward);
+        when(unhealthyForward.isAlive()).thenReturn(true);
+        when(unhealthyForward.errorOccurred()).thenReturn(true);
+        when(healthyForward.isAlive()).thenReturn(true);
+        when(healthyForward.errorOccurred()).thenReturn(false);
+
+        LocalPortForward forward = manager.createForward("test", "mock-fleet-demo", loopback);
+
+        assertEquals(healthyForward, forward);
+        verify(unhealthyForward).close();
+    }
+
+    @Test
+    void resolveBindAddressFailsForInvalidHost() {
+        MockFleetConfig config = localDebugConfig(true, "not-a-real-host.invalid", 18080, 18081, 8080);
+        LocalServicePortForwardManager manager = new LocalServicePortForwardManager();
+        manager.config = config;
+
+        assertThrows(IllegalStateException.class, manager::resolveBindAddress);
+    }
+
+    @Test
     void closeForMockRemovesCachedForward() throws Exception {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         @SuppressWarnings("unchecked")
