@@ -1,10 +1,10 @@
 quarkus:
   quinoa:
     ui-dir: src/main/webui
-    ui-root-path: /
+    ui-root-path: /__fleet
     build-dir: dist
     enable-spa-routing: true
-    ignored-path-prefixes: /__fleet
+    ignored-path-prefixes: /__fleet/api
   container-image:
     registry: docker.io
     group: letsrokk

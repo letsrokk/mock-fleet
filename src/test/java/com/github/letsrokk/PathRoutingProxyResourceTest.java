@@ -144,7 +144,8 @@ class PathRoutingProxyResourceTest {
         .when()
                 .get("/")
         .then()
-                .statusCode(404);
+                .statusCode(400)
+                .body(containsString("Unable to extract mock id"));
     }
 
     @Test

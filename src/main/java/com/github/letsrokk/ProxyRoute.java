@@ -33,16 +33,13 @@ public class ProxyRoute {
     @Inject
     RequestRoutingResolver requestRoutingResolver;
 
-    @Inject
-    MockFleetConfig config;
-
     private volatile WebClient webClient;
 
     @Route(path = "/*", order = 100)
     void proxy(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
         String requestPath = requestPath(routingContext.request().uri());
-        if (shouldHandleLocally(host, requestPath)) {
+        if (shouldHandleLocally(requestPath)) {
             routingContext.next();
             return;
         }
@@ -96,26 +93,8 @@ public class ProxyRoute {
         return routingContext.response().end(responseBody);
     }
 
-    private boolean shouldHandleLocally(String host, String requestPath) {
-        if (requestPath.equals("/") && config.routing().mode() == MockFleetConfig.RoutingMode.PATH) {
-            return true;
-        }
-        if (requestPath.equals("/") && config.routing().mode() == MockFleetConfig.RoutingMode.HOST) {
-            return isBareHost(host);
-        }
-        return requestPath.startsWith("/__fleet/");
-    }
-
-    private boolean isBareHost(String host) {
-        if (host == null || host.isBlank()) {
-            return true;
-        }
-        String normalizedHost = host.trim();
-        int portSeparator = normalizedHost.indexOf(':');
-        if (portSeparator >= 0) {
-            normalizedHost = normalizedHost.substring(0, portSeparator);
-        }
-        return !normalizedHost.contains(".");
+    private boolean shouldHandleLocally(String requestPath) {
+        return requestPath.equals("/__fleet") || requestPath.startsWith("/__fleet/");
     }
 
     private String requestPath(String requestUri) {

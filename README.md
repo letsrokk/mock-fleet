@@ -2,7 +2,7 @@
 
 `mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. The target pod is selected either from the request `Host` header or from the first URL path segment, depending on configuration, and the service creates or reuses a WireMock pod for that mock ID.
 
-The service also exposes a small internal dashboard at `/` for inspecting and manually deleting active mock pods. Its management API is reserved under `/__fleet/`.
+The service also exposes a small internal dashboard at `/__fleet/` for inspecting and manually deleting active mock pods. Its management API is reserved under `/__fleet/`.
 
 ## How routing works
 
@@ -20,7 +20,7 @@ The proxy forwards method, path, query string, request body, and incoming header
 
 Reserved local routes:
 
-- `/` serves the dashboard UI when the request is not being routed to a mock
+- `/__fleet/` serves the dashboard UI
 - `/__fleet/api/mocks` lists active mock pods
 - `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually
 

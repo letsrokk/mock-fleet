@@ -74,14 +74,24 @@ h1 {
 }
 
 .refresh-button {
-  padding: 12px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
   color: #081221;
   background: #f4b663;
   font-weight: 700;
 }
 
 .danger-button {
-  padding: 10px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
   color: #fff4ef;
   background: linear-gradient(135deg, #cd4f43 0%, #a12b39 100%);
   font-weight: 700;
@@ -106,6 +116,19 @@ h1 {
   margin-right: auto;
 }
 
+.toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 20;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 12px 16px;
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 18px 44px rgba(3, 8, 18, 0.32);
+  animation: toast-in 180ms ease-out;
+}
+
 .notice {
   margin-bottom: 16px;
   padding: 12px 16px;
@@ -116,6 +139,12 @@ h1 {
 .notice.success {
   background: rgba(63, 139, 91, 0.2);
   border: 1px solid rgba(122, 206, 153, 0.25);
+}
+
+.toast.success {
+  background: rgba(63, 139, 91, 0.92);
+  border: 1px solid rgba(122, 206, 153, 0.35);
+  color: #f4fff7;
 }
 
 .notice.error {
@@ -140,6 +169,60 @@ h1 {
   border-bottom: 1px solid rgba(198, 207, 222, 0.1);
   color: #c6cfde;
   font-size: 0.95rem;
+}
+
+.panel-status {
+  color: #90a0bb;
+  font-size: 0.82rem;
+}
+
+.refresh-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.refresh-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(8, 18, 33, 0.28);
+  border-top-color: #081221;
+  border-radius: 999px;
+}
+
+.refresh-spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+.trash-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.delete-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 244, 239, 0.35);
+  border-top-color: #fff4ef;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .state {
@@ -189,6 +272,13 @@ tr:last-child td {
   .hero-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .toast {
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
   }
 
   table,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type MockRow = {
   mockId: string;
@@ -10,24 +10,35 @@ const API_PATH = "/__fleet/api/mocks";
 export default function App() {
   const [rows, setRows] = useState<MockRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyMockId, setBusyMockId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const toastTimerRef = useRef<number | null>(null);
 
-  async function loadMocks() {
-    setLoading(true);
-    setError(null);
+  async function loadMocks(showSpinner: boolean) {
+    if (showSpinner) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
     try {
       const response = await fetch(API_PATH);
       if (!response.ok) {
         throw new Error(`Unable to load mocks (${response.status})`);
       }
       const data = (await response.json()) as MockRow[];
+      setError(null);
       setRows(data);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load mocks.");
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -46,7 +57,7 @@ export default function App() {
         throw new Error(`Unable to delete mock '${mockId}'.`);
       }
       setRows((currentRows) => currentRows.filter((row) => row.mockId !== mockId));
-      setMessage(`Deleted mock '${mockId}'.`);
+      showToast(`Deleted mock '${mockId}'.`);
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Unable to delete mock.");
     } finally {
@@ -54,12 +65,38 @@ export default function App() {
     }
   }
 
+  function showToast(nextMessage: string) {
+    setMessage(nextMessage);
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setMessage(null);
+      toastTimerRef.current = null;
+    }, 2600);
+  }
+
   useEffect(() => {
-    void loadMocks();
+    mountedRef.current = true;
+    void loadMocks(true);
+
+    const intervalId = window.setInterval(() => {
+      void loadMocks(false);
+    }, 5000);
+
+    return () => {
+      mountedRef.current = false;
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   return (
     <main className="shell">
+      {message ? <div className="toast success">{message}</div> : null}
+
       <section className="hero">
         <p className="eyebrow">Mock Fleet</p>
         <div className="hero-row">
@@ -69,18 +106,44 @@ export default function App() {
               Inspect currently active mocks and remove them before inactivity cleanup runs.
             </p>
           </div>
-          <button className="refresh-button" onClick={() => void loadMocks()} disabled={loading}>
-            {loading ? "Refreshing..." : "Refresh"}
+          <button
+            className="refresh-button"
+            onClick={() => void loadMocks(false)}
+            disabled={loading || refreshing}
+            aria-label={loading || refreshing ? "Refreshing" : "Refresh"}
+          >
+            {loading || refreshing ? (
+              <span className="refresh-spinner" aria-hidden="true"></span>
+            ) : (
+              <svg
+                aria-hidden="true"
+                className="refresh-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M21.8 12a10 10 0 1 1-4.8-7.9"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M22.35 0.05 23.1 11.2 11.95 10.45Z"
+                  fill="currentColor"
+                />
+              </svg>
+            )}
           </button>
         </div>
       </section>
 
-      {message ? <p className="notice success">{message}</p> : null}
       {error ? <p className="notice error">{error}</p> : null}
 
       <section className="panel">
         <div className="panel-header">
           <span>{rows.length} active mocks</span>
+          <span className="panel-status">{refreshing ? "Updating..." : "Auto-refresh every 5s"}</span>
         </div>
 
         {loading ? <p className="state">Loading active mocks...</p> : null}
@@ -105,8 +168,57 @@ export default function App() {
                       className="danger-button"
                       onClick={() => void killMock(row.mockId)}
                       disabled={busyMockId === row.mockId}
+                      aria-label={busyMockId === row.mockId ? "Deleting" : `Delete ${row.mockId}`}
                     >
-                      {busyMockId === row.mockId ? "Killing..." : "Kill Pod"}
+                      {busyMockId === row.mockId ? (
+                        <span className="delete-spinner" aria-hidden="true"></span>
+                      ) : (
+                        <svg
+                          aria-hidden="true"
+                          className="trash-icon"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            d="M4 7h16"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M8 4.5h8"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M6.5 7l0.9 12a1 1 0 0 0 1 0.9h7.2a1 1 0 0 0 1-0.9l0.9-12"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M9.5 10v7"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M12 10v7"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                          <path
+                            d="M14.5 10v7"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      )}
                     </button>
                   </td>
                 </tr>
