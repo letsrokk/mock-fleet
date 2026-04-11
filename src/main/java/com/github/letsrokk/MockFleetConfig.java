@@ -13,7 +13,18 @@ public interface MockFleetConfig {
 
     String wiremockImage();
 
+    RoutingConfig routing();
+
     LocalDebugConfig localDebug();
+
+    interface RoutingConfig {
+        RoutingMode mode();
+    }
+
+    enum RoutingMode {
+        HOST,
+        PATH
+    }
 
     interface LocalDebugConfig {
         boolean enabled();

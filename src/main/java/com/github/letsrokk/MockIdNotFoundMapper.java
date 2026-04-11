@@ -14,7 +14,7 @@ public class MockIdNotFoundMapper implements ExceptionMapper<MockIdNotFound> {
 
     @Override
     public Response toResponse(MockIdNotFound exception) {
-        LOG.debugf("Rejecting request with invalid host header: %s", exception.getMessage());
+        LOG.debugf("Rejecting request: %s", exception.getMessage());
         return Response.status(Response.Status.BAD_REQUEST)
                 .type(MediaType.TEXT_PLAIN_TYPE)
                 .entity(exception.getMessage())
