@@ -1,21 +1,9 @@
 quarkus:
-  #
-  # Cache
-  #
-  cache:
-      pod-ip-cache:
-        expire-after-write: 10s
-  #
-  # Container image
-  #
   container-image:
     registry: docker.io
     group: letsrokk
     name: mock-fleet
     build: true
-  #
-  # Kubernetes
-  #
   kubernetes:
     idempotent: true
     ingress:
@@ -32,6 +20,10 @@ quarkus:
             mock-fleet-pod-manager-policy:
               api-groups: ""
               resources: pods
+              verbs: "*"
+            mock-fleet-service-manager-policy:
+              api-groups: ""
+              resources: services
               verbs: "*"
       role-bindings:
         mock-fleet-pod-manager-role-binding:
@@ -60,3 +52,14 @@ quarkus:
         alias: hazelcast
         version: 5.10.1
         repository: https://hazelcast-charts.s3.amazonaws.com/
+
+mock-fleet:
+  inactivity-threshold: 1M
+  pod-creation-timeout: 1M
+  wiremock-image: wiremock/wiremock:3.9.2
+  local-debug:
+    enabled: false
+    bind-address: 127.0.0.1
+    start-port: 18080
+    end-port: 18180
+    service-port: 8080
