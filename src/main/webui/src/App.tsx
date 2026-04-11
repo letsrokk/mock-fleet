@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import refreshIcon from "./assets/refresh.svg";
+import trashIcon from "./assets/trash.svg";
 
 type MockRow = {
   mockId: string;
@@ -101,7 +103,7 @@ export default function App() {
         <p className="eyebrow">Mock Fleet</p>
         <div className="hero-row">
           <div>
-            <h1>Active Mock Pods</h1>
+            <h1>Active Mocks</h1>
             <p className="subtitle">
               Inspect currently active mocks and remove them before inactivity cleanup runs.
             </p>
@@ -115,24 +117,7 @@ export default function App() {
             {loading || refreshing ? (
               <span className="refresh-spinner" aria-hidden="true"></span>
             ) : (
-              <svg
-                aria-hidden="true"
-                className="refresh-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M21.8 12a10 10 0 1 1-4.8-7.9"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M22.35 0.05 23.1 11.2 11.95 10.45Z"
-                  fill="currentColor"
-                />
-              </svg>
+              <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
             )}
           </button>
         </div>
@@ -173,51 +158,7 @@ export default function App() {
                       {busyMockId === row.mockId ? (
                         <span className="delete-spinner" aria-hidden="true"></span>
                       ) : (
-                        <svg
-                          aria-hidden="true"
-                          className="trash-icon"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path
-                            d="M4 7h16"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M8 4.5h8"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M6.5 7l0.9 12a1 1 0 0 0 1 0.9h7.2a1 1 0 0 0 1-0.9l0.9-12"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M9.5 10v7"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M12 10v7"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                          <path
-                            d="M14.5 10v7"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          />
-                        </svg>
+                        <img src={trashIcon} alt="" aria-hidden="true" className="trash-icon" />
                       )}
                     </button>
                   </td>
