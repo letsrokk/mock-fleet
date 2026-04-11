@@ -20,6 +20,9 @@ final class MockIdResolver {
         if (normalizedHost.isBlank()) {
             throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
         }
+        if (!normalizedHost.contains(".")) {
+            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
+        }
 
         String[] parts = normalizedHost.split("\\.");
         return normalize(parts[0], String.format("Unable to extract mock id from host '%s'.", host));

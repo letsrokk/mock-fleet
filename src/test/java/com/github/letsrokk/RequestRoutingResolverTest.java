@@ -37,6 +37,13 @@ class RequestRoutingResolverTest {
     }
 
     @Test
+    void hostModeRejectsSingleLabelHosts() {
+        RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.HOST);
+
+        assertThrows(MockIdNotFound.class, () -> resolver.resolve("localhost:8080", "/anything"));
+    }
+
+    @Test
     void pathModeExtractsMockIdAndStripsPrefix() {
         RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.PATH);
 

@@ -7,6 +7,7 @@
 - `HOST` mode:
   - `demo.example.test` routes to mock ID `demo`
   - `demo.example.test:8080` also routes to mock ID `demo`
+  - single-label hosts like `localhost` are rejected and do not spawn mocks
   - invalid or empty `Host` headers are rejected with HTTP `400`
 - `PATH` mode:
   - `/demo` routes to mock ID `demo` and is forwarded upstream as `/`
@@ -38,7 +39,7 @@ Run the app against a real local Kubernetes cluster from your IDE with the dedic
 
 Important runtime expectations:
 
-- in `HOST` mode, requests must include a `Host` header that contains the mock ID in the first label
+- in `HOST` mode, requests must include a multi-label `Host` header that contains the mock ID in the first label
 - in `PATH` mode, requests must include the mock ID as the first URL path segment
 - Kubernetes credentials must be available to the Fabric8 client
 - Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments

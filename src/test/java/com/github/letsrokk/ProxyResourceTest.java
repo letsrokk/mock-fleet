@@ -22,6 +22,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -104,6 +105,19 @@ class ProxyResourceTest {
         .then()
                 .statusCode(400)
                 .body(containsString("Unable to extract mock id"));
+    }
+
+    @Test
+    void rejectsSingleLabelHostWithoutSpawningMock() {
+        given()
+                .header("Host", "localhost")
+        .when()
+                .get("/anything")
+        .then()
+                .statusCode(400)
+                .body(containsString("Unable to extract mock id"));
+
+        verifyNoInteractions(podManager);
     }
 
     @Test
