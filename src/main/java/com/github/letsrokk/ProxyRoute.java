@@ -29,26 +29,41 @@ public class ProxyRoute {
     @Inject
     PodManager podManager;
 
+    @Inject
+    RequestRoutingResolver requestRoutingResolver;
+
     private volatile WebClient webClient;
 
     @Route(path = "/*", order = 100)
     void proxy(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
-        vertx.<URI>executeBlocking(() -> URI.create(podManager.getUpstreamBaseUrl(host)))
+        ResolvedRequest resolvedRequest;
+        try {
+            resolvedRequest = requestRoutingResolver.resolve(host, routingContext.request().uri());
+        } catch (Throwable error) {
+            handleFailure(routingContext, host, error);
+            return;
+        }
+
+        ResolvedRequest finalResolvedRequest = resolvedRequest;
+        vertx.<URI>executeBlocking(() -> URI.create(podManager.getUpstreamBaseUrl(finalResolvedRequest.mockId())))
                 .onSuccess(upstream -> {
-                    LOG.debugf("Proxying %s %s for host '%s' to upstream %s.",
+                    LOG.debugf("Proxying %s %s for host '%s' and mock id '%s' to upstream %s as %s.",
                             routingContext.request().method(),
                             routingContext.request().uri(),
                             host,
-                            upstream);
-                    forward(upstream, routingContext, routingContext.body() == null ? null : routingContext.body().buffer())
+                            finalResolvedRequest.mockId(),
+                            upstream,
+                            finalResolvedRequest.upstreamRequestUri());
+                    forward(upstream, finalResolvedRequest.upstreamRequestUri(), routingContext,
+                            routingContext.body() == null ? null : routingContext.body().buffer())
                             .onFailure(error -> handleFailure(routingContext, host, error));
                 })
                 .onFailure(error -> handleFailure(routingContext, host, error));
     }
 
-    private io.vertx.core.Future<Void> forward(URI upstream, RoutingContext routingContext, Buffer body) {
-        String targetUri = upstream.resolve(routingContext.request().uri()).toString();
+    private io.vertx.core.Future<Void> forward(URI upstream, String upstreamRequestUri, RoutingContext routingContext, Buffer body) {
+        String targetUri = upstream.resolve(upstreamRequestUri).toString();
         HttpRequest<Buffer> request = client()
                 .requestAbs(routingContext.request().method(), targetUri)
                 .followRedirects(false);

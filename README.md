@@ -1,12 +1,18 @@
 # mock-fleet
 
-`mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. The target pod is selected from the request `Host` header: the first hostname label becomes the mock ID, and the service creates or reuses a WireMock pod for that ID.
+`mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. The target pod is selected either from the request `Host` header or from the first URL path segment, depending on configuration, and the service creates or reuses a WireMock pod for that mock ID.
 
 ## How routing works
 
-- `demo.example.test` routes to mock ID `demo`
-- `demo.example.test:8080` also routes to mock ID `demo`
-- invalid or empty `Host` headers are rejected with HTTP `400`
+- `HOST` mode:
+  - `demo.example.test` routes to mock ID `demo`
+  - `demo.example.test:8080` also routes to mock ID `demo`
+  - single-label hosts like `localhost` are rejected and do not spawn mocks
+  - invalid or empty `Host` headers are rejected with HTTP `400`
+- `PATH` mode:
+  - `/demo` routes to mock ID `demo` and is forwarded upstream as `/`
+  - `/demo/nested/path?alpha=1` routes to mock ID `demo` and is forwarded upstream as `/nested/path?alpha=1`
+  - requests without a first path segment are rejected with HTTP `400`
 
 The proxy forwards method, path, query string, request body, and incoming headers to the selected WireMock pod on port `8080`.
 
@@ -33,7 +39,8 @@ Run the app against a real local Kubernetes cluster from your IDE with the dedic
 
 Important runtime expectations:
 
-- requests must include a `Host` header that contains the mock ID in the first label
+- in `HOST` mode, requests must include a multi-label `Host` header that contains the mock ID in the first label
+- in `PATH` mode, requests must include the mock ID as the first URL path segment
 - Kubernetes credentials must be available to the Fabric8 client
 - Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments
 - include both `dev` and `local-k8s` in `quarkus.profile`; `%local-k8s` augments the dev configuration rather than replacing it
@@ -46,12 +53,14 @@ Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/
 - `mock-fleet.inactivity-threshold`: how long an inactive mock pod may live before cleanup
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
+- `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 
 ## Tests
 
 The test suite now covers:
 
 - host-header parsing and validation
+- path-based routing and prefix stripping
 - proxy dispatch and nested path forwarding
 - request-header forwarding
 - idle/orphan pod cleanup decisions

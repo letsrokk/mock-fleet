@@ -1,6 +1,5 @@
 package com.github.letsrokk;
 
-import com.github.letsrokk.exceptions.MockIdNotFound;
 import com.github.letsrokk.exceptions.PodCreationException;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
@@ -48,8 +47,7 @@ public class PodManager {
     @ConfigProperty(name = "mock-fleet.pod-creation-timeout")
     Duration podCreationTimeout;
 
-    public String getUpstreamBaseUrl(String host) {
-        String mockId = extractMockId(host);
+    public String getUpstreamBaseUrl(String mockId) {
         Pod pod = podState.getPod(mockId, this::spawnPod);
         podState.setLastAccessTime(pod.getMetadata().getName(), Instant.now().toEpochMilli());
         ensureServiceExists(mockId);
@@ -57,41 +55,6 @@ public class PodManager {
             return localServicePortForwardManager.getOrCreateForwardBaseUrl(mockId, currentNamespace());
         }
         return buildServiceBaseUrl(mockId);
-    }
-
-    /**
-     * Extract mock id from Host header
-     * @param host Host header value
-     * @return mock id
-     */
-    String extractMockId(String host) {
-        if (host == null || host.isBlank()) {
-            throw new MockIdNotFound("Host header is missing or empty.");
-        }
-
-        String normalizedHost = host.trim();
-        int portSeparator = normalizedHost.indexOf(':');
-        if (portSeparator >= 0) {
-            normalizedHost = normalizedHost.substring(0, portSeparator);
-        }
-        if (normalizedHost.isBlank()) {
-            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
-        }
-
-        String[] parts = normalizedHost.split("\\.");
-        String subdomain = parts[0];
-
-        subdomain = subdomain.toLowerCase().replaceAll("[^a-z0-9\\-]", "");
-        if (subdomain.isEmpty()) {
-            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
-        }
-
-        // Trim to max length
-        if (subdomain.length() > 63) {
-            subdomain = subdomain.substring(0, 63);
-        }
-
-        return subdomain;
     }
 
     /**

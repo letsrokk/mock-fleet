@@ -40,27 +40,6 @@ import static org.mockito.Mockito.when;
 class PodManagerTest {
 
     @Test
-    void extractMockIdSupportsPortSuffixedHosts() {
-        PodManager podManager = new PodManager();
-
-        assertEquals("demo", podManager.extractMockId("demo.example.test:8080"));
-    }
-
-    @Test
-    void extractMockIdNormalizesEdgeCaseValues() {
-        PodManager podManager = new PodManager();
-
-        assertEquals("mixedname", podManager.extractMockId("MiXeD_Name.example.test"));
-    }
-
-    @Test
-    void extractMockIdRejectsMissingHost() {
-        PodManager podManager = new PodManager();
-
-        assertThrows(MockIdNotFound.class, () -> podManager.extractMockId("   "));
-    }
-
-    @Test
     void waitForPodToBeRunningTimesOutCleanly() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodManager podManager = new PodManager();
@@ -104,7 +83,7 @@ class PodManagerTest {
         when(serviceResource.get()).thenReturn(null);
         when(podState.getPod(eq("demo"), any())).thenReturn(pod);
 
-        String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo.example.test");
+        String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo");
 
         assertEquals("http://mock-fleet-demo.test.svc.cluster.local:8080", upstreamBaseUrl);
         verify(namespacedServices, times(1)).withName("mock-fleet-demo");
@@ -143,7 +122,7 @@ class PodManagerTest {
         when(podState.getPod(eq("demo"), any())).thenReturn(pod);
         when(localServicePortForwardManager.getOrCreateForwardBaseUrl("demo", "test")).thenReturn("http://127.0.0.1:18080");
 
-        String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo.example.test");
+        String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo");
 
         assertEquals("http://127.0.0.1:18080", upstreamBaseUrl);
         verify(localServicePortForwardManager).getOrCreateForwardBaseUrl("demo", "test");

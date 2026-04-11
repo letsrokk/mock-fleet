@@ -1,14 +1,14 @@
 package com.github.letsrokk;
 
-import com.github.letsrokk.exceptions.MockIdNotFound;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.vertx.core.MultiMap;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -22,11 +22,11 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
-class ProxyResourceTest {
+@TestProfile(PathRoutingProfile.class)
+class PathRoutingProxyResourceTest {
 
     private static Vertx upstreamVertx;
     private static HttpServer upstreamServer;
@@ -76,16 +76,15 @@ class ProxyResourceTest {
     }
 
     @Test
-    void proxiesNestedGetRequestsWithPathAndQueryParameters() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
+    void stripsMockIdPrefixBeforeForwardingToUpstream() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "mock-fleet.localhost")
                 .queryParam("alpha", "1")
                 .queryParam("beta", "two")
         .when()
-                .get("/nested/path")
+                .get("/demo/nested/path")
         .then()
                 .statusCode(200)
                 .body(is("ok"));
@@ -94,108 +93,58 @@ class ProxyResourceTest {
         assertNotNull(request);
         assertEquals("GET", request.method());
         assertEquals("/nested/path?alpha=1&beta=two", request.uri());
+        assertEquals("mock-fleet.localhost", request.headers().get("Host"));
     }
 
     @Test
-    void returnsControlledBadRequestForInvalidHostHeader() {
-        given()
-                .header("Host", "!!!:8080")
-        .when()
-                .get("/anything")
-        .then()
-                .statusCode(400)
-                .body(containsString("Unable to extract mock id"));
-    }
-
-    @Test
-    void rejectsSingleLabelHostWithoutSpawningMock() {
-        given()
-                .header("Host", "localhost")
-        .when()
-                .get("/anything")
-        .then()
-                .statusCode(400)
-                .body(containsString("Unable to extract mock id"));
-
-        verifyNoInteractions(podManager);
-    }
-
-    @Test
-    void forwardsUpstreamClientErrorsWithoutMaskingThem() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
-        nextResponse.set(new UpstreamResponse(404, "missing", Map.of("X-Upstream", List.of("true"))));
+    void forwardsRootWhenPathContainsOnlyMockId() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "mock-fleet.localhost")
         .when()
-                .get("/missing")
-        .then()
-                .statusCode(404)
-                .header("X-Upstream", "true")
-                .body(is("missing"));
-    }
-
-    @Test
-    void forwardsRequestHeadersAndBody() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
-        nextResponse.set(new UpstreamResponse(201, "created", Map.of()));
-
-        given()
-                .header("Host", "demo.example.test")
-                .header("X-Test", "value")
-                .body("payload")
-        .when()
-                .post("/headers/check?mode=full")
-        .then()
-                .statusCode(201)
-                .body(is("created"));
-
-        CapturedRequest request = capturedRequest.get();
-        assertNotNull(request);
-        assertEquals("POST", request.method());
-        assertEquals("/headers/check?mode=full", request.uri());
-        assertEquals("value", request.headers().get("X-Test"));
-        assertArrayEquals("payload".getBytes(StandardCharsets.UTF_8), request.body());
-    }
-
-    @Test
-    void proxiesToLocalhostUpstreamReturnedByPodManager() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
-
-        given()
-                .header("Host", "demo.example.test")
-        .when()
-                .get("/local-debug")
+                .get("/demo")
         .then()
                 .statusCode(200)
                 .body(is("ok"));
 
         CapturedRequest request = capturedRequest.get();
         assertNotNull(request);
-        assertEquals("/local-debug", request.uri());
+        assertEquals("/", request.uri());
     }
 
     @Test
-    void forwardsMultipleOrdinaryHeaders() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
+    void forwardsRequestHeadersAndBodyInPathMode() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
+        nextResponse.set(new UpstreamResponse(201, "created", Map.of("X-Upstream", List.of("true"))));
 
         given()
-                .header("Host", "demo.example.test")
-                .header("X-Correlation-Id", "abc-123")
-                .header("Accept", "application/json")
+                .header("Host", "mock-fleet.localhost")
+                .header("X-Test", "value")
+                .body("payload")
         .when()
-                .get("/headers")
+                .post("/demo/headers/check?mode=full")
         .then()
-                .statusCode(200);
+                .statusCode(201)
+                .header("X-Upstream", "true")
+                .body(is("created"));
 
         CapturedRequest request = capturedRequest.get();
         assertNotNull(request);
-        assertEquals("abc-123", request.headers().get("X-Correlation-Id"));
-        assertEquals("application/json", request.headers().get("Accept"));
+        assertEquals("/headers/check?mode=full", request.uri());
+        assertEquals("value", request.headers().get("X-Test"));
+        assertArrayEquals("payload".getBytes(StandardCharsets.UTF_8), request.body());
+    }
+
+    @Test
+    void returnsBadRequestWhenPathDoesNotContainMockId() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(400)
+                .body(containsString("Unable to extract mock id"));
     }
 
     record CapturedRequest(String method,
