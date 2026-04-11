@@ -24,3 +24,7 @@ release.properties
 
 # Local environment
 .env
+
+# Frontend
+src/main/webui/node_modules/
+src/main/webui/dist/

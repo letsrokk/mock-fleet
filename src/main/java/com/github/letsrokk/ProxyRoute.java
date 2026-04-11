@@ -17,6 +17,7 @@ import jakarta.ws.rs.core.MediaType;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 
 @ApplicationScoped
 public class ProxyRoute {
@@ -32,11 +33,20 @@ public class ProxyRoute {
     @Inject
     RequestRoutingResolver requestRoutingResolver;
 
+    @Inject
+    MockFleetConfig config;
+
     private volatile WebClient webClient;
 
     @Route(path = "/*", order = 100)
     void proxy(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
+        String requestPath = requestPath(routingContext.request().uri());
+        if (shouldHandleLocally(host, requestPath)) {
+            routingContext.next();
+            return;
+        }
+
         ResolvedRequest resolvedRequest;
         try {
             resolvedRequest = requestRoutingResolver.resolve(host, routingContext.request().uri());
@@ -86,6 +96,37 @@ public class ProxyRoute {
         return routingContext.response().end(responseBody);
     }
 
+    private boolean shouldHandleLocally(String host, String requestPath) {
+        if (requestPath.equals("/") && config.routing().mode() == MockFleetConfig.RoutingMode.PATH) {
+            return true;
+        }
+        if (requestPath.equals("/") && config.routing().mode() == MockFleetConfig.RoutingMode.HOST) {
+            return isBareHost(host);
+        }
+        return requestPath.startsWith("/__fleet/");
+    }
+
+    private boolean isBareHost(String host) {
+        if (host == null || host.isBlank()) {
+            return true;
+        }
+        String normalizedHost = host.trim();
+        int portSeparator = normalizedHost.indexOf(':');
+        if (portSeparator >= 0) {
+            normalizedHost = normalizedHost.substring(0, portSeparator);
+        }
+        return !normalizedHost.contains(".");
+    }
+
+    private String requestPath(String requestUri) {
+        try {
+            return new URI(requestUri).getPath();
+        } catch (URISyntaxException ignored) {
+            int queryStart = requestUri.indexOf('?');
+            return queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+        }
+    }
+
     private WebClient client() {
         WebClient local = webClient;
         if (local == null) {
@@ -109,7 +150,7 @@ public class ProxyRoute {
 
     private void handleFailure(RoutingContext routingContext, String host, Throwable error) {
         if (error instanceof MockIdNotFound e) {
-            LOG.debugf("Rejecting request with invalid host header: %s", e.getMessage());
+            LOG.debugf("Rejecting request: %s", e.getMessage());
             routingContext.response()
                     .setStatusCode(400)
                     .putHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN)

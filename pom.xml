@@ -50,6 +50,10 @@
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
             <artifactId>quarkus-reactive-routes</artifactId>
         </dependency>
         <dependency>
@@ -95,6 +99,11 @@
             <artifactId>quarkus-smallrye-fault-tolerance</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.quarkiverse.quinoa</groupId>
+            <artifactId>quarkus-quinoa</artifactId>
+            <version>2.5.5</version>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
             <scope>test</scope>
@@ -113,6 +122,12 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkiverse.quinoa</groupId>
+            <artifactId>quarkus-quinoa-testing</artifactId>
+            <version>2.5.5</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -146,7 +161,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
-                    <argLine>@{argLine} &quot;-javaagent:${mockito.agent.path}&quot;</argLine>
+                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
@@ -165,7 +180,7 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <argLine>@{argLine} &quot;-javaagent:${mockito.agent.path}&quot;</argLine>
+                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>

@@ -2,6 +2,8 @@
 
 `mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. The target pod is selected either from the request `Host` header or from the first URL path segment, depending on configuration, and the service creates or reuses a WireMock pod for that mock ID.
 
+The service also exposes a small internal dashboard at `/` for inspecting and manually deleting active mock pods. Its management API is reserved under `/__fleet/`.
+
 ## How routing works
 
 - `HOST` mode:
@@ -15,6 +17,12 @@
   - requests without a first path segment are rejected with HTTP `400`
 
 The proxy forwards method, path, query string, request body, and incoming headers to the selected WireMock pod on port `8080`.
+
+Reserved local routes:
+
+- `/` serves the dashboard UI when the request is not being routed to a mock
+- `/__fleet/api/mocks` lists active mock pods
+- `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually
 
 ## Requirements
 
@@ -54,6 +62,7 @@ Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
+- `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
 
 ## Tests
 
@@ -61,6 +70,7 @@ The test suite now covers:
 
 - host-header parsing and validation
 - path-based routing and prefix stripping
+- internal dashboard root and management API isolation under `/__fleet/`
 - proxy dispatch and nested path forwarding
 - request-header forwarding
 - idle/orphan pod cleanup decisions

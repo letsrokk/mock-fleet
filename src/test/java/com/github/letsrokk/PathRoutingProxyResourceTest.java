@@ -22,6 +22,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -143,8 +144,24 @@ class PathRoutingProxyResourceTest {
         .when()
                 .get("/")
         .then()
-                .statusCode(400)
-                .body(containsString("Unable to extract mock id"));
+                .statusCode(404);
+    }
+
+    @Test
+    void keepsFleetApiRequestsLocalInPathMode() {
+        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
+
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet/api/mocks")
+        .then()
+                .statusCode(200)
+                .body("[0].mockId", is("demo"))
+                .body("[0].podName", is("mock-fleet-demo-1"));
+
+        verify(podManager).listActiveMocks();
+        assertEquals(null, capturedRequest.get());
     }
 
     record CapturedRequest(String method,
