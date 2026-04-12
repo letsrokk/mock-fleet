@@ -5,6 +5,8 @@ quarkus:
     build-dir: dist
     enable-spa-routing: true
     ignored-path-prefixes: /__fleet/api
+  smallrye-health:
+    root-path: /__fleet/health
   container-image:
     registry: docker.io
     group: letsrokk
@@ -12,8 +14,26 @@ quarkus:
     build: true
   kubernetes:
     idempotent: true
+    image-pull-policy: if-not-present
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 512Mi
+    security-context:
+      run-as-non-root: true
     ingress:
       expose: true
+    readiness-probe:
+      initial-delay: 5S
+      period: 10S
+      timeout: 5S
+    liveness-probe:
+      initial-delay: 15S
+      period: 20S
+      timeout: 5S
     rbac:
       service-accounts:
         mock-fleet-pod-manager:
@@ -26,11 +46,11 @@ quarkus:
             mock-fleet-pod-manager-policy:
               api-groups: ""
               resources: pods
-              verbs: "*"
+              verbs: get,list,create,delete
             mock-fleet-service-manager-policy:
               api-groups: ""
               resources: services
-              verbs: "*"
+              verbs: get,list,create,delete
       role-bindings:
         mock-fleet-pod-manager-role-binding:
           name: mock-fleet-pods-manager-role-binding
@@ -50,9 +70,45 @@ quarkus:
         default-mode: 0644
     env:
       vars:
-        hazelcast-host: mock-fleet-hazelcast
         java-opts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
   helm:
+    add-if-statement:
+      ingress-enabled:
+        property: ingress.enabled
+        on-resource-kind: Ingress
+        with-default-value: false
+        description: Determine if the Ingress resource should be installed.
+    values:
+      image-pull-policy:
+        property: imagePullPolicy
+        paths: (kind == Deployment).spec.template.spec.containers.imagePullPolicy
+        value: if-not-present
+        description: Image pull policy for the application container.
+      resources-requests-cpu:
+        property: resources.requests.cpu
+        paths: (kind == Deployment).spec.template.spec.containers.resources.requests.cpu
+        value: 250m
+        description: CPU request for the application container.
+      resources-requests-memory:
+        property: resources.requests.memory
+        paths: (kind == Deployment).spec.template.spec.containers.resources.requests.memory
+        value: 256Mi
+        description: Memory request for the application container.
+      resources-limits-cpu:
+        property: resources.limits.cpu
+        paths: (kind == Deployment).spec.template.spec.containers.resources.limits.cpu
+        value: 1000m
+        description: CPU limit for the application container.
+      resources-limits-memory:
+        property: resources.limits.memory
+        paths: (kind == Deployment).spec.template.spec.containers.resources.limits.memory
+        value: 512Mi
+        description: Memory limit for the application container.
+      security-context-run-as-non-root:
+        property: securityContext.runAsNonRoot
+        paths: (kind == Deployment).spec.template.spec.securityContext.runAsNonRoot
+        value-as-bool: true
+        description: Whether the pod must run as a non-root user.
     dependencies:
       hazelcast:
         alias: hazelcast
@@ -60,11 +116,11 @@ quarkus:
         repository: https://hazelcast-charts.s3.amazonaws.com/
 
 mock-fleet:
-  inactivity-threshold: 1M
-  pod-creation-timeout: 1M
+  inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
+  pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
   wiremock-image: wiremock/wiremock:3.9.2
   routing:
-    mode: HOST
+    mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
   local-debug:
     enabled: false
     bind-address: 127.0.0.1

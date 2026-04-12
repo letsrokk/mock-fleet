@@ -9,4 +9,4 @@ data:
       cluster-name: dev
       network:
         cluster-members:
-          - {{ .Release.Name }}-hazelcast:5701
+          - mock-fleet-hazelcast:5701
