@@ -13,13 +13,14 @@ import static org.hamcrest.CoreMatchers.containsString;
 class DashboardPageTest {
 
     @Test
-    void servesDashboardFromFleetRoot() {
+    void servesDashboardFromFleetNamespace() {
         given()
         .when()
             .get("/__fleet/")
         .then()
             .statusCode(200)
             .body(containsString("<div id=\"root\"></div>"))
-            .body(containsString("Mock Fleet"));
+            .body(containsString("Mock Fleet"))
+            .body(containsString("/__fleet/assets/"));
     }
 }

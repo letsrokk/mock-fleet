@@ -8,9 +8,9 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             output: {
-                entryFileNames: "__fleet/assets/[name]-[hash].js",
-                chunkFileNames: "__fleet/assets/[name]-[hash].js",
-                assetFileNames: "__fleet/assets/[name]-[hash][extname]"
+                entryFileNames: "assets/[name]-[hash].js",
+                chunkFileNames: "assets/[name]-[hash].js",
+                assetFileNames: "assets/[name]-[hash][extname]"
             }
         }
     }

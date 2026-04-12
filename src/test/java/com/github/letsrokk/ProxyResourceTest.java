@@ -139,6 +139,20 @@ class ProxyResourceTest {
     }
 
     @Test
+    void keepsFaviconRequestsLocalInsteadOfProxying() {
+        when(podManager.getUpstreamBaseUrl("favicon")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "favicon.example.test")
+        .when()
+                .get("/favicon.ico")
+        .then()
+                .statusCode(404);
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void forwardsUpstreamClientErrorsWithoutMaskingThem() {
         when(podManager.getUpstreamBaseUrl("demo"))
                 .thenReturn(upstreamBaseUrl);

@@ -23,6 +23,19 @@ import java.net.URISyntaxException;
 public class ProxyRoute {
 
     private static final Logger LOG = Logger.getLogger(ProxyRoute.class);
+    private static final String[] LOCAL_UI_PREFIXES = {
+            "/__fleet/",
+            "/src/",
+            "/node_modules/",
+            "/@vite/",
+            "/@fs/",
+            "/@id/",
+            "/@react-refresh"
+    };
+    private static final String[] LOCAL_UI_PATHS = {
+            "/__fleet",
+            "/favicon.ico"
+    };
 
     @Inject
     Vertx vertx;
@@ -94,7 +107,26 @@ public class ProxyRoute {
     }
 
     private boolean shouldHandleLocally(String requestPath) {
-        return requestPath.equals("/__fleet") || requestPath.startsWith("/__fleet/");
+        return matchesAny(requestPath, LOCAL_UI_PATHS)
+                || startsWithAny(requestPath, LOCAL_UI_PREFIXES);
+    }
+
+    private boolean matchesAny(String requestPath, String[] paths) {
+        for (String path : paths) {
+            if (requestPath.equals(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean startsWithAny(String requestPath, String[] prefixes) {
+        for (String prefix : prefixes) {
+            if (requestPath.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String requestPath(String requestUri) {
