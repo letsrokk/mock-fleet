@@ -7,6 +7,8 @@ import java.time.Duration;
 @ConfigMapping(prefix = "mock-fleet")
 public interface MockFleetConfig {
 
+    String namespace();
+
     Duration inactivityThreshold();
 
     Duration podCreationTimeout();

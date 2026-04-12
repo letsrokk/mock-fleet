@@ -5,6 +5,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceList;
+import io.fabric8.kubernetes.api.model.Endpoints;
 import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -55,6 +56,7 @@ public class PodManager {
         podState.setLastAccessTime(pod.getMetadata().getName(), Instant.now().toEpochMilli());
         if (existingPod != null) {
             ensureServiceExists(mockId);
+            waitForServiceToBeReady(mockId, podCreationTimeout);
         }
         if (config.localDebug().enabled()) {
             return localServicePortForwardManager.getOrCreateForwardBaseUrl(mockId, currentNamespace());
@@ -94,13 +96,15 @@ public class PodManager {
 
         String podNamePrefix = String.format("mock-fleet-%s-", mockId);
         Pod pod = podFactory.createPodSpec(podNamePrefix, mockId);
+        String namespace = currentNamespace();
 
         pod = kubernetesClient.resource(pod)
-                .inNamespace(kubernetesClient.getNamespace())
+                .inNamespace(namespace)
                 .create();
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
         ensureServiceExists(mockId);
+        waitForServiceToBeReady(mockId, podCreationTimeout);
 
         return pod;
     }
@@ -137,11 +141,23 @@ public class PodManager {
     }
 
     String currentNamespace() {
-        return Objects.requireNonNullElse(kubernetesClient.getNamespace(), "default");
+        String clientNamespace = kubernetesClient.getNamespace();
+        if (clientNamespace != null && !clientNamespace.isBlank()) {
+            return clientNamespace;
+        }
+
+        if (config != null) {
+            String configuredNamespace = config.namespace();
+            if (configuredNamespace != null && !configuredNamespace.isBlank()) {
+                return configuredNamespace;
+            }
+        }
+
+        return "mock-fleet";
     }
 
     /**
-     * Wait for the Pod to become Running.
+     * Wait for the Pod to become Running and Ready.
      * @param pod Pod item
      * @return updated Pod
      */
@@ -151,12 +167,9 @@ public class PodManager {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             Pod currentPod = kubernetesClient.resource(pod).get();
-            if (currentPod != null && currentPod.getStatus() != null) {
-                String phase = currentPod.getStatus().getPhase();
-                if ("Running".equalsIgnoreCase(phase)) {
-                    LOG.infof("Pod '%s' is Running.", currentPod.getMetadata().getName());
+            if (isPodReady(currentPod)) {
+                LOG.infof("Pod '%s' is Running and Ready.", currentPod.getMetadata().getName());
                     return currentPod;
-                }
             }
 
             try {
@@ -168,6 +181,55 @@ public class PodManager {
         }
 
         throw new PodCreationException("Pod '" + pod.getMetadata().getName() + "' did not become running before timeout.");
+    }
+
+    boolean isPodReady(Pod pod) {
+        if (pod == null || pod.getStatus() == null) {
+            return false;
+        }
+
+        String phase = pod.getStatus().getPhase();
+        if (!"Running".equalsIgnoreCase(phase)) {
+            return false;
+        }
+
+        return pod.getStatus().getConditions() != null
+                && pod.getStatus().getConditions().stream()
+                .filter(condition -> Objects.equals("Ready", condition.getType()))
+                .anyMatch(condition -> "True".equalsIgnoreCase(condition.getStatus()));
+    }
+
+    void waitForServiceToBeReady(String mockId, Duration timeout) {
+        String namespace = currentNamespace();
+        String serviceName = serviceFactory.serviceName(mockId);
+        long deadline = System.nanoTime() + timeout.toNanos();
+
+        while (System.nanoTime() < deadline) {
+            Endpoints endpoints = kubernetesClient.endpoints()
+                    .inNamespace(namespace)
+                    .withName(serviceName)
+                    .get();
+            if (hasReadyEndpoints(endpoints)) {
+                LOG.infof("Service '%s' has a ready endpoint.", serviceName);
+                return;
+            }
+
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new PodCreationException("Interrupted while waiting for service '" + serviceName + "' to become ready.");
+            }
+        }
+
+        throw new PodCreationException("Service '" + serviceName + "' did not expose a ready endpoint before timeout.");
+    }
+
+    boolean hasReadyEndpoints(Endpoints endpoints) {
+        return endpoints != null
+                && endpoints.getSubsets() != null
+                && endpoints.getSubsets().stream().anyMatch(subset ->
+                subset.getAddresses() != null && !subset.getAddresses().isEmpty());
     }
 
     /**

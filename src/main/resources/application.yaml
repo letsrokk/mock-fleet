@@ -14,7 +14,8 @@ quarkus:
     build: true
   kubernetes:
     idempotent: true
-    image-pull-policy: if-not-present
+    namespace: mock-fleet
+    image-pull-policy: IfNotPresent
     resources:
       requests:
         cpu: 250m
@@ -51,6 +52,10 @@ quarkus:
               api-groups: ""
               resources: services
               verbs: get,list,create,delete
+            mock-fleet-endpoints-reader-policy:
+              api-groups: ""
+              resources: endpoints
+              verbs: get,list
       role-bindings:
         mock-fleet-pod-manager-role-binding:
           name: mock-fleet-pods-manager-role-binding
@@ -82,7 +87,7 @@ quarkus:
       image-pull-policy:
         property: imagePullPolicy
         paths: (kind == Deployment).spec.template.spec.containers.imagePullPolicy
-        value: if-not-present
+        value: IfNotPresent
         description: Image pull policy for the application container.
       resources-requests-cpu:
         property: resources.requests.cpu
@@ -116,6 +121,7 @@ quarkus:
         repository: https://hazelcast-charts.s3.amazonaws.com/
 
 mock-fleet:
+  namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
   wiremock-image: wiremock/wiremock:3.9.2
