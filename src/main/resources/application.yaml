@@ -1,6 +1,6 @@
 quarkus:
   quinoa:
-    ui-dir: src/main/webui
+    ui-dir: ${QUINOA_UI_DIR:${user.dir}/src/main/webui}
     ui-root-path: /__fleet
     build-dir: dist
     enable-spa-routing: true
@@ -8,6 +8,7 @@ quarkus:
   smallrye-health:
     root-path: /__fleet/health
   container-image:
+    builder: docker
     registry: docker.io
     group: letsrokk
     name: mock-fleet
@@ -21,8 +22,8 @@ quarkus:
         cpu: 250m
         memory: 256Mi
       limits:
-        cpu: 1000m
-        memory: 512Mi
+        cpu: 2
+        memory: 2Gi
     security-context:
       run-as-non-root: true
     ingress:
@@ -102,12 +103,12 @@ quarkus:
       resources-limits-cpu:
         property: resources.limits.cpu
         paths: (kind == Deployment).spec.template.spec.containers.resources.limits.cpu
-        value: 1000m
+        value: 2
         description: CPU limit for the application container.
       resources-limits-memory:
         property: resources.limits.memory
         paths: (kind == Deployment).spec.template.spec.containers.resources.limits.memory
-        value: 512Mi
+        value: 2Gi
         description: Memory limit for the application container.
       security-context-run-as-non-root:
         property: securityContext.runAsNonRoot
@@ -127,9 +128,3 @@ mock-fleet:
   wiremock-image: wiremock/wiremock:3.9.2
   routing:
     mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
-  local-debug:
-    enabled: false
-    bind-address: 127.0.0.1
-    start-port: 18080
-    end-port: 18180
-    service-port: 8080

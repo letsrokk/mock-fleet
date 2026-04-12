@@ -1,5 +1,9 @@
 *
-!target/*-runner
-!target/*-runner.jar
-!target/lib/*
-!target/quarkus-app/*
+!.dockerignore
+!pom.xml
+!src/main/docker/Dockerfile.jvm
+!src/main/webui/**
+src/main/webui/.vite
+src/main/webui/node_modules
+src/main/webui/*.tsbuildinfo
+!target/quarkus-app/**

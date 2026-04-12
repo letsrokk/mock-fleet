@@ -5,14 +5,30 @@ quarkus:
         level: DEBUG
   kubernetes:
     image-pull-policy: if-not-present
+    ingress:
+      host: mock-fleet.localhost
     remote-debug:
       enabled: true
-
-"%local-k8s":
-  mock-fleet:
-    local-debug:
-      enabled: true
-      bind-address: 127.0.0.1
-      start-port: 18080
-      end-port: 18180
-      service-port: 8080
+    env:
+      vars:
+        QUARKUS_LAUNCH_DEVMODE: "true"
+        QUINOA_UI_DIR: /workspace/src/main/webui
+        QUARKUS_PACKAGE_OUTPUT_DIRECTORY: /workspace/target
+  quinoa:
+    package-manager-install:
+      node-version: 22.14.0
+  package:
+    jar:
+      type: mutable-jar
+  helm:
+    add-if-statement:
+      ingress-enabled:
+        with-default-value: true
+    expressions:
+      ingress-rules:
+        path: (kind == Ingress).spec.rules
+        expression: >-
+          {{ include "mock-fleet.ingressRules" . | nindent 4 }}
+  live-reload:
+    url: http://mock-fleet.localhost
+    password: mock-fleet-dev
