@@ -69,7 +69,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - pod security defaults require the application to run as non-root
 - app RBAC is narrowed to `get`, `list`, `create`, and `delete` for pods and services
 - generated manifests default to namespace `mock-fleet`
-- the Helm chart disables the Ingress resource by default; enable it with `--set app.ingress.enabled=true`
+- the `dev` profile packages the Helm chart with Ingress enabled by default at `mock-fleet.localhost`
 - Helm values expose image pull policy, resource requests/limits, and selected `mock-fleet.*` runtime settings through environment variables
 
 Namespace behavior:
@@ -105,19 +105,16 @@ The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the 
 helm dependency build target/helm/kubernetes/mock-fleet
 helm upgrade --install mock-fleet target/helm/kubernetes/mock-fleet \
   --namespace mock-fleet \
-  --create-namespace \
-  --set app.ingress.enabled=true
+  --create-namespace
 kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
-kubectl patch ingress mock-fleet --namespace mock-fleet --type merge \
-  -p '{"spec":{"rules":[{"host":"mock-fleet.localhost","http":{"paths":[{"backend":{"service":{"name":"mock-fleet","port":{"name":"http"}}},"path":"/","pathType":"Prefix"}]}},{"host":"*.mock-fleet.localhost","http":{"paths":[{"backend":{"service":{"name":"mock-fleet","port":{"name":"http"}}},"path":"/","pathType":"Prefix"}]}}]}}'
 ```
 
 Then connect from your workstation with Quarkus remote dev:
 
 ```bash
-./mvnw quarkus:remote-dev -Dquarkus.profile=dev -Dquarkus.live-reload.url=http://mock-fleet.localhost
+./mvnw quarkus:remote-dev -Dquarkus.profile=dev
 ```
-In the `dev` profile, the container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
+In the `dev` profile, the generated Ingress uses `mock-fleet.localhost` and the remote dev URL is preconfigured to match it. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
 
 If you are not using Minikube ingress, expose the app first and then point remote dev at the port-forwarded URL:
 
@@ -145,8 +142,7 @@ minikube addons enable ingress
 - packages the in-cluster app with profile `dev` by default
 - builds images through the Docker-based Quarkus container-image path
 - creates the namespace if needed
-- can enable Ingress for a host with `--ingress-host mock-fleet.localhost`
-  this enables the generated Ingress and then patches both `mock-fleet.localhost` and `*.mock-fleet.localhost`
+- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` directly in the `dev` profile Ingress
 - prints the exact `quarkus:remote-dev` command to run locally after deployment
 - keeps logs and remote debug port-forwarding opt-in via `--logs` and `--port-forward`
 - only uninstalls the release when explicitly requested with `--cleanup`
