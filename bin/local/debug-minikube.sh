@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
-PROFILE=${QUARKUS_PROFILE:-dev,minikube}
+PROFILE=${QUARKUS_PROFILE:-dev}
 CHART_DIR="${REPO_ROOT}/target/helm/kubernetes/mock-fleet"
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
@@ -14,7 +14,7 @@ INGRESS_HOST=""
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--ingress-host <host>] [--namespace <name>] [--profile <profiles>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--ingress-host <host>] [--namespace <name>] [--profile <profile>]
 
 Deploy the generated Helm chart into Minikube using an in-cluster profile.
 
@@ -24,7 +24,7 @@ Options:
   --cleanup           Uninstall the Helm release before exiting.
   --ingress-host      Enable Ingress and bind it to the provided host, for example mock-fleet.localhost.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
-  --profile <value>   Quarkus profile(s) for packaging. Defaults to ${PROFILE}.
+  --profile <value>   Quarkus profile for packaging. Defaults to ${PROFILE}.
   --help              Show this help.
 EOF
 }

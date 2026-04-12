@@ -98,10 +98,10 @@ Run tests with:
 
 ## Minikube workflow
 
-The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the app to Minikube with the `dev,minikube` profile:
+The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the app to Minikube with the standalone `dev` profile:
 
 ```bash
-./mvnw package -DskipTests -Dquarkus.profile=dev,minikube
+./mvnw package -DskipTests -Dquarkus.profile=dev
 helm dependency build target/helm/kubernetes/mock-fleet
 helm upgrade --install mock-fleet target/helm/kubernetes/mock-fleet \
   --namespace mock-fleet \
@@ -115,15 +115,15 @@ kubectl patch ingress mock-fleet --namespace mock-fleet --type merge \
 Then connect from your workstation with Quarkus remote dev:
 
 ```bash
-./mvnw quarkus:remote-dev -Dquarkus.profile=dev,minikube -Dquarkus.live-reload.url=http://mock-fleet.localhost
+./mvnw quarkus:remote-dev -Dquarkus.profile=dev -Dquarkus.live-reload.url=http://mock-fleet.localhost
 ```
-In the `minikube` profile, the container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
+In the `dev` profile, the container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
 
 If you are not using Minikube ingress, expose the app first and then point remote dev at the port-forwarded URL:
 
 ```bash
 kubectl port-forward --namespace mock-fleet service/mock-fleet 8080:8080
-./mvnw quarkus:remote-dev -Dquarkus.profile=dev,minikube -Dquarkus.live-reload.url=http://127.0.0.1:8080
+./mvnw quarkus:remote-dev -Dquarkus.profile=dev -Dquarkus.live-reload.url=http://127.0.0.1:8080
 ```
 
 Optional helpers:
@@ -142,7 +142,7 @@ minikube addons enable ingress
 [`bin/local/debug-minikube.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/debug-minikube.sh) remains as a thin wrapper around that flow. It now:
 
 - deploys into namespace `mock-fleet` by default
-- packages the in-cluster app with profile `dev,minikube` by default
+- packages the in-cluster app with profile `dev` by default
 - builds images through the Docker-based Quarkus container-image path
 - creates the namespace if needed
 - can enable Ingress for a host with `--ingress-host mock-fleet.localhost`
