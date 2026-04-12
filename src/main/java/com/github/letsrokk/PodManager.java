@@ -7,6 +7,7 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceList;
 import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -49,9 +50,12 @@ public class PodManager {
     Duration podCreationTimeout;
 
     public String getUpstreamBaseUrl(String mockId) {
-        Pod pod = podState.getPod(mockId, this::spawnPod);
+        Pod existingPod = podState.getPod(mockId);
+        Pod pod = existingPod != null ? existingPod : podState.getPod(mockId, this::spawnPod);
         podState.setLastAccessTime(pod.getMetadata().getName(), Instant.now().toEpochMilli());
-        ensureServiceExists(mockId);
+        if (existingPod != null) {
+            ensureServiceExists(mockId);
+        }
         if (config.localDebug().enabled()) {
             return localServicePortForwardManager.getOrCreateForwardBaseUrl(mockId, currentNamespace());
         }
@@ -115,9 +119,17 @@ public class PodManager {
 
         LOG.infof("Creating service '%s' for mock id '%s'.", serviceName, mockId);
         Service service = serviceFactory.createServiceSpec(mockId);
-        kubernetesClient.resource(service)
-                .inNamespace(namespace)
-                .create();
+        try {
+            kubernetesClient.resource(service)
+                    .inNamespace(namespace)
+                    .create();
+        } catch (KubernetesClientException e) {
+            if (e.getCode() == 409) {
+                LOG.debugf("Service '%s' already exists for mock id '%s'.", serviceName, mockId);
+                return;
+            }
+            throw e;
+        }
     }
 
     String buildServiceBaseUrl(String mockId) {

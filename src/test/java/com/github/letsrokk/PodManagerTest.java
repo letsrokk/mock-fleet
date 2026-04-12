@@ -12,6 +12,7 @@ import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServiceList;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NamespaceableResource;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -135,7 +137,7 @@ class PodManagerTest {
     }
 
     @Test
-    void getUpstreamBaseUrlCreatesServiceAndReturnsClusterDnsName() {
+    void getUpstreamBaseUrlEnsuresServiceForExistingPodAndReturnsClusterDnsName() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodState podState = mock(PodState.class);
         ServiceFactory serviceFactory = new ServiceFactory();
@@ -164,7 +166,7 @@ class PodManagerTest {
         when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
         when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
         when(serviceResource.get()).thenReturn(null);
-        when(podState.getPod(eq("demo"), any())).thenReturn(pod);
+        when(podState.getPod("demo")).thenReturn(pod);
 
         String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo");
 
@@ -377,6 +379,70 @@ class PodManagerTest {
         verify(podFactory).createPodSpec("mock-fleet-demo-", "demo");
         verify(podHandle).create();
         verify(serviceHandle).create();
+    }
+
+    @Test
+    void ensureServiceExistsTreatsAlreadyExistsConflictAsSuccess() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        ServiceFactory serviceFactory = new ServiceFactory();
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Service> serviceHandle = mock(NamespaceableResource.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Service, ServiceList, ServiceResource<Service>> serviceOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Service, ServiceList, ServiceResource<Service>> namespacedServices = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        ServiceResource<Service> serviceResource = mock(ServiceResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.serviceFactory = serviceFactory;
+
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.services()).thenReturn(serviceOperations);
+        when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
+        when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
+        when(serviceResource.get()).thenReturn(null);
+        when(kubernetesClient.resource(any(Service.class))).thenReturn(serviceHandle);
+        when(serviceHandle.inNamespace("test")).thenReturn(serviceHandle);
+        when(serviceHandle.create()).thenThrow(new KubernetesClientException("already exists", 409, null));
+
+        podManager.ensureServiceExists("demo");
+
+        verify(serviceHandle).create();
+    }
+
+    @Test
+    void getUpstreamBaseUrlDoesNotRecreateServiceForNewlySpawnedPod() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        LocalServicePortForwardManager localServicePortForwardManager = mock(LocalServicePortForwardManager.class);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.LocalDebugConfig localDebugConfig = mock(MockFleetConfig.LocalDebugConfig.class);
+        PodManager podManager = new PodManager() {
+            @Override
+            public Pod spawnPod(String mockId) {
+                return pod("mock-fleet-demo-1", "Running");
+            }
+        };
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+        podManager.serviceFactory = new ServiceFactory();
+        podManager.localServicePortForwardManager = localServicePortForwardManager;
+        podManager.config = config;
+
+        when(config.localDebug()).thenReturn(localDebugConfig);
+        when(localDebugConfig.enabled()).thenReturn(false);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(podState.getPod("demo")).thenReturn(null);
+        when(podState.getPod(eq("demo"), any())).thenAnswer(invocation -> {
+            java.util.function.Function<String, Pod> mappingFunction = invocation.getArgument(1);
+            return mappingFunction.apply("demo");
+        });
+
+        String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo");
+
+        assertEquals("http://mock-fleet-demo.test.svc.cluster.local:8080", upstreamBaseUrl);
+        verify(kubernetesClient, never()).services();
     }
 
     @Test
