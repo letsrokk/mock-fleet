@@ -54,28 +54,3 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "mock-fleet.hazelcastServiceName" -}}
 {{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}
-
-{{- define "mock-fleet.ingressRules" -}}
-- host: {{ required "ingress.host is required" .Values.ingress.host | quote }}
-  http:
-    paths:
-      - backend:
-          service:
-            name: {{ include "mock-fleet.fullname" . }}
-            port:
-              name: http
-        path: {{ .Values.ingress.path }}
-        pathType: {{ .Values.ingress.pathType }}
-{{- if eq .Values.routing.mode "HOST" }}
-- host: {{ printf "*.%s" .Values.ingress.host | quote }}
-  http:
-    paths:
-      - backend:
-          service:
-            name: {{ include "mock-fleet.fullname" . }}
-            port:
-              name: http
-        path: {{ .Values.ingress.path }}
-        pathType: {{ .Values.ingress.pathType }}
-{{- end }}
-{{- end -}}
