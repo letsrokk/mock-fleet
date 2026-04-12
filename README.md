@@ -65,6 +65,17 @@ Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
+- `quarkus.kubernetes.*`: generated Deployment, Service, RBAC, probes, resource requests/limits, and ingress settings
+- `quarkus.helm.*`: generated Helm chart settings and additional values/schema mappings
+
+## Kubernetes and Helm
+
+- generated Kubernetes manifests now include readiness and liveness probes via SmallRye Health
+- the application Deployment declares explicit CPU and memory requests/limits
+- pod security defaults require the application to run as non-root
+- app RBAC is narrowed to `get`, `list`, `create`, and `delete` for pods and services
+- the Helm chart disables the Ingress resource by default; enable it with `--set app.ingress.enabled=true`
+- Helm values expose image pull policy, resource requests/limits, and selected `mock-fleet.*` runtime settings through environment variables
 
 ## Tests
 
