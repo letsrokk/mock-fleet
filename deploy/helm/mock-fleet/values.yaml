@@ -1,0 +1,87 @@
+nameOverride: ""
+fullnameOverride: ""
+namespaceOverride: ""
+
+image:
+  repository: docker.io/letsrokk/mock-fleet
+  tag: 1.0.0-SNAPSHOT
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  ports:
+    http: 80
+    targetHttp: 8080
+    debug: 5005
+    targetDebug: 5005
+
+routing:
+  mode: HOST
+
+ingress:
+  enabled: true
+  host: mock-fleet.localhost
+  className: ""
+  annotations: {}
+  tls: []
+  path: /
+  pathType: Prefix
+
+resources:
+  requests:
+    cpu: "0.5"
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+securityContext:
+  runAsNonRoot: true
+
+probes:
+  liveness:
+    path: /__fleet/health/live
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  readiness:
+    path: /__fleet/health/ready
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  startup:
+    path: /__fleet/health/started
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 10
+    successThreshold: 1
+    failureThreshold: 3
+
+env:
+  mockFleetNamespace: mock-fleet
+  mockFleetInactivityThreshold: 1M
+  mockFleetPodCreationTimeout: 1M
+  quinoaUiDir: /workspace/src/main/webui
+  quarkusPackageOutputDirectory: /workspace/target
+  quarkusLaunchDevmode: "true"
+  javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
+  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+  userDir: /workspace
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+
+hazelcastClient:
+  clusterName: dev
+
+hazelcast:
+  cluster:
+    memberCount: 1

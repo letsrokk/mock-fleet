@@ -6,7 +6,7 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
 PROFILE=${QUARKUS_PROFILE:-dev}
-CHART_DIR="${REPO_ROOT}/target/helm/kubernetes/mock-fleet"
+CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
 CLEANUP=false
@@ -15,7 +15,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--profile <profile>]
 
-Deploy the generated Helm chart into Minikube using an in-cluster profile.
+Deploy the hand-maintained Helm chart into Minikube using an in-cluster profile.
 
 Options:
   --logs              Tail application logs after deployment.

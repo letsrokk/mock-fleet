@@ -1,7 +1,0 @@
----
-rbac:
-  create: false
-
-hazelcast:
-  cluster:
-    memberCount: 1

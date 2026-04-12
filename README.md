@@ -59,24 +59,22 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
   `quarkus.quinoa.ui-dir` defaults to `${user.dir}/src/main/webui` and can be overridden with `QUINOA_UI_DIR`
-- `quarkus.kubernetes.*`: generated Deployment, Service, RBAC, probes, resource requests/limits, and ingress settings
-- `quarkus.helm.*`: generated Helm chart settings and additional values/schema mappings
+- `deploy/helm/mock-fleet`: the source-controlled Helm chart used for Kubernetes deployment
 
 ## Kubernetes and Helm
 
-- generated Kubernetes manifests now include readiness and liveness probes via SmallRye Health
-- the application Deployment declares explicit CPU and memory requests/limits
-- pod security defaults require the application to run as non-root
-- app RBAC is narrowed to `get`, `list`, `create`, and `delete` for pods and services
-- generated manifests default to namespace `mock-fleet`
-- the `dev` profile packages the Helm chart with Ingress enabled by default at `mock-fleet.localhost`
-- Helm values expose image pull policy, resource requests/limits, and selected `mock-fleet.*` runtime settings through environment variables
+- the source-controlled Helm chart preserves the current Deployment, Service, RBAC, probes, and Hazelcast wiring
+- the chart keeps ingress enabled by default for the local `dev` workflow at `mock-fleet.localhost`
+- routing-aware ingress behavior is chart-owned:
+  `routing.mode=HOST` adds both `mock-fleet.localhost` and `*.mock-fleet.localhost`
+  `routing.mode=PATH` adds only `mock-fleet.localhost`
+- chart values are exposed through a cleaner manual interface such as `image.*`, `routing.mode`, `ingress.*`, `resources.*`, and `env.*`
 
 Namespace behavior:
 
 - runtime-created mock pods and services use the Fabric8 client namespace when one is available
 - otherwise, the app falls back to `mock-fleet.namespace`, which defaults to `mock-fleet`
-- generated Quarkus Kubernetes manifests also target `mock-fleet` by default
+- the Helm chart defaults to namespace `mock-fleet`, while still allowing namespace overrides at install time
 
 ## Tests
 
@@ -102,8 +100,8 @@ The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the 
 
 ```bash
 ./mvnw package -DskipTests -Dquarkus.profile=dev
-helm dependency build target/helm/kubernetes/mock-fleet
-helm upgrade --install mock-fleet target/helm/kubernetes/mock-fleet \
+helm dependency build deploy/helm/mock-fleet
+helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --namespace mock-fleet \
   --create-namespace
 kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
@@ -114,7 +112,7 @@ Then connect from your workstation with Quarkus remote dev:
 ```bash
 ./mvnw quarkus:remote-dev -Dquarkus.profile=dev
 ```
-In the `dev` profile, the generated Ingress uses `mock-fleet.localhost` and the remote dev URL is preconfigured to match it. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
+The manual chart defaults to `ingress.host=mock-fleet.localhost`, `ingress.enabled=true`, and `routing.mode=HOST`, so the remote dev URL remains aligned with the in-cluster route. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
 
 If you are not using Minikube ingress, expose the app first and then point remote dev at the port-forwarded URL:
 
@@ -142,7 +140,8 @@ minikube addons enable ingress
 - packages the in-cluster app with profile `dev` by default
 - builds images through the Docker-based Quarkus container-image path
 - creates the namespace if needed
-- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` directly in the `dev` profile Ingress
+- deploys the source-controlled chart from `deploy/helm/mock-fleet`
+- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` when `routing.mode=HOST`
 - prints the exact `quarkus:remote-dev` command to run locally after deployment
 - keeps logs and remote debug port-forwarding opt-in via `--logs` and `--port-forward`
 - only uninstalls the release when explicitly requested with `--cleanup`

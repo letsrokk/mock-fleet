@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "mock-fleet values",
+  "type": "object",
+  "properties": {
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "namespaceOverride": {
+      "type": "string"
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string"
+        }
+      },
+      "required": ["repository", "tag", "pullPolicy"]
+    },
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "http": {
+              "type": "integer"
+            },
+            "targetHttp": {
+              "type": "integer"
+            },
+            "debug": {
+              "type": "integer"
+            },
+            "targetDebug": {
+              "type": "integer"
+            }
+          },
+          "required": ["http", "targetHttp", "debug", "targetDebug"]
+        }
+      },
+      "required": ["type", "ports"]
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["HOST", "PATH"]
+        }
+      },
+      "required": ["mode"]
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "host": {
+          "type": "string"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "tls": {
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        },
+        "pathType": {
+          "type": "string"
+        }
+      },
+      "required": ["enabled", "host", "path", "pathType"]
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          },
+          "required": ["cpu", "memory"]
+        },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
+          },
+          "required": ["cpu", "memory"]
+        }
+      },
+      "required": ["requests", "limits"]
+    },
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "runAsNonRoot": {
+          "type": "boolean"
+        }
+      },
+      "required": ["runAsNonRoot"]
+    },
+    "probes": {
+      "type": "object",
+      "properties": {
+        "liveness": {
+          "$ref": "#/definitions/httpProbe"
+        },
+        "readiness": {
+          "$ref": "#/definitions/httpProbe"
+        },
+        "startup": {
+          "$ref": "#/definitions/httpProbe"
+        }
+      },
+      "required": ["liveness", "readiness", "startup"]
+    },
+    "env": {
+      "type": "object",
+      "properties": {
+        "mockFleetNamespace": {
+          "type": "string"
+        },
+        "mockFleetInactivityThreshold": {
+          "type": "string"
+        },
+        "mockFleetPodCreationTimeout": {
+          "type": "string"
+        },
+        "quinoaUiDir": {
+          "type": "string"
+        },
+        "quarkusPackageOutputDirectory": {
+          "type": "string"
+        },
+        "quarkusLaunchDevmode": {
+          "type": "string"
+        },
+        "javaOpts": {
+          "type": "string"
+        },
+        "javaToolOptions": {
+          "type": "string"
+        },
+        "userDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "mockFleetNamespace",
+        "mockFleetInactivityThreshold",
+        "mockFleetPodCreationTimeout",
+        "quinoaUiDir",
+        "quarkusPackageOutputDirectory",
+        "quarkusLaunchDevmode",
+        "javaOpts",
+        "javaToolOptions",
+        "userDir"
+      ]
+    },
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": ["create", "name"]
+    },
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": {
+          "type": "boolean"
+        }
+      },
+      "required": ["create"]
+    },
+    "hazelcastClient": {
+      "type": "object",
+      "properties": {
+        "clusterName": {
+          "type": "string"
+        }
+      },
+      "required": ["clusterName"]
+    },
+    "hazelcast": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "image",
+    "service",
+    "routing",
+    "ingress",
+    "resources",
+    "securityContext",
+    "probes",
+    "env",
+    "serviceAccount",
+    "rbac",
+    "hazelcastClient",
+    "hazelcast"
+  ],
+  "definitions": {
+    "httpProbe": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        },
+        "successThreshold": {
+          "type": "integer"
+        },
+        "failureThreshold": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "initialDelaySeconds",
+        "periodSeconds",
+        "timeoutSeconds",
+        "successThreshold",
+        "failureThreshold"
+      ]
+    }
+  }
+}
