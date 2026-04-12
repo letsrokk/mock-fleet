@@ -35,18 +35,22 @@ public class LocalServicePortForwardManager {
 
     public String getOrCreateForwardBaseUrl(String mockId, String namespace) {
         String serviceName = serviceFactory.serviceName(mockId);
-        ForwardEntry current = forwards.get(serviceName);
-        if (isUsable(current)) {
-            return current.baseUrl();
-        }
-
-        close(serviceName);
-
         InetAddress bindAddress = resolveBindAddress();
-        LocalPortForward portForward = createForward(namespace, serviceName, bindAddress);
-        ForwardEntry entry = new ForwardEntry(serviceName, portForward);
-        forwards.put(serviceName, entry);
-        LOG.infof("Opened local port-forward for service '%s' on %s:%d.", serviceName, bindAddress.getHostAddress(), portForward.getLocalPort());
+        ForwardEntry entry = forwards.compute(serviceName, (ignored, current) -> {
+            if (isUsable(current)) {
+                return current;
+            }
+
+            close(current, serviceName);
+
+            LocalPortForward portForward = createForward(namespace, serviceName, bindAddress);
+            ForwardEntry next = new ForwardEntry(serviceName, portForward);
+            LOG.infof("Opened local port-forward for service '%s' on %s:%d.",
+                    serviceName,
+                    bindAddress.getHostAddress(),
+                    portForward.getLocalPort());
+            return next;
+        });
         return entry.baseUrl();
     }
 
@@ -56,12 +60,17 @@ public class LocalServicePortForwardManager {
 
     public void close(String serviceName) {
         ForwardEntry removed = forwards.remove(serviceName);
-        if (removed != null) {
-            try {
-                removed.portForward().close();
-            } catch (IOException e) {
-                LOG.debugf(e, "Failed to close port-forward for service '%s'.", serviceName);
-            }
+        close(removed, serviceName);
+    }
+
+    private void close(ForwardEntry entry, String serviceName) {
+        if (entry == null) {
+            return;
+        }
+        try {
+            entry.portForward().close();
+        } catch (IOException e) {
+            LOG.debugf(e, "Failed to close port-forward for service '%s'.", serviceName);
         }
     }
 

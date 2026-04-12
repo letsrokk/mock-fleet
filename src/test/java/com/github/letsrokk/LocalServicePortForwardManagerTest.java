@@ -10,6 +10,15 @@ import io.fabric8.kubernetes.client.dsl.ServiceResource;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -236,6 +245,55 @@ class LocalServicePortForwardManagerTest {
 
         verify(portForward, times(1)).close();
         verify(serviceResource, times(1)).portForward(8080, loopback, 18080);
+    }
+
+    @Test
+    void concurrentRequestsReuseSingleCreatedForwardForSameService() throws Exception {
+        MockFleetConfig config = localDebugConfig(true, "127.0.0.1", 18080, 18081, 8080);
+        ServiceFactory serviceFactory = new ServiceFactory();
+        LocalPortForward portForward = mock(LocalPortForward.class);
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        AtomicInteger createCalls = new AtomicInteger();
+        CountDownLatch started = new CountDownLatch(1);
+
+        LocalServicePortForwardManager manager = new LocalServicePortForwardManager() {
+            @Override
+            LocalPortForward createForward(String namespace, String serviceName, InetAddress bindAddress) {
+                createCalls.incrementAndGet();
+                started.countDown();
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+                return portForward;
+            }
+
+            @Override
+            boolean canConnect(InetAddress address, int port) {
+                return true;
+            }
+        };
+        manager.config = config;
+        manager.serviceFactory = serviceFactory;
+
+        when(portForward.isAlive()).thenReturn(true);
+        when(portForward.errorOccurred()).thenReturn(false);
+        when(portForward.getLocalAddress()).thenReturn(loopback);
+        when(portForward.getLocalPort()).thenReturn(18080);
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Callable<String> task = () -> manager.getOrCreateForwardBaseUrl("demo", "test");
+            Future<String> first = executor.submit(task);
+            started.await(1, TimeUnit.SECONDS);
+            Future<String> second = executor.submit(task);
+
+            List<String> baseUrls = List.of(first.get(2, TimeUnit.SECONDS), second.get(2, TimeUnit.SECONDS));
+
+            assertEquals(List.of("http://127.0.0.1:18080", "http://127.0.0.1:18080"), baseUrls);
+            assertEquals(1, createCalls.get());
+        }
     }
 
     private MockFleetConfig localDebugConfig(boolean enabled, String bindAddress, int startPort, int endPort, int servicePort) {

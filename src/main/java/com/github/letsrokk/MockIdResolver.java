@@ -2,7 +2,12 @@ package com.github.letsrokk;
 
 import com.github.letsrokk.exceptions.MockIdNotFound;
 
+import java.util.Locale;
+import java.util.regex.Pattern;
+
 final class MockIdResolver {
+
+    private static final Pattern VALID_MOCK_ID = Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$");
 
     private MockIdResolver() {
     }
@@ -57,12 +62,9 @@ final class MockIdResolver {
     }
 
     static String normalize(String candidate, String errorMessage) {
-        String normalized = candidate.toLowerCase().replaceAll("[^a-z0-9\\-]", "");
-        if (normalized.isEmpty()) {
+        String normalized = candidate.toLowerCase(Locale.ROOT);
+        if (!VALID_MOCK_ID.matcher(normalized).matches()) {
             throw new MockIdNotFound(errorMessage);
-        }
-        if (normalized.length() > 63) {
-            return normalized.substring(0, 63);
         }
         return normalized;
     }

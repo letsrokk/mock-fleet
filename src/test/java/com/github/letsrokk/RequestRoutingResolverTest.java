@@ -24,9 +24,24 @@ class RequestRoutingResolverTest {
     void hostModeNormalizesMockIdFromHost() {
         RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.HOST);
 
-        ResolvedRequest resolvedRequest = resolver.resolve("MiXeD_Name.example.test", "/anything");
+        ResolvedRequest resolvedRequest = resolver.resolve("MiXeD.example.test", "/anything");
 
-        assertEquals("mixedname", resolvedRequest.mockId());
+        assertEquals("mixed", resolvedRequest.mockId());
+    }
+
+    @Test
+    void hostModeRejectsInvalidCharactersInsteadOfNormalizingToAnotherMock() {
+        RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.HOST);
+
+        assertThrows(MockIdNotFound.class, () -> resolver.resolve("demo_.example.test", "/anything"));
+    }
+
+    @Test
+    void hostModeRejectsMockIdsLongerThanDnsLabelLimit() {
+        RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.HOST);
+
+        assertThrows(MockIdNotFound.class,
+                () -> resolver.resolve("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example.test", "/anything"));
     }
 
     @Test
@@ -68,6 +83,13 @@ class RequestRoutingResolverTest {
         RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.PATH);
 
         assertThrows(MockIdNotFound.class, () -> resolver.resolve("mock-fleet.localhost", "/"));
+    }
+
+    @Test
+    void pathModeRejectsInvalidCharactersInsteadOfNormalizingToAnotherMock() {
+        RequestRoutingResolver resolver = resolver(MockFleetConfig.RoutingMode.PATH);
+
+        assertThrows(MockIdNotFound.class, () -> resolver.resolve("mock-fleet.localhost", "/demo_/anything"));
     }
 
     private RequestRoutingResolver resolver(MockFleetConfig.RoutingMode mode) {
