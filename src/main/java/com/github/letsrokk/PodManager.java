@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -55,6 +56,28 @@ public class PodManager {
             return localServicePortForwardManager.getOrCreateForwardBaseUrl(mockId, currentNamespace());
         }
         return buildServiceBaseUrl(mockId);
+    }
+
+    public List<ActiveMockPod> listActiveMocks() {
+        return podState.getPods().entrySet().stream()
+                .map(entry -> new ActiveMockPod(entry.getKey(), entry.getValue().getMetadata().getName()))
+                .sorted(Comparator.comparing(ActiveMockPod::mockId))
+                .toList();
+    }
+
+    public DeleteMockResult deleteMock(String mockId) {
+        Pod pod = podState.getPod(mockId);
+        if (pod == null) {
+            return DeleteMockResult.NOT_FOUND;
+        }
+        if (!deletePod(pod)) {
+            return DeleteMockResult.FAILED;
+        }
+
+        LOG.infof("Pod '%s' deleted manually for mock id '%s'.", pod.getMetadata().getName(), mockId);
+        deleteService(mockId);
+        podState.removePod(mockId);
+        return DeleteMockResult.DELETED;
     }
 
     /**
@@ -236,6 +259,15 @@ public class PodManager {
 
     boolean wasDeleteSuccessful(List<StatusDetails> details) {
         return details != null && !details.isEmpty();
+    }
+
+    public record ActiveMockPod(String mockId, String podName) {
+    }
+
+    public enum DeleteMockResult {
+        DELETED,
+        NOT_FOUND,
+        FAILED
     }
 
 }

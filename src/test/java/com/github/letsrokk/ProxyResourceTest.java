@@ -22,6 +22,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -118,6 +119,37 @@ class ProxyResourceTest {
                 .body(containsString("Unable to extract mock id"));
 
         verifyNoInteractions(podManager);
+    }
+
+    @Test
+    void keepsFleetApiRequestsLocalInsteadOfProxying() {
+        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
+
+        given()
+                .header("Host", "demo.example.test")
+        .when()
+                .get("/__fleet/api/mocks")
+        .then()
+                .statusCode(200)
+                .body("[0].mockId", is("demo"))
+                .body("[0].podName", is("mock-fleet-demo-1"));
+
+        verify(podManager).listActiveMocks();
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsFaviconRequestsLocalInsteadOfProxying() {
+        when(podManager.getUpstreamBaseUrl("favicon")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "favicon.example.test")
+        .when()
+                .get("/favicon.ico")
+        .then()
+                .statusCode(404);
+
+        assertEquals(null, capturedRequest.get());
     }
 
     @Test

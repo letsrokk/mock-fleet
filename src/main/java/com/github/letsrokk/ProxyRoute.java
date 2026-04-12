@@ -17,11 +17,25 @@ import jakarta.ws.rs.core.MediaType;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 
 @ApplicationScoped
 public class ProxyRoute {
 
     private static final Logger LOG = Logger.getLogger(ProxyRoute.class);
+    private static final String[] LOCAL_UI_PREFIXES = {
+            "/__fleet/",
+            "/src/",
+            "/node_modules/",
+            "/@vite/",
+            "/@fs/",
+            "/@id/",
+            "/@react-refresh"
+    };
+    private static final String[] LOCAL_UI_PATHS = {
+            "/__fleet",
+            "/favicon.ico"
+    };
 
     @Inject
     Vertx vertx;
@@ -37,6 +51,12 @@ public class ProxyRoute {
     @Route(path = "/*", order = 100)
     void proxy(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
+        String requestPath = requestPath(routingContext.request().uri());
+        if (shouldHandleLocally(requestPath)) {
+            routingContext.next();
+            return;
+        }
+
         ResolvedRequest resolvedRequest;
         try {
             resolvedRequest = requestRoutingResolver.resolve(host, routingContext.request().uri());
@@ -86,6 +106,38 @@ public class ProxyRoute {
         return routingContext.response().end(responseBody);
     }
 
+    private boolean shouldHandleLocally(String requestPath) {
+        return matchesAny(requestPath, LOCAL_UI_PATHS)
+                || startsWithAny(requestPath, LOCAL_UI_PREFIXES);
+    }
+
+    private boolean matchesAny(String requestPath, String[] paths) {
+        for (String path : paths) {
+            if (requestPath.equals(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean startsWithAny(String requestPath, String[] prefixes) {
+        for (String prefix : prefixes) {
+            if (requestPath.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String requestPath(String requestUri) {
+        try {
+            return new URI(requestUri).getPath();
+        } catch (URISyntaxException ignored) {
+            int queryStart = requestUri.indexOf('?');
+            return queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+        }
+    }
+
     private WebClient client() {
         WebClient local = webClient;
         if (local == null) {
@@ -109,7 +161,7 @@ public class ProxyRoute {
 
     private void handleFailure(RoutingContext routingContext, String host, Throwable error) {
         if (error instanceof MockIdNotFound e) {
-            LOG.debugf("Rejecting request with invalid host header: %s", e.getMessage());
+            LOG.debugf("Rejecting request: %s", e.getMessage());
             routingContext.response()
                     .setStatusCode(400)
                     .putHeader(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN)

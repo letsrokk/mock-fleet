@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -49,6 +50,88 @@ class PodManagerTest {
         when(kubernetesClient.resource(pod).get()).thenReturn(pod);
 
         assertThrows(PodCreationException.class, () -> podManager.waitForPodToBeRunning(pod, Duration.ofMillis(1)));
+    }
+
+    @Test
+    void listActiveMocksReturnsSortedRows() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        IMap<String, Pod> pods = mock(IMap.class);
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+
+        when(podState.getPods()).thenReturn(pods);
+        when(pods.entrySet()).thenReturn(Map.of(
+                "zeta", pod("mock-fleet-zeta-1", "Running"),
+                "alpha", pod("mock-fleet-alpha-1", "Running")).entrySet());
+
+        List<PodManager.ActiveMockPod> activeMocks = podManager.listActiveMocks();
+
+        assertEquals(List.of(
+                new PodManager.ActiveMockPod("alpha", "mock-fleet-alpha-1"),
+                new PodManager.ActiveMockPod("zeta", "mock-fleet-zeta-1")), activeMocks);
+    }
+
+    @Test
+    void deleteMockReturnsNotFoundWhenMockIsMissing() {
+        PodState podState = mock(PodState.class);
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+
+        when(podState.getPod("demo")).thenReturn(null);
+
+        assertEquals(PodManager.DeleteMockResult.NOT_FOUND, podManager.deleteMock("demo"));
+    }
+
+    @Test
+    void deleteMockDeletesPodServiceAndState() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
+        PodState podState = mock(PodState.class);
+        ServiceFactory serviceFactory = new ServiceFactory();
+        @SuppressWarnings("unchecked")
+        MixedOperation<Service, ServiceList, ServiceResource<Service>> serviceOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Service, ServiceList, ServiceResource<Service>> namespacedServices = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        ServiceResource<Service> serviceResource = mock(ServiceResource.class);
+        LocalServicePortForwardManager localServicePortForwardManager = mock(LocalServicePortForwardManager.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+        podManager.serviceFactory = serviceFactory;
+        podManager.localServicePortForwardManager = localServicePortForwardManager;
+
+        Pod pod = pod("mock-fleet-demo-1", "Running");
+        Service service = service("mock-fleet-demo");
+
+        when(podState.getPod("demo")).thenReturn(pod);
+        when(kubernetesClient.resource(pod).delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.services()).thenReturn(serviceOperations);
+        when(serviceOperations.inNamespace("test")).thenReturn(namespacedServices);
+        when(namespacedServices.withName("mock-fleet-demo")).thenReturn(serviceResource);
+        when(serviceResource.get()).thenReturn(service);
+        when(kubernetesClient.resource(service).delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+
+        assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
+        verify(podState).removePod("demo");
+        verify(localServicePortForwardManager).closeForMock("demo");
+    }
+
+    @Test
+    void deleteMockReturnsFailedWhenPodDeletionFails() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
+        PodState podState = mock(PodState.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+
+        Pod pod = pod("mock-fleet-demo-1", "Running");
+        when(podState.getPod("demo")).thenReturn(pod);
+        when(kubernetesClient.resource(pod).delete()).thenReturn(List.of());
+
+        assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
+        verify(podState, never()).removePod("demo");
     }
 
     @Test

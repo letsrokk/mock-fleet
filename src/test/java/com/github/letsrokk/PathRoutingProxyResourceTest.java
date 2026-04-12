@@ -22,6 +22,7 @@ import static org.hamcrest.CoreMatchers.is;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -141,10 +142,69 @@ class PathRoutingProxyResourceTest {
         given()
                 .header("Host", "mock-fleet.localhost")
         .when()
-                .get("/")
+                .get("/__")
         .then()
                 .statusCode(400)
                 .body(containsString("Unable to extract mock id"));
+    }
+
+    @Test
+    void servesDashboardFromFleetNamespaceInPathMode() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet/")
+        .then()
+                .statusCode(200)
+                .body(containsString("<div id=\"root\"></div>"))
+                .body(containsString("/__fleet/assets/"));
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsFleetApiRequestsLocalInPathMode() {
+        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
+
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet/api/mocks")
+        .then()
+                .statusCode(200)
+                .body("[0].mockId", is("demo"))
+                .body("[0].podName", is("mock-fleet-demo-1"));
+
+        verify(podManager).listActiveMocks();
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsDashboardDevSourcesLocalInPathMode() {
+        when(podManager.getUpstreamBaseUrl("__fleet")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet/src/main.tsx")
+        .then()
+                .statusCode(200);
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsFaviconRequestsLocalInPathMode() {
+        when(podManager.getUpstreamBaseUrl("favicon.ico")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/favicon.ico")
+        .then()
+                .statusCode(404);
+
+        assertEquals(null, capturedRequest.get());
     }
 
     record CapturedRequest(String method,

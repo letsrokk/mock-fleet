@@ -8,6 +8,8 @@ public class PathRoutingProfile implements QuarkusTestProfile {
 
     @Override
     public Map<String, String> getConfigOverrides() {
-        return Map.of("mock-fleet.routing.mode", "PATH");
+        return Map.of(
+                "mock-fleet.routing.mode", "PATH",
+                "quarkus.quinoa", "true");
     }
 }
