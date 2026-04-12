@@ -15,6 +15,7 @@ public class PodFactory {
     public static final String LABEL_APP_NAME = "app.kubernetes.io/name";
     public static final String APP_NAME_VALUE = "mock-fleet-wiremock";
     public static final String LABEL_MOCK_ID = "mock-fleet/mock-id";
+    static final String WIREMOCK_HEALTH_PATH = "/__admin/health";
 
     private final MockFleetConfig config;
 
@@ -31,6 +32,36 @@ public class PodFactory {
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
+                .withNewStartupProbe()
+                    .withNewHttpGet()
+                        .withPath(WIREMOCK_HEALTH_PATH)
+                        .withNewPort(8080)
+                    .endHttpGet()
+                    .withInitialDelaySeconds(1)
+                    .withPeriodSeconds(1)
+                    .withTimeoutSeconds(1)
+                    .withFailureThreshold(60)
+                .endStartupProbe()
+                .withNewReadinessProbe()
+                    .withNewHttpGet()
+                        .withPath(WIREMOCK_HEALTH_PATH)
+                        .withNewPort(8080)
+                    .endHttpGet()
+                    .withInitialDelaySeconds(1)
+                    .withPeriodSeconds(1)
+                    .withTimeoutSeconds(1)
+                    .withFailureThreshold(30)
+                .endReadinessProbe()
+                .withNewLivenessProbe()
+                    .withNewHttpGet()
+                        .withPath(WIREMOCK_HEALTH_PATH)
+                        .withNewPort(8080)
+                    .endHttpGet()
+                    .withInitialDelaySeconds(10)
+                    .withPeriodSeconds(10)
+                    .withTimeoutSeconds(1)
+                    .withFailureThreshold(3)
+                .endLivenessProbe()
                 .build();
 
         // Build the Pod

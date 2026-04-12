@@ -16,6 +16,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import org.jboss.logging.Logger;
 
+import java.net.ConnectException;
 import java.net.URI;
 import java.net.URISyntaxException;
 
@@ -23,6 +24,9 @@ import java.net.URISyntaxException;
 public class ProxyRoute {
 
     private static final Logger LOG = Logger.getLogger(ProxyRoute.class);
+    private static final int MAX_CONNECT_RETRIES = 10;
+    private static final long INITIAL_CONNECT_RETRY_DELAY_MS = 100;
+    private static final long MAX_CONNECT_RETRY_DELAY_MS = 1_000;
     private static final String[] LOCAL_UI_PREFIXES = {
             "/__fleet/",
             "/src/",
@@ -75,11 +79,49 @@ public class ProxyRoute {
                             finalResolvedRequest.mockId(),
                             upstream,
                             finalResolvedRequest.upstreamRequestUri());
-                    forward(upstream, finalResolvedRequest.upstreamRequestUri(), routingContext,
-                            routingContext.body() == null ? null : routingContext.body().buffer())
+                    forwardWithRetry(upstream, finalResolvedRequest.upstreamRequestUri(), routingContext,
+                            routingContext.body() == null ? null : routingContext.body().buffer(),
+                            0)
                             .onFailure(error -> handleFailure(routingContext, host, error));
                 })
                 .onFailure(error -> handleFailure(routingContext, host, error));
+    }
+
+    private io.vertx.core.Future<Void> forwardWithRetry(URI upstream, String upstreamRequestUri,
+                                                        RoutingContext routingContext, Buffer body, int attempt) {
+        return forward(upstream, upstreamRequestUri, routingContext, body)
+                .recover(error -> {
+                    if (!shouldRetryConnectFailure(error, attempt)) {
+                        return io.vertx.core.Future.failedFuture(error);
+                    }
+
+                    long delayMs = retryDelayMs(attempt);
+                    LOG.debugf("Retrying upstream connect for %s after transient failure (attempt %d/%d, delay %dms).",
+                            upstream, attempt + 1, MAX_CONNECT_RETRIES, delayMs);
+
+                    return vertx.timer(delayMs)
+                            .flatMap(ignored -> forwardWithRetry(upstream, upstreamRequestUri, routingContext, body, attempt + 1));
+                });
+    }
+
+    private long retryDelayMs(int attempt) {
+        long delayMs = INITIAL_CONNECT_RETRY_DELAY_MS * (1L << attempt);
+        return Math.min(delayMs, MAX_CONNECT_RETRY_DELAY_MS);
+    }
+
+    private boolean shouldRetryConnectFailure(Throwable error, int attempt) {
+        return attempt < MAX_CONNECT_RETRIES && isConnectFailure(error);
+    }
+
+    private boolean isConnectFailure(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ConnectException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private io.vertx.core.Future<Void> forward(URI upstream, String upstreamRequestUri, RoutingContext routingContext, Buffer body) {

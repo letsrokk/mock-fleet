@@ -63,6 +63,7 @@ Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/
 - `mock-fleet.inactivity-threshold`: how long an inactive mock pod may live before cleanup
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
+- `mock-fleet.namespace`: default namespace used for runtime-created mock pods and services when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
 - `quarkus.kubernetes.*`: generated Deployment, Service, RBAC, probes, resource requests/limits, and ingress settings
@@ -74,8 +75,15 @@ Main application settings live in [`application.yaml`](/C:/Users/Dmitry%20Mayer/
 - the application Deployment declares explicit CPU and memory requests/limits
 - pod security defaults require the application to run as non-root
 - app RBAC is narrowed to `get`, `list`, `create`, and `delete` for pods and services
+- generated manifests default to namespace `mock-fleet`
 - the Helm chart disables the Ingress resource by default; enable it with `--set app.ingress.enabled=true`
 - Helm values expose image pull policy, resource requests/limits, and selected `mock-fleet.*` runtime settings through environment variables
+
+Namespace behavior:
+
+- runtime-created mock pods and services use the Fabric8 client namespace when one is available
+- otherwise, the app falls back to `mock-fleet.namespace`, which defaults to `mock-fleet`
+- generated Quarkus Kubernetes manifests also target `mock-fleet` by default
 
 ## Tests
 
@@ -95,6 +103,44 @@ Run tests with:
 ./mvnw test
 ```
 
-## Minikube helper
+## Minikube workflow
 
-The local helper script at [`debug-minikube.sh`](/C:/Users/Dmitry%20Mayer/projects/github/mock-fleet/bin/local/debug-minikube.sh) builds the app with Maven, updates the generated Helm chart, deploys it into Minikube, then tails logs and opens remote debugging on port `5005`.
+The primary local Kubernetes workflow is command-driven:
+
+```bash
+./mvnw package -DskipTests -Dquarkus.profile=dev
+helm dependency build target/helm/kubernetes/mock-fleet
+helm upgrade --install mock-fleet target/helm/kubernetes/mock-fleet \
+  --namespace mock-fleet \
+  --create-namespace \
+  --set app.ingress.enabled=true
+kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
+kubectl patch ingress mock-fleet --namespace mock-fleet --type merge \
+  -p '{"spec":{"rules":[{"host":"mock-fleet.localhost","http":{"paths":[{"backend":{"service":{"name":"mock-fleet","port":{"name":"http"}}},"path":"/","pathType":"Prefix"}]}},{"host":"*.mock-fleet.localhost","http":{"paths":[{"backend":{"service":{"name":"mock-fleet","port":{"name":"http"}}},"path":"/","pathType":"Prefix"}]}}]}}'
+```
+
+Optional helpers:
+
+```bash
+kubectl port-forward --namespace mock-fleet service/mock-fleet 5005:5005
+kubectl logs --namespace mock-fleet -f -l app.kubernetes.io/name=mock-fleet
+```
+
+If you want to reach the service through Minikube Ingress on `mock-fleet.localhost`, enable the Minikube ingress addon first:
+
+```bash
+minikube addons enable ingress
+```
+
+[`bin/local/debug-minikube.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/debug-minikube.sh) remains as a thin wrapper around that flow. It now:
+
+- deploys into namespace `mock-fleet` by default
+- packages the in-cluster app with profile `dev` by default
+- creates the namespace if needed
+- can enable Ingress for a host with `--ingress-host mock-fleet.localhost`
+  this enables the generated Ingress and then patches both `mock-fleet.localhost` and `*.mock-fleet.localhost`
+- keeps logs and port-forwarding opt-in via `--logs` and `--port-forward`
+- only uninstalls the release when explicitly requested with `--cleanup`
+
+Use `dev,local-k8s` only when running the application locally against the cluster.
+That profile enables localhost-based upstream access and is not appropriate for the app running inside Kubernetes.
