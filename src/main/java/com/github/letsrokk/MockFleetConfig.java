@@ -17,8 +17,6 @@ public interface MockFleetConfig {
 
     RoutingConfig routing();
 
-    LocalDebugConfig localDebug();
-
     interface RoutingConfig {
         RoutingMode mode();
     }
@@ -26,18 +24,6 @@ public interface MockFleetConfig {
     enum RoutingMode {
         HOST,
         PATH
-    }
-
-    interface LocalDebugConfig {
-        boolean enabled();
-
-        String bindAddress();
-
-        int startPort();
-
-        int endPort();
-
-        int servicePort();
     }
 
 }

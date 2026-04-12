@@ -5,7 +5,6 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceList;
-import io.fabric8.kubernetes.api.model.Endpoints;
 import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -39,9 +38,6 @@ public class PodManager {
     ServiceFactory serviceFactory;
 
     @Inject
-    LocalServicePortForwardManager localServicePortForwardManager;
-
-    @Inject
     MockFleetConfig config;
 
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
@@ -56,10 +52,6 @@ public class PodManager {
         podState.setLastAccessTime(pod.getMetadata().getName(), Instant.now().toEpochMilli());
         if (existingPod != null) {
             ensureServiceExists(mockId);
-            waitForServiceToBeReady(mockId, podCreationTimeout);
-        }
-        if (config.localDebug().enabled()) {
-            return localServicePortForwardManager.getOrCreateForwardBaseUrl(mockId, currentNamespace());
         }
         return buildServiceBaseUrl(mockId);
     }
@@ -104,7 +96,6 @@ public class PodManager {
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
         ensureServiceExists(mockId);
-        waitForServiceToBeReady(mockId, podCreationTimeout);
 
         return pod;
     }
@@ -199,39 +190,6 @@ public class PodManager {
                 .anyMatch(condition -> "True".equalsIgnoreCase(condition.getStatus()));
     }
 
-    void waitForServiceToBeReady(String mockId, Duration timeout) {
-        String namespace = currentNamespace();
-        String serviceName = serviceFactory.serviceName(mockId);
-        long deadline = System.nanoTime() + timeout.toNanos();
-
-        while (System.nanoTime() < deadline) {
-            Endpoints endpoints = kubernetesClient.endpoints()
-                    .inNamespace(namespace)
-                    .withName(serviceName)
-                    .get();
-            if (hasReadyEndpoints(endpoints)) {
-                LOG.infof("Service '%s' has a ready endpoint.", serviceName);
-                return;
-            }
-
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new PodCreationException("Interrupted while waiting for service '" + serviceName + "' to become ready.");
-            }
-        }
-
-        throw new PodCreationException("Service '" + serviceName + "' did not expose a ready endpoint before timeout.");
-    }
-
-    boolean hasReadyEndpoints(Endpoints endpoints) {
-        return endpoints != null
-                && endpoints.getSubsets() != null
-                && endpoints.getSubsets().stream().anyMatch(subset ->
-                subset.getAddresses() != null && !subset.getAddresses().isEmpty());
-    }
-
     /**
      * Periodic job that checks inactivity for each pod.
      * Runs every 5m in this example.
@@ -318,7 +276,6 @@ public class PodManager {
     }
 
     boolean deleteService(String mockId) {
-        localServicePortForwardManager.closeForMock(mockId);
         Service service = kubernetesClient.services()
                 .inNamespace(currentNamespace())
                 .withName(serviceFactory.serviceName(mockId))
@@ -327,7 +284,6 @@ public class PodManager {
     }
 
     boolean deleteService(Service service) {
-        localServicePortForwardManager.close(service.getMetadata().getName());
         return wasDeleteSuccessful(kubernetesClient.resource(service).delete());
     }
 

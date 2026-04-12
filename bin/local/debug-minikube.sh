@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
-PROFILE=${QUARKUS_PROFILE:-dev}
+PROFILE=${QUARKUS_PROFILE:-dev,minikube}
 CHART_DIR="${REPO_ROOT}/target/helm/kubernetes/mock-fleet"
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
@@ -25,10 +25,28 @@ Options:
   --ingress-host      Enable Ingress and bind it to the provided host, for example mock-fleet.localhost.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
   --profile <value>   Quarkus profile(s) for packaging. Defaults to ${PROFILE}.
-                      Use dev,local-k8s only when you intentionally need the
-                      in-cluster app to run with local-debug port-forward logic.
   --help              Show this help.
 EOF
+}
+
+print_remote_dev_instructions() {
+    local release_name="$1"
+    local namespace="$2"
+    local profile="$3"
+    local ingress_host="$4"
+    local live_reload_url
+
+    echo
+    echo "Remote dev follow-up:"
+    if [[ -n "${ingress_host}" ]]; then
+        live_reload_url="http://${ingress_host}"
+    else
+        live_reload_url="http://127.0.0.1:8080"
+        echo "1. In a separate terminal, expose the app:"
+        echo "   kubectl port-forward --namespace ${namespace} service/${release_name} 8080:8080"
+    fi
+    echo "2. In another terminal, start Quarkus remote dev:"
+    echo "   ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile} -Dquarkus.live-reload.url=${live_reload_url}"
 }
 
 build_ingress_patch_payload() {
@@ -119,6 +137,8 @@ fi
 if [[ "${ENABLE_PORT_FORWARD}" == "true" ]]; then
     kubectl port-forward --namespace "${NAMESPACE}" service/"${RELEASE_NAME}" 5005:5005 &
 fi
+
+print_remote_dev_instructions "${RELEASE_NAME}" "${NAMESPACE}" "${PROFILE}" "${INGRESS_HOST}"
 
 if [[ "${ENABLE_LOGS}" == "true" ]]; then
     kubectl logs --namespace "${NAMESPACE}" -f -l app.kubernetes.io/name=mock-fleet

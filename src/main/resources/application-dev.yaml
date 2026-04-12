@@ -8,11 +8,36 @@ quarkus:
     remote-debug:
       enabled: true
 
-"%local-k8s":
-  mock-fleet:
-    local-debug:
-      enabled: true
-      bind-address: 127.0.0.1
-      start-port: 18080
-      end-port: 18180
-      service-port: 8080
+"%minikube":
+  quarkus:
+    quinoa:
+      package-manager-install:
+        node-version: 22.14.0
+    package:
+      jar:
+        type: mutable-jar
+    live-reload:
+      password: mock-fleet-minikube
+    kubernetes:
+      env:
+        vars:
+          QUARKUS_LAUNCH_DEVMODE: "true"
+          QUINOA_UI_DIR: /workspace/src/main/webui
+          QUARKUS_PACKAGE_OUTPUT_DIRECTORY: /workspace/target
+
+"%dev,minikube":
+  quarkus:
+    quinoa:
+      package-manager-install:
+        node-version: 22.14.0
+    package:
+      jar:
+        type: mutable-jar
+    live-reload:
+      password: mock-fleet-minikube
+    kubernetes:
+      env:
+        vars:
+          QUARKUS_LAUNCH_DEVMODE: "true"
+          QUINOA_UI_DIR: /workspace/src/main/webui
+          QUARKUS_PACKAGE_OUTPUT_DIRECTORY: /workspace/target

@@ -80,18 +80,38 @@
 FROM registry.access.redhat.com/ubi8/openjdk-21:1.20
 
 ENV LANGUAGE='en_US:en'
+ARG NODE_VERSION=22.14.0
+USER root
+WORKDIR /workspace
 
+# Install a modern Node.js runtime explicitly because the UBI package is too old for Vite 7.
+RUN microdnf install -y curl tar xz && microdnf clean all
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    && rm -f /tmp/node.tar.xz \
+    && node --version \
+    && npm --version
 
-# We make four distinct layers so if there are application changes the library layers can be re-used
-COPY --chown=185 target/quarkus-app/lib/ /deployments/lib/
-COPY --chown=185 target/quarkus-app/*.jar /deployments/
-COPY --chown=185 target/quarkus-app/app/ /deployments/app/
-COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
+# Copy package metadata first so npm dependency installation can be cached separately from source changes.
+COPY src/main/webui/package.json /workspace/src/main/webui/package.json
+COPY src/main/webui/package-lock.json /workspace/src/main/webui/package-lock.json
+RUN cd /workspace/src/main/webui && npm install
 
-EXPOSE 8080
+# Copy the frontend workspace so Quinoa can resolve it relative to the project root in remote dev mode.
+COPY src/main/webui/ /workspace/src/main/webui/
+COPY pom.xml /workspace/pom.xml
+
+# Copy the Quarkus fast-jar application into the same workspace root.
+COPY target/quarkus-app/lib/ /workspace/lib/
+COPY target/quarkus-app/*.jar /workspace/
+COPY target/quarkus-app/app/ /workspace/app/
+COPY target/quarkus-app/quarkus/ /workspace/quarkus/
+
+RUN chown -R 185:root /workspace && chmod -R g=u /workspace
+
+EXPOSE 8080 5005
 USER 185
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
-ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+ENV JAVA_APP_JAR="/workspace/quarkus-run.jar"
 
 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
-
