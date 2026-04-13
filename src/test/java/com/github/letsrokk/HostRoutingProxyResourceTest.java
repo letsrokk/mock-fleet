@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import com.github.letsrokk.exceptions.MockIdNotFound;
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.vertx.core.MultiMap;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
@@ -28,7 +29,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
-class ProxyResourceTest {
+@TestProfile(HostRoutingProfile.class)
+class HostRoutingProxyResourceTest {
 
     private static Vertx upstreamVertx;
     private static HttpServer upstreamServer;
@@ -140,8 +142,8 @@ class ProxyResourceTest {
     }
 
     @Test
-    void keepsFleetApiPathsLocalForMockHosts() {
-        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
+    void proxiesFleetApiPathsForMockHosts() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
 
         given()
                 .header("Host", "demo.mock-fleet.localhost")
@@ -149,11 +151,11 @@ class ProxyResourceTest {
                 .get("/__fleet/api/mocks")
         .then()
                 .statusCode(200)
-                .body("[0].mockId", is("demo"))
-                .body("[0].podName", is("mock-fleet-demo-1"));
+                .body(is("ok"));
 
-        verify(podManager).listActiveMocks();
-        assertEquals(null, capturedRequest.get());
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/__fleet/api/mocks", request.uri());
     }
 
     @Test
@@ -216,6 +218,69 @@ class ProxyResourceTest {
     }
 
     @Test
+    void redirectsFleetDashboardEntryToCanonicalPath() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/")
+                .body(is(""));
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void proxiesFleetDashboardEntryOnMockHosts() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/__fleet")
+        .then()
+                .statusCode(200)
+                .body(is("ok"));
+
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/__fleet", request.uri());
+    }
+
+    @Test
+    void redirectsFleetDashboardEntryOnHeadRequests() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .head("/__fleet")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/");
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void doesNotRedirectFleetDashboardEntryOnPostRequests() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+                .body("payload")
+        .when()
+                .post("/__fleet")
+        .then()
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void doesNotRedirectFleetHostRootOnPostRequests() {
         given()
                 .header("Host", "mock-fleet.localhost")
@@ -249,7 +314,24 @@ class ProxyResourceTest {
     }
 
     @Test
-    void keepsFaviconRequestsLocalInsteadOfProxying() {
+    void proxiesFleetHealthRequestsForMockHosts() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/__fleet/health/started")
+        .then()
+                .statusCode(200)
+                .body(is("ok"));
+
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/__fleet/health/started", request.uri());
+    }
+
+    @Test
+    void proxiesFaviconRequestsForMockHosts() {
         when(podManager.getUpstreamBaseUrl("favicon")).thenReturn(upstreamBaseUrl);
 
         given()
@@ -257,9 +339,12 @@ class ProxyResourceTest {
         .when()
                 .get("/favicon.ico")
         .then()
-                .statusCode(404);
+                .statusCode(200)
+                .body(is("ok"));
 
-        assertEquals(null, capturedRequest.get());
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/favicon.ico", request.uri());
     }
 
     @Test

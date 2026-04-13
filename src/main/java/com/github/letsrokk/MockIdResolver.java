@@ -38,6 +38,13 @@ final class MockIdResolver {
         return normalizeHost(host).equals(normalizeConfiguredHost(fleetHost));
     }
 
+    static boolean isFleetSubdomain(String host, String fleetHost) {
+        String normalizedHost = normalizeHost(host);
+        String normalizedFleetHost = normalizeConfiguredHost(fleetHost);
+        return !normalizedHost.equals(normalizedFleetHost)
+                && normalizedHost.endsWith("." + normalizedFleetHost);
+    }
+
     static ResolvedRequest extractFromPath(String requestUri) {
         if (requestUri == null || requestUri.isBlank()) {
             throw new MockIdNotFound("Request path is missing or empty.");
