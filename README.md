@@ -11,23 +11,30 @@ The service also exposes a small internal dashboard under `/__fleet/` for inspec
   - `demo.mock-fleet.localhost:8080` also routes to mock ID `demo`
   - `mock-fleet.localhost` is treated as mock-fleet's own host and never spawns a mock
   - `GET /` and `HEAD /` on the fleet host redirect to `/__fleet/`
+  - `GET /__fleet` and `HEAD /__fleet` redirect to `/__fleet/`
+  - `/__fleet/`, `/__fleet/*`, `/favicon.ico`, and `/` stay local only on the exact fleet host
+  - all requests sent to valid mock subdomains are proxied, regardless of path
   - only a single subdomain label of the configured fleet host is accepted as a mock ID
   - invalid or empty `Host` headers are rejected with HTTP `400`
 - `PATH` mode:
   - `/demo` routes to mock ID `demo` and is forwarded upstream as `/`
   - `/demo/nested/path?alpha=1` routes to mock ID `demo` and is forwarded upstream as `/nested/path?alpha=1`
   - `GET /` and `HEAD /` on the fleet host redirect to `/__fleet/`
+  - `GET /__fleet` and `HEAD /__fleet` redirect to `/__fleet/`
+  - `/__fleet/` and `/__fleet/*` always stay local, regardless of `Host`
+  - `*.mock-fleet.localhost` is rejected with HTTP `400`
   - requests without a first path segment are rejected with HTTP `400`
 
 The proxy forwards method, path, query string, request body, and incoming headers to the selected WireMock pod on port `8080`.
 
 Reserved local routes:
 
+- `/__fleet` redirects to `/__fleet/` for `GET` and `HEAD`
 - `/__fleet/` serves the dashboard UI on the fleet host
 - `/__fleet/assets/...` serves dashboard static assets on the fleet host
 - `/__fleet/api/mocks` lists active mock pods on the fleet host
 - `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually on the fleet host
-- `/favicon.ico` is handled locally and does not create or proxy a mock request
+- `/favicon.ico` is handled locally only on the fleet host
 
 ## Requirements
 

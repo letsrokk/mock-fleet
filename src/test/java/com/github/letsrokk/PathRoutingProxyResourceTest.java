@@ -180,6 +180,49 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
+    void redirectsFleetDashboardEntryToCanonicalPathInPathMode() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/__fleet")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/")
+                .body(is(""));
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsFleetDashboardEntryOnHeadRequestsInPathMode() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .head("/__fleet")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/");
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void doesNotRedirectFleetDashboardEntryOnPostRequestsInPathMode() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+                .body("payload")
+        .when()
+                .post("/__fleet")
+        .then()
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void redirectsRootToDashboardInPathMode() {
         given()
                 .redirects().follow(false)
@@ -246,6 +289,19 @@ class PathRoutingProxyResourceTest {
                 .get("/favicon.ico")
         .then()
                 .statusCode(404);
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void rejectsFleetSubdomainHostsInPathMode() {
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/demo/anything")
+        .then()
+                .statusCode(400)
+                .body(containsString("does not accept fleet subdomain host"));
 
         assertEquals(null, capturedRequest.get());
     }
