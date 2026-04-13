@@ -58,8 +58,12 @@ public class ProxyRoute {
 
     private volatile WebClient webClient;
 
-    @Route(path = "/*", order = 100)
+    @Route(path = "/*", order = 1)
     void proxy(RoutingContext routingContext) {
+        handle(routingContext);
+    }
+
+    private void handle(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
         String requestPath = requestPath(routingContext.request().uri());
         if (shouldHandleLocally(host, requestPath)) {
@@ -187,10 +191,12 @@ public class ProxyRoute {
 
     private String requestPath(String requestUri) {
         try {
-            return new URI(requestUri).getPath();
+            String path = new URI(requestUri).getPath();
+            return path == null || path.isEmpty() ? "/" : path;
         } catch (URISyntaxException ignored) {
             int queryStart = requestUri.indexOf('?');
-            return queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+            String path = queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+            return path == null || path.isEmpty() ? "/" : path;
         }
     }
 

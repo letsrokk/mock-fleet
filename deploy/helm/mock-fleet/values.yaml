@@ -3,8 +3,8 @@ fullnameOverride: ""
 namespaceOverride: ""
 
 image:
-  repository: docker.io/letsrokk/mock-fleet
-  tag: 1.0.0-SNAPSHOT
+  repository: ghcr.io/letsrokk/mock-fleet
+  tag: latest
   pullPolicy: IfNotPresent
 
 service:
@@ -19,7 +19,7 @@ routing:
   mode: HOST
 
 ingress:
-  enabled: true
+  enabled: false
   host: mock-fleet.localhost
   className: ""
   annotations: {}

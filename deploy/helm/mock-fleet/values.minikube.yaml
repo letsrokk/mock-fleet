@@ -1,0 +1,6 @@
+ingress:
+  enabled: true
+  host: mock-fleet.localhost
+
+routing:
+  mode: HOST

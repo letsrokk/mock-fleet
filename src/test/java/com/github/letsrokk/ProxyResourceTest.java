@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -167,6 +168,67 @@ class ProxyResourceTest {
 
         verifyNoInteractions(podManager);
         assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsFleetHostRootToDashboard() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/")
+                .body(is(""));
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsFleetHostRootOnHeadRequests() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .head("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/");
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void doesNotRedirectFleetHostRootOnPostRequests() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+                .body("payload")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(404);
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void stillProxiesMockHostRootRequests() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(200)
+                .header("Location", nullValue())
+                .body(is("ok"));
+
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/", request.uri());
     }
 
     @Test

@@ -9,9 +9,11 @@ quarkus:
     root-path: /__fleet/health
   container-image:
     builder: docker
-    registry: docker.io
+    registry: ghcr.io
     group: letsrokk
     name: mock-fleet
+    additional-tags:
+      - latest
     build: true
 
 mock-fleet:
