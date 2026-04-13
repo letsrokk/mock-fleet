@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import com.github.letsrokk.exceptions.MockIdNotFound;
 import io.quarkus.vertx.web.Route;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.http.HttpMethod;
 import io.vertx.core.Vertx;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.client.HttpRequest;
@@ -27,8 +28,13 @@ public class ProxyRoute {
     private static final int MAX_CONNECT_RETRIES = 10;
     private static final long INITIAL_CONNECT_RETRY_DELAY_MS = 100;
     private static final long MAX_CONNECT_RETRY_DELAY_MS = 1_000;
-    private static final String[] LOCAL_UI_PREFIXES = {
+    private static final String[] GLOBAL_LOCAL_PATHS = {
+            "/favicon.ico"
+    };
+    private static final String[] LOCAL_FLEET_PREFIXES = {
             "/__fleet/",
+    };
+    private static final String[] LOCAL_UI_PREFIXES = {
             "/src/",
             "/node_modules/",
             "/@vite/",
@@ -50,13 +56,29 @@ public class ProxyRoute {
     @Inject
     RequestRoutingResolver requestRoutingResolver;
 
+    @Inject
+    MockFleetConfig config;
+
     private volatile WebClient webClient;
 
-    @Route(path = "/*", order = 100)
+    @Route(path = "/", order = 1)
+    void proxyRoot(RoutingContext routingContext) {
+        handle(routingContext);
+    }
+
+    @Route(path = "/*", order = 1)
     void proxy(RoutingContext routingContext) {
+        handle(routingContext);
+    }
+
+    private void handle(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
         String requestPath = requestPath(routingContext.request().uri());
-        if (shouldHandleLocally(requestPath)) {
+        if (handleFleetOwnedRoot(routingContext, host, requestPath)) {
+            return;
+        }
+
+        if (shouldHandleLocally(host, requestPath)) {
             routingContext.next();
             return;
         }
@@ -85,6 +107,27 @@ public class ProxyRoute {
                             .onFailure(error -> handleFailure(routingContext, host, error));
                 })
                 .onFailure(error -> handleFailure(routingContext, host, error));
+    }
+
+    private boolean handleFleetOwnedRoot(RoutingContext routingContext, String host, String requestPath) {
+        if (!"/".equals(requestPath) || !isFleetOwnedRoot(host)) {
+            return false;
+        }
+
+        HttpMethod method = routingContext.request().method();
+        if (method == HttpMethod.GET || method == HttpMethod.HEAD) {
+            routingContext.response()
+                    .setStatusCode(302)
+                    .putHeader(HttpHeaders.LOCATION, "/__fleet/")
+                    .end();
+            return true;
+        }
+
+        routingContext.response()
+                .setStatusCode(405)
+                .putHeader(HttpHeaders.ALLOW, "GET, HEAD")
+                .end();
+        return true;
     }
 
     private io.vertx.core.Future<Void> forwardWithRetry(URI upstream, String upstreamRequestUri,
@@ -148,9 +191,29 @@ public class ProxyRoute {
         return routingContext.response().end(responseBody);
     }
 
-    private boolean shouldHandleLocally(String requestPath) {
-        return matchesAny(requestPath, LOCAL_UI_PATHS)
-                || startsWithAny(requestPath, LOCAL_UI_PREFIXES);
+    private boolean shouldHandleLocally(String host, String requestPath) {
+        if (matchesAny(requestPath, GLOBAL_LOCAL_PATHS)) {
+            return true;
+        }
+
+        if (matchesAny(requestPath, LOCAL_UI_PATHS)
+                || startsWithAny(requestPath, LOCAL_FLEET_PREFIXES)) {
+            return true;
+        }
+
+        if (config.routing().mode() == MockFleetConfig.RoutingMode.HOST) {
+            return requestRoutingResolver.isFleetHost(host);
+        }
+
+        return startsWithAny(requestPath, LOCAL_UI_PREFIXES);
+    }
+
+    private boolean isFleetOwnedRoot(String host) {
+        if (config.routing().mode() == MockFleetConfig.RoutingMode.HOST) {
+            return requestRoutingResolver.isFleetHost(host);
+        }
+
+        return true;
     }
 
     private boolean matchesAny(String requestPath, String[] paths) {
@@ -173,10 +236,12 @@ public class ProxyRoute {
 
     private String requestPath(String requestUri) {
         try {
-            return new URI(requestUri).getPath();
+            String path = new URI(requestUri).getPath();
+            return path == null || path.isEmpty() ? "/" : path;
         } catch (URISyntaxException ignored) {
             int queryStart = requestUri.indexOf('?');
-            return queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+            String path = queryStart >= 0 ? requestUri.substring(0, queryStart) : requestUri;
+            return path == null || path.isEmpty() ? "/" : path;
         }
     }
 
@@ -192,13 +257,6 @@ public class ProxyRoute {
             }
         }
         return local;
-    }
-
-    private int resolvePort(URI upstream) {
-        if (upstream.getPort() != -1) {
-            return upstream.getPort();
-        }
-        return "https".equalsIgnoreCase(upstream.getScheme()) ? 443 : 80;
     }
 
     private void handleFailure(RoutingContext routingContext, String host, Throwable error) {

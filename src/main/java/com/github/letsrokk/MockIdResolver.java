@@ -12,25 +12,30 @@ final class MockIdResolver {
     private MockIdResolver() {
     }
 
-    static String extractFromHost(String host) {
-        if (host == null || host.isBlank()) {
-            throw new MockIdNotFound("Host header is missing or empty.");
+    static String extractFromHost(String host, String fleetHost) {
+        String normalizedHost = normalizeHost(host);
+        String normalizedFleetHost = normalizeConfiguredHost(fleetHost);
+        String errorMessage = String.format("Unable to extract mock id from host '%s'.", host);
+
+        if (normalizedHost.equals(normalizedFleetHost)) {
+            throw new MockIdNotFound(errorMessage);
         }
 
-        String normalizedHost = host.trim();
-        int portSeparator = normalizedHost.indexOf(':');
-        if (portSeparator >= 0) {
-            normalizedHost = normalizedHost.substring(0, portSeparator);
-        }
-        if (normalizedHost.isBlank()) {
-            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
-        }
-        if (!normalizedHost.contains(".")) {
-            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
+        String requiredSuffix = "." + normalizedFleetHost;
+        if (!normalizedHost.endsWith(requiredSuffix)) {
+            throw new MockIdNotFound(errorMessage);
         }
 
-        String[] parts = normalizedHost.split("\\.");
-        return normalize(parts[0], String.format("Unable to extract mock id from host '%s'.", host));
+        String candidate = normalizedHost.substring(0, normalizedHost.length() - requiredSuffix.length());
+        if (candidate.isBlank() || candidate.contains(".")) {
+            throw new MockIdNotFound(errorMessage);
+        }
+
+        return normalize(candidate, errorMessage);
+    }
+
+    static boolean isFleetHost(String host, String fleetHost) {
+        return normalizeHost(host).equals(normalizeConfiguredHost(fleetHost));
     }
 
     static ResolvedRequest extractFromPath(String requestUri) {
@@ -59,6 +64,37 @@ final class MockIdResolver {
                 String.format("Unable to extract mock id from path '%s'.", path));
         String remainderPath = segmentEnd >= path.length() ? "/" : path.substring(segmentEnd);
         return new ResolvedRequest(mockId, remainderPath + query);
+    }
+
+    private static String normalizeHost(String host) {
+        if (host == null || host.isBlank()) {
+            throw new MockIdNotFound("Host header is missing or empty.");
+        }
+
+        String normalizedHost = host.trim().toLowerCase(Locale.ROOT);
+        int portSeparator = normalizedHost.indexOf(':');
+        if (portSeparator >= 0) {
+            normalizedHost = normalizedHost.substring(0, portSeparator);
+        }
+        if (normalizedHost.isBlank()) {
+            throw new MockIdNotFound(String.format("Unable to extract mock id from host '%s'.", host));
+        }
+        return normalizedHost;
+    }
+
+    private static String normalizeConfiguredHost(String fleetHost) {
+        if (fleetHost == null || fleetHost.isBlank()) {
+            throw new IllegalStateException("mock-fleet.routing.host must not be blank.");
+        }
+        String normalizedFleetHost = fleetHost.trim().toLowerCase(Locale.ROOT);
+        int portSeparator = normalizedFleetHost.indexOf(':');
+        if (portSeparator >= 0) {
+            normalizedFleetHost = normalizedFleetHost.substring(0, portSeparator);
+        }
+        if (normalizedFleetHost.isBlank()) {
+            throw new IllegalStateException("mock-fleet.routing.host must not be blank.");
+        }
+        return normalizedFleetHost;
     }
 
     static String normalize(String candidate, String errorMessage) {

@@ -1,0 +1,14 @@
+ingress:
+  enabled: true
+  host: mock-fleet.localhost
+
+routing:
+  mode: HOST
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 4Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi

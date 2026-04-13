@@ -3,32 +3,12 @@ quarkus:
     category:
       "com.github.letsrokk":
         level: DEBUG
-  kubernetes:
-    image-pull-policy: if-not-present
-    ingress:
-      host: mock-fleet.localhost
-    remote-debug:
-      enabled: true
-    env:
-      vars:
-        QUARKUS_LAUNCH_DEVMODE: "true"
-        QUINOA_UI_DIR: /workspace/src/main/webui
-        QUARKUS_PACKAGE_OUTPUT_DIRECTORY: /workspace/target
   quinoa:
     package-manager-install:
       node-version: 22.14.0
   package:
     jar:
       type: mutable-jar
-  helm:
-    add-if-statement:
-      ingress-enabled:
-        with-default-value: true
-    expressions:
-      ingress-rules:
-        path: (kind == Ingress).spec.rules
-        expression: >-
-          {{ include "mock-fleet.ingressRules" . | nindent 4 }}
   live-reload:
     url: http://mock-fleet.localhost
     password: mock-fleet-dev

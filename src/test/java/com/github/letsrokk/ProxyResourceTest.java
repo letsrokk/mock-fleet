@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -82,7 +83,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .queryParam("alpha", "1")
                 .queryParam("beta", "two")
         .when()
@@ -126,7 +127,7 @@ class ProxyResourceTest {
         when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "mock-fleet.localhost")
         .when()
                 .get("/__fleet/api/mocks")
         .then()
@@ -139,11 +140,120 @@ class ProxyResourceTest {
     }
 
     @Test
+    void keepsFleetApiPathsLocalForMockHosts() {
+        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/__fleet/api/mocks")
+        .then()
+                .statusCode(200)
+                .body("[0].mockId", is("demo"))
+                .body("[0].podName", is("mock-fleet-demo-1"));
+
+        verify(podManager).listActiveMocks();
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsHealthRequestsLocalForInternalHosts() {
+        given()
+                .header("Host", "10.42.0.17:8080")
+        .when()
+                .get("/__fleet/health/started")
+        .then()
+                .statusCode(200)
+                .body(containsString("\"status\""))
+                .body(containsString("\"UP\""));
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsFleetHostRequestsLocalEvenOutsideReservedPaths() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/anything")
+        .then()
+                .statusCode(404);
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsFleetHostRootToDashboard() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/")
+                .body(is(""));
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsFleetHostRootOnHeadRequests() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .head("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/");
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void doesNotRedirectFleetHostRootOnPostRequests() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+                .body("payload")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void stillProxiesMockHostRootRequests() {
+        when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(200)
+                .header("Location", nullValue())
+                .body(is("ok"));
+
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/", request.uri());
+    }
+
+    @Test
     void keepsFaviconRequestsLocalInsteadOfProxying() {
         when(podManager.getUpstreamBaseUrl("favicon")).thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "favicon.example.test")
+                .header("Host", "favicon.mock-fleet.localhost")
         .when()
                 .get("/favicon.ico")
         .then()
@@ -159,7 +269,7 @@ class ProxyResourceTest {
         nextResponse.set(new UpstreamResponse(404, "missing", Map.of("X-Upstream", List.of("true"))));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
         .when()
                 .get("/missing")
         .then()
@@ -175,7 +285,7 @@ class ProxyResourceTest {
         nextResponse.set(new UpstreamResponse(201, "created", Map.of()));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .header("X-Test", "value")
                 .body("payload")
         .when()
@@ -198,7 +308,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
         .when()
                 .get("/local-debug")
         .then()
@@ -216,7 +326,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .header("X-Correlation-Id", "abc-123")
                 .header("Accept", "application/json")
         .when()

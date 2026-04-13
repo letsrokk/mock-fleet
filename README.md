@@ -7,23 +7,26 @@ The service also exposes a small internal dashboard under `/__fleet/` for inspec
 ## How routing works
 
 - `HOST` mode:
-  - `demo.example.test` routes to mock ID `demo`
-  - `demo.example.test:8080` also routes to mock ID `demo`
-  - single-label hosts like `localhost` are rejected and do not spawn mocks
+  - `demo.mock-fleet.localhost` routes to mock ID `demo`
+  - `demo.mock-fleet.localhost:8080` also routes to mock ID `demo`
+  - `mock-fleet.localhost` is treated as mock-fleet's own host and never spawns a mock
+  - `GET /` and `HEAD /` on the fleet host redirect to `/__fleet/`
+  - only a single subdomain label of the configured fleet host is accepted as a mock ID
   - invalid or empty `Host` headers are rejected with HTTP `400`
 - `PATH` mode:
   - `/demo` routes to mock ID `demo` and is forwarded upstream as `/`
   - `/demo/nested/path?alpha=1` routes to mock ID `demo` and is forwarded upstream as `/nested/path?alpha=1`
+  - `GET /` and `HEAD /` on the fleet host redirect to `/__fleet/`
   - requests without a first path segment are rejected with HTTP `400`
 
 The proxy forwards method, path, query string, request body, and incoming headers to the selected WireMock pod on port `8080`.
 
 Reserved local routes:
 
-- `/__fleet/` serves the dashboard UI
-- `/__fleet/assets/...` serves dashboard static assets
-- `/__fleet/api/mocks` lists active mock pods
-- `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually
+- `/__fleet/` serves the dashboard UI on the fleet host
+- `/__fleet/assets/...` serves dashboard static assets on the fleet host
+- `/__fleet/api/mocks` lists active mock pods on the fleet host
+- `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually on the fleet host
 - `/favicon.ico` is handled locally and does not create or proxy a mock request
 
 ## Requirements
@@ -43,7 +46,7 @@ Run the app in dev mode:
 
 Important runtime expectations:
 
-- in `HOST` mode, requests must include a multi-label `Host` header that contains the mock ID in the first label
+- in `HOST` mode, requests must target either the exact fleet host for local handling or a single-label subdomain of `mock-fleet.routing.host` for mock routing
 - in `PATH` mode, requests must include the mock ID as the first URL path segment
 - Kubernetes credentials must be available to the Fabric8 client
 - Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments
@@ -57,26 +60,26 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
 - `mock-fleet.namespace`: default namespace used for runtime-created mock pods and services when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
+- `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
   `quarkus.quinoa.ui-dir` defaults to `${user.dir}/src/main/webui` and can be overridden with `QUINOA_UI_DIR`
-- `quarkus.kubernetes.*`: generated Deployment, Service, RBAC, probes, resource requests/limits, and ingress settings
-- `quarkus.helm.*`: generated Helm chart settings and additional values/schema mappings
+- `deploy/helm/mock-fleet`: the source-controlled Helm chart used for Kubernetes deployment
 
 ## Kubernetes and Helm
 
-- generated Kubernetes manifests now include readiness and liveness probes via SmallRye Health
-- the application Deployment declares explicit CPU and memory requests/limits
-- pod security defaults require the application to run as non-root
-- app RBAC is narrowed to `get`, `list`, `create`, and `delete` for pods and services
-- generated manifests default to namespace `mock-fleet`
-- the `dev` profile packages the Helm chart with Ingress enabled by default at `mock-fleet.localhost`
-- Helm values expose image pull policy, resource requests/limits, and selected `mock-fleet.*` runtime settings through environment variables
+- the source-controlled Helm chart preserves the current Deployment, Service, RBAC, probes, and Hazelcast wiring
+- the chart keeps ingress enabled by default for the local `dev` workflow at `mock-fleet.localhost`
+- routing-aware ingress behavior is chart-owned:
+  `routing.mode=HOST` adds both `mock-fleet.localhost` and `*.mock-fleet.localhost`
+  `routing.mode=PATH` adds only `mock-fleet.localhost`
+- chart values are exposed through a cleaner manual interface such as `image.*`, `routing.mode`, `ingress.*`, `resources.*`, and `env.*`
+- the `/` to `/__fleet/` redirect is handled by the application, so it works regardless of ingress controller
 
 Namespace behavior:
 
 - runtime-created mock pods and services use the Fabric8 client namespace when one is available
 - otherwise, the app falls back to `mock-fleet.namespace`, which defaults to `mock-fleet`
-- generated Quarkus Kubernetes manifests also target `mock-fleet` by default
+- the Helm chart defaults to namespace `mock-fleet`, while still allowing namespace overrides at install time
 
 ## Tests
 
@@ -102,8 +105,8 @@ The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the 
 
 ```bash
 ./mvnw package -DskipTests -Dquarkus.profile=dev
-helm dependency build target/helm/kubernetes/mock-fleet
-helm upgrade --install mock-fleet target/helm/kubernetes/mock-fleet \
+helm dependency build deploy/helm/mock-fleet
+helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --namespace mock-fleet \
   --create-namespace
 kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
@@ -114,7 +117,7 @@ Then connect from your workstation with Quarkus remote dev:
 ```bash
 ./mvnw quarkus:remote-dev -Dquarkus.profile=dev
 ```
-In the `dev` profile, the generated Ingress uses `mock-fleet.localhost` and the remote dev URL is preconfigured to match it. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
+The generic chart defaults now leave ingress disabled. Local Minikube deploys stay ingress-enabled because [`bin/local/deploy.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/deploy.sh) applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml), which keeps `ingress.host=mock-fleet.localhost` and `routing.mode=HOST` unless you override routing on the CLI. The deployed image reference is `ghcr.io/letsrokk/mock-fleet:latest`, while `./mvnw package` also keeps the version tag derived from `pom.xml`. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
 
 If you are not using Minikube ingress, expose the app first and then point remote dev at the port-forwarded URL:
 
@@ -136,13 +139,18 @@ If you want to reach the service through Minikube Ingress on `mock-fleet.localho
 minikube addons enable ingress
 ```
 
-[`bin/local/debug-minikube.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/debug-minikube.sh) remains as a thin wrapper around that flow. It now:
+[`bin/local/deploy.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/deploy.sh) remains as a thin wrapper around that flow. It now:
 
 - deploys into namespace `mock-fleet` by default
 - packages the in-cluster app with profile `dev` by default
 - builds images through the Docker-based Quarkus container-image path
 - creates the namespace if needed
-- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` directly in the `dev` profile Ingress
+- deploys the source-controlled chart from `deploy/helm/mock-fleet`
+- applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml) so local Minikube deploys keep ingress enabled even though the generic chart defaults do not
+- checks that Minikube is running before doing any build or deploy work
+- relies on `./mvnw package` to build `ghcr.io/letsrokk/mock-fleet` locally and imports only `ghcr.io/letsrokk/mock-fleet:latest` into Minikube with `minikube image load`
+- allows switching routing mode with `--routing HOST|PATH`, defaulting to `HOST`
+- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` when `routing.mode=HOST`
 - prints the exact `quarkus:remote-dev` command to run locally after deployment
 - keeps logs and remote debug port-forwarding opt-in via `--logs` and `--port-forward`
 - only uninstalls the release when explicitly requested with `--cleanup`

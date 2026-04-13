@@ -1,0 +1,45 @@
+{{- if .Values.ingress.enabled }}
+{{- $host := required "ingress.host is required" .Values.ingress.host }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mock-fleet.fullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ $host | quote }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "mock-fleet.fullname" . }}
+                port:
+                  name: http
+            path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+    {{- if eq .Values.routing.mode "HOST" }}
+    - host: {{ printf "*.%s" $host | quote }}
+      http:
+        paths:
+          - backend:
+              service:
+                name: {{ include "mock-fleet.fullname" . }}
+                port:
+                  name: http
+            path: {{ .Values.ingress.path }}
+            pathType: {{ .Values.ingress.pathType }}
+    {{- end }}
+{{- end }}

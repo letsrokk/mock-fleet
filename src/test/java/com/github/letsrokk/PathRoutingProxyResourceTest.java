@@ -180,6 +180,49 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
+    void redirectsRootToDashboardInPathMode() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/")
+                .body(is(""));
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void redirectsRootOnHeadRequestsInPathMode() {
+        given()
+                .redirects().follow(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .head("/")
+        .then()
+                .statusCode(302)
+                .header("Location", "/__fleet/");
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void doesNotRedirectRootOnPostRequestsInPathMode() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+                .body("payload")
+        .when()
+                .post("/")
+        .then()
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
+
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void keepsDashboardDevSourcesLocalInPathMode() {
         when(podManager.getUpstreamBaseUrl("__fleet")).thenReturn(upstreamBaseUrl);
 

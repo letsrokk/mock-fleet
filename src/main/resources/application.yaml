@@ -9,117 +9,12 @@ quarkus:
     root-path: /__fleet/health
   container-image:
     builder: docker
-    registry: docker.io
+    registry: ghcr.io
     group: letsrokk
     name: mock-fleet
+    additional-tags:
+      - latest
     build: true
-  kubernetes:
-    idempotent: true
-    namespace: mock-fleet
-    image-pull-policy: IfNotPresent
-    resources:
-      requests:
-        cpu: 250m
-        memory: 256Mi
-      limits:
-        cpu: 2
-        memory: 2Gi
-    security-context:
-      run-as-non-root: true
-    ingress:
-      expose: true
-    readiness-probe:
-      initial-delay: 5S
-      period: 10S
-      timeout: 5S
-    liveness-probe:
-      initial-delay: 15S
-      period: 20S
-      timeout: 5S
-    rbac:
-      service-accounts:
-        mock-fleet-pod-manager:
-          name: mock-fleet-pod-manager
-          use-as-default: true
-      roles:
-        mock-fleet-pod-manager-role:
-          name: mock-fleet-pod-manager-role
-          policy-rules:
-            mock-fleet-pod-manager-policy:
-              api-groups: ""
-              resources: pods
-              verbs: get,list,create,delete
-            mock-fleet-service-manager-policy:
-              api-groups: ""
-              resources: services
-              verbs: get,list,create,delete
-            mock-fleet-endpoints-reader-policy:
-              api-groups: ""
-              resources: endpoints
-              verbs: get,list
-      role-bindings:
-        mock-fleet-pod-manager-role-binding:
-          name: mock-fleet-pods-manager-role-binding
-          role-name: mock-fleet-pod-manager-role
-          subjects:
-            mock-fleet-pod-manager:
-              kind: ServiceAccount
-              name: mock-fleet-pod-manager
-    mounts:
-      hazelcast-config:
-        name: hazelcast-config
-        path: /etc/hazelcast
-        read-only: true
-    config-map-volumes:
-      hazelcast-config:
-        config-map-name: hazelcast-client-configmap
-        default-mode: 0644
-    env:
-      vars:
-        java-opts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
-  helm:
-    add-if-statement:
-      ingress-enabled:
-        property: ingress.enabled
-        on-resource-kind: Ingress
-        with-default-value: false
-        description: Determine if the Ingress resource should be installed.
-    values:
-      image-pull-policy:
-        property: imagePullPolicy
-        paths: (kind == Deployment).spec.template.spec.containers.imagePullPolicy
-        value: IfNotPresent
-        description: Image pull policy for the application container.
-      resources-requests-cpu:
-        property: resources.requests.cpu
-        paths: (kind == Deployment).spec.template.spec.containers.resources.requests.cpu
-        value: 250m
-        description: CPU request for the application container.
-      resources-requests-memory:
-        property: resources.requests.memory
-        paths: (kind == Deployment).spec.template.spec.containers.resources.requests.memory
-        value: 256Mi
-        description: Memory request for the application container.
-      resources-limits-cpu:
-        property: resources.limits.cpu
-        paths: (kind == Deployment).spec.template.spec.containers.resources.limits.cpu
-        value: 2
-        description: CPU limit for the application container.
-      resources-limits-memory:
-        property: resources.limits.memory
-        paths: (kind == Deployment).spec.template.spec.containers.resources.limits.memory
-        value: 2Gi
-        description: Memory limit for the application container.
-      security-context-run-as-non-root:
-        property: securityContext.runAsNonRoot
-        paths: (kind == Deployment).spec.template.spec.securityContext.runAsNonRoot
-        value-as-bool: true
-        description: Whether the pod must run as a non-root user.
-    dependencies:
-      hazelcast:
-        alias: hazelcast
-        version: 5.10.1
-        repository: https://hazelcast-charts.s3.amazonaws.com/
 
 mock-fleet:
   namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
@@ -128,3 +23,4 @@ mock-fleet:
   wiremock-image: wiremock/wiremock:3.9.2
   routing:
     mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
+    host: ${MOCK_FLEET_ROUTING_HOST:mock-fleet.localhost}
