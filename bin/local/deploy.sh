@@ -158,6 +158,27 @@ HELM_ARGS=(
 
 echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with image=${LOCAL_IMAGE}, routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
+
+deployment_name=$(
+  kubectl get deployment \
+    --namespace "${NAMESPACE}" \
+    -l app.kubernetes.io/name=mock-fleet \
+    -o jsonpath='{.items[0].metadata.name}'
+)
+
+if [[ -z "${deployment_name}" ]]; then
+  echo "No mock-fleet deployment found in namespace ${NAMESPACE} after Helm upgrade." >&2
+  exit 1
+fi
+
+echo "Restarting deployment to pick up the refreshed local image..."
+kubectl rollout restart --namespace "${NAMESPACE}" "deployment/${deployment_name}"
+
+kubectl rollout status \
+  --namespace "${NAMESPACE}" \
+  "deployment/${deployment_name}" \
+  --timeout=1m
+
 kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
 
 if [[ "${ENABLE_PORT_FORWARD}" == "true" ]]; then
