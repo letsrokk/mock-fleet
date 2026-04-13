@@ -140,9 +140,8 @@ class ProxyResourceTest {
     }
 
     @Test
-    void proxiesFleetApiPathsForMockHosts() {
-        when(podManager.getUpstreamBaseUrl("demo"))
-                .thenReturn(upstreamBaseUrl);
+    void keepsFleetApiPathsLocalForMockHosts() {
+        when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
 
         given()
                 .header("Host", "demo.mock-fleet.localhost")
@@ -150,11 +149,26 @@ class ProxyResourceTest {
                 .get("/__fleet/api/mocks")
         .then()
                 .statusCode(200)
-                .body(is("ok"));
+                .body("[0].mockId", is("demo"))
+                .body("[0].podName", is("mock-fleet-demo-1"));
 
-        CapturedRequest request = capturedRequest.get();
-        assertNotNull(request);
-        assertEquals("/__fleet/api/mocks", request.uri());
+        verify(podManager).listActiveMocks();
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
+    void keepsHealthRequestsLocalForInternalHosts() {
+        given()
+                .header("Host", "10.42.0.17:8080")
+        .when()
+                .get("/__fleet/health/started")
+        .then()
+                .statusCode(200)
+                .body(containsString("\"status\""))
+                .body(containsString("\"UP\""));
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
     }
 
     @Test
@@ -173,6 +187,7 @@ class ProxyResourceTest {
     @Test
     void redirectsFleetHostRootToDashboard() {
         given()
+                .redirects().follow(false)
                 .header("Host", "mock-fleet.localhost")
         .when()
                 .get("/")
@@ -188,6 +203,7 @@ class ProxyResourceTest {
     @Test
     void redirectsFleetHostRootOnHeadRequests() {
         given()
+                .redirects().follow(false)
                 .header("Host", "mock-fleet.localhost")
         .when()
                 .head("/")
@@ -207,7 +223,8 @@ class ProxyResourceTest {
         .when()
                 .post("/")
         .then()
-                .statusCode(404);
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
 
         verifyNoInteractions(podManager);
         assertEquals(null, capturedRequest.get());

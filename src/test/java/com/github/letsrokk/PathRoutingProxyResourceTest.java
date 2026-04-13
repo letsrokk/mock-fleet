@@ -182,6 +182,7 @@ class PathRoutingProxyResourceTest {
     @Test
     void redirectsRootToDashboardInPathMode() {
         given()
+                .redirects().follow(false)
                 .header("Host", "mock-fleet.localhost")
         .when()
                 .get("/")
@@ -196,6 +197,7 @@ class PathRoutingProxyResourceTest {
     @Test
     void redirectsRootOnHeadRequestsInPathMode() {
         given()
+                .redirects().follow(false)
                 .header("Host", "mock-fleet.localhost")
         .when()
                 .head("/")
@@ -214,8 +216,8 @@ class PathRoutingProxyResourceTest {
         .when()
                 .post("/")
         .then()
-                .statusCode(400)
-                .body(containsString("Unable to extract mock id"));
+                .statusCode(405)
+                .header("Allow", "GET, HEAD");
 
         assertEquals(null, capturedRequest.get());
     }

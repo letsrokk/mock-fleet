@@ -119,6 +119,14 @@ require_minikube_running() {
     fi
 }
 
+use_minikube_docker_daemon() {
+    eval "$(minikube docker-env --shell bash)"
+}
+
+reset_docker_daemon() {
+    eval "$(minikube docker-env --shell bash --unset)"
+}
+
 trap cleanup EXIT
 
 cd "${REPO_ROOT}"
@@ -126,11 +134,16 @@ cd "${REPO_ROOT}"
 echo "Checking Minikube status..."
 require_minikube_running
 
-echo "Packaging application and building image via Maven..."
-./mvnw package -DskipTests "-Dquarkus.profile=${PROFILE}"
+echo "Pointing Docker commands at the Minikube daemon..."
+use_minikube_docker_daemon
 
-echo "Loading ${LOCAL_IMAGE} into Minikube..."
-minikube image load "${LOCAL_IMAGE}"
+echo "Packaging application and building image via Maven..."
+./mvnw clean package \
+    -DskipTests \
+    "-Dquarkus.profile=${PROFILE}"
+
+echo "Resetting Docker commands back to the host daemon..."
+reset_docker_daemon
 
 helm dependency build "${CHART_DIR}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
