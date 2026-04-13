@@ -21,3 +21,4 @@ mock-fleet:
   wiremock-image: wiremock/wiremock:3.9.2
   routing:
     mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
+    host: ${MOCK_FLEET_ROUTING_HOST:mock-fleet.localhost}

@@ -27,6 +27,9 @@ public class ProxyRoute {
     private static final int MAX_CONNECT_RETRIES = 10;
     private static final long INITIAL_CONNECT_RETRY_DELAY_MS = 100;
     private static final long MAX_CONNECT_RETRY_DELAY_MS = 1_000;
+    private static final String[] GLOBAL_LOCAL_PATHS = {
+            "/favicon.ico"
+    };
     private static final String[] LOCAL_UI_PREFIXES = {
             "/__fleet/",
             "/src/",
@@ -50,13 +53,16 @@ public class ProxyRoute {
     @Inject
     RequestRoutingResolver requestRoutingResolver;
 
+    @Inject
+    MockFleetConfig config;
+
     private volatile WebClient webClient;
 
     @Route(path = "/*", order = 100)
     void proxy(RoutingContext routingContext) {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
         String requestPath = requestPath(routingContext.request().uri());
-        if (shouldHandleLocally(requestPath)) {
+        if (shouldHandleLocally(host, requestPath)) {
             routingContext.next();
             return;
         }
@@ -148,7 +154,15 @@ public class ProxyRoute {
         return routingContext.response().end(responseBody);
     }
 
-    private boolean shouldHandleLocally(String requestPath) {
+    private boolean shouldHandleLocally(String host, String requestPath) {
+        if (matchesAny(requestPath, GLOBAL_LOCAL_PATHS)) {
+            return true;
+        }
+
+        if (config.routing().mode() == MockFleetConfig.RoutingMode.HOST) {
+            return requestRoutingResolver.isFleetHost(host);
+        }
+
         return matchesAny(requestPath, LOCAL_UI_PATHS)
                 || startsWithAny(requestPath, LOCAL_UI_PREFIXES);
     }
@@ -192,13 +206,6 @@ public class ProxyRoute {
             }
         }
         return local;
-    }
-
-    private int resolvePort(URI upstream) {
-        if (upstream.getPort() != -1) {
-            return upstream.getPort();
-        }
-        return "https".equalsIgnoreCase(upstream.getScheme()) ? 443 : 80;
     }
 
     private void handleFailure(RoutingContext routingContext, String host, Throwable error) {

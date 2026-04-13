@@ -82,7 +82,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .queryParam("alpha", "1")
                 .queryParam("beta", "two")
         .when()
@@ -126,7 +126,7 @@ class ProxyResourceTest {
         when(podManager.listActiveMocks()).thenReturn(List.of(new PodManager.ActiveMockPod("demo", "mock-fleet-demo-1")));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "mock-fleet.localhost")
         .when()
                 .get("/__fleet/api/mocks")
         .then()
@@ -139,11 +139,42 @@ class ProxyResourceTest {
     }
 
     @Test
+    void proxiesFleetApiPathsForMockHosts() {
+        when(podManager.getUpstreamBaseUrl("demo"))
+                .thenReturn(upstreamBaseUrl);
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/__fleet/api/mocks")
+        .then()
+                .statusCode(200)
+                .body(is("ok"));
+
+        CapturedRequest request = capturedRequest.get();
+        assertNotNull(request);
+        assertEquals("/__fleet/api/mocks", request.uri());
+    }
+
+    @Test
+    void keepsFleetHostRequestsLocalEvenOutsideReservedPaths() {
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/anything")
+        .then()
+                .statusCode(404);
+
+        verifyNoInteractions(podManager);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void keepsFaviconRequestsLocalInsteadOfProxying() {
         when(podManager.getUpstreamBaseUrl("favicon")).thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "favicon.example.test")
+                .header("Host", "favicon.mock-fleet.localhost")
         .when()
                 .get("/favicon.ico")
         .then()
@@ -159,7 +190,7 @@ class ProxyResourceTest {
         nextResponse.set(new UpstreamResponse(404, "missing", Map.of("X-Upstream", List.of("true"))));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
         .when()
                 .get("/missing")
         .then()
@@ -175,7 +206,7 @@ class ProxyResourceTest {
         nextResponse.set(new UpstreamResponse(201, "created", Map.of()));
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .header("X-Test", "value")
                 .body("payload")
         .when()
@@ -198,7 +229,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
         .when()
                 .get("/local-debug")
         .then()
@@ -216,7 +247,7 @@ class ProxyResourceTest {
                 .thenReturn(upstreamBaseUrl);
 
         given()
-                .header("Host", "demo.example.test")
+                .header("Host", "demo.mock-fleet.localhost")
                 .header("X-Correlation-Id", "abc-123")
                 .header("Accept", "application/json")
         .when()

@@ -7,9 +7,10 @@ The service also exposes a small internal dashboard under `/__fleet/` for inspec
 ## How routing works
 
 - `HOST` mode:
-  - `demo.example.test` routes to mock ID `demo`
-  - `demo.example.test:8080` also routes to mock ID `demo`
-  - single-label hosts like `localhost` are rejected and do not spawn mocks
+  - `demo.mock-fleet.localhost` routes to mock ID `demo`
+  - `demo.mock-fleet.localhost:8080` also routes to mock ID `demo`
+  - `mock-fleet.localhost` is treated as mock-fleet's own host and never spawns a mock
+  - only a single subdomain label of the configured fleet host is accepted as a mock ID
   - invalid or empty `Host` headers are rejected with HTTP `400`
 - `PATH` mode:
   - `/demo` routes to mock ID `demo` and is forwarded upstream as `/`
@@ -20,10 +21,10 @@ The proxy forwards method, path, query string, request body, and incoming header
 
 Reserved local routes:
 
-- `/__fleet/` serves the dashboard UI
-- `/__fleet/assets/...` serves dashboard static assets
-- `/__fleet/api/mocks` lists active mock pods
-- `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually
+- `/__fleet/` serves the dashboard UI on the fleet host
+- `/__fleet/assets/...` serves dashboard static assets on the fleet host
+- `/__fleet/api/mocks` lists active mock pods on the fleet host
+- `DELETE /__fleet/api/mocks/{mockId}` deletes an active mock pod manually on the fleet host
 - `/favicon.ico` is handled locally and does not create or proxy a mock request
 
 ## Requirements
@@ -43,7 +44,7 @@ Run the app in dev mode:
 
 Important runtime expectations:
 
-- in `HOST` mode, requests must include a multi-label `Host` header that contains the mock ID in the first label
+- in `HOST` mode, requests must target either the exact fleet host for local handling or a single-label subdomain of `mock-fleet.routing.host` for mock routing
 - in `PATH` mode, requests must include the mock ID as the first URL path segment
 - Kubernetes credentials must be available to the Fabric8 client
 - Hazelcast client configuration is loaded from `/etc/hazelcast/hazelcast-client.yaml` in Kubernetes deployments
@@ -57,6 +58,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
 - `mock-fleet.namespace`: default namespace used for runtime-created mock pods and services when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
+- `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
   `quarkus.quinoa.ui-dir` defaults to `${user.dir}/src/main/webui` and can be overridden with `QUINOA_UI_DIR`
 - `deploy/helm/mock-fleet`: the source-controlled Helm chart used for Kubernetes deployment

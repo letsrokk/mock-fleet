@@ -33,6 +33,8 @@ spec:
               value: {{ .Values.env.mockFleetNamespace | quote }}
             - name: MOCK_FLEET_ROUTING_MODE
               value: {{ .Values.routing.mode | quote }}
+            - name: MOCK_FLEET_ROUTING_HOST
+              value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_INACTIVITY_THRESHOLD
               value: {{ .Values.env.mockFleetInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT

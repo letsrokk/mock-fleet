@@ -15,6 +15,7 @@ class DashboardPageTest {
     @Test
     void servesDashboardFromFleetNamespace() {
         given()
+            .header("Host", "mock-fleet.localhost")
         .when()
             .get("/__fleet/")
         .then()
