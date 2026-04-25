@@ -21,6 +21,10 @@ mock-fleet:
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
   wiremock-image: wiremock/wiremock:3.9.2
+  storage:
+    pvc-name: ${MOCK_FLEET_STORAGE_PVC_NAME:mock-fleet-wiremock-mappings}
+    container-mappings-path: ${MOCK_FLEET_STORAGE_CONTAINER_MAPPINGS_PATH:/home/wiremock/mappings}
+    init-container-storage-path: ${MOCK_FLEET_STORAGE_INIT_CONTAINER_STORAGE_PATH:/storage}
   routing:
     mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
     host: ${MOCK_FLEET_ROUTING_HOST:mock-fleet.localhost}

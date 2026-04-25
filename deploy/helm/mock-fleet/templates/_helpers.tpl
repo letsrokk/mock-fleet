@@ -54,3 +54,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "mock-fleet.hazelcastServiceName" -}}
 {{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}
+
+{{- define "mock-fleet.wiremockMappingsPvcName" -}}
+{{- if .Values.storage.pvcName -}}
+{{- .Values.storage.pvcName -}}
+{{- else -}}
+{{- printf "%s-wiremock-mappings" (include "mock-fleet.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockMappingsPvName" -}}
+{{- printf "%s-pv" (include "mock-fleet.wiremockMappingsPvcName" .) -}}
+{{- end -}}

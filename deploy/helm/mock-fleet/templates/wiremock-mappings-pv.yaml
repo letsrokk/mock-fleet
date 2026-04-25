@@ -1,0 +1,18 @@
+{{- if .Values.storage.enabled }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ include "mock-fleet.wiremockMappingsPvName" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+spec:
+  capacity:
+    storage: {{ .Values.storage.size | quote }}
+  accessModes:
+    {{- toYaml .Values.storage.accessModes | nindent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: {{ .Values.storage.hostPath | quote }}
+    type: DirectoryOrCreate
+{{- end }}

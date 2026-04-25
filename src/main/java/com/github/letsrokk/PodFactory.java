@@ -16,6 +16,9 @@ public class PodFactory {
     public static final String APP_NAME_VALUE = "mock-fleet-wiremock";
     public static final String LABEL_MOCK_ID = "mock-fleet/mock-id";
     static final String WIREMOCK_HEALTH_PATH = "/__admin/health";
+    static final String WIREMOCK_MAPPINGS_VOLUME = "wiremock-mappings";
+    static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
+    static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
 
     private final MockFleetConfig config;
 
@@ -25,10 +28,28 @@ public class PodFactory {
     }
 
     public Pod createPodSpec(String podName, String mockId) {
+        MockFleetConfig.StorageConfig storage = config.storage();
+        String storageMountPath = storage.initContainerStoragePath();
+
+        Container initContainer = new ContainerBuilder()
+                .withName(INIT_MAPPINGS_CONTAINER)
+                .withImage(INIT_CONTAINER_IMAGE)
+                .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
+                .addNewVolumeMount()
+                    .withName(WIREMOCK_MAPPINGS_VOLUME)
+                    .withMountPath(storageMountPath)
+                .endVolumeMount()
+                .build();
+
         // Define the container
         Container container = new ContainerBuilder()
                 .withName("wiremock")
                 .withImage(config.wiremockImage())
+                .addNewVolumeMount()
+                    .withName(WIREMOCK_MAPPINGS_VOLUME)
+                    .withMountPath(storage.containerMappingsPath())
+                    .withSubPath(mockId)
+                .endVolumeMount()
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
@@ -73,7 +94,14 @@ public class PodFactory {
                     .addToLabels(LABEL_MOCK_ID, mockId)
                 .endMetadata()
                 .withNewSpec()
+                    .withInitContainers(initContainer)
                     .withContainers(container)
+                    .addNewVolume()
+                        .withName(WIREMOCK_MAPPINGS_VOLUME)
+                        .withNewPersistentVolumeClaim()
+                            .withClaimName(storage.pvcName())
+                        .endPersistentVolumeClaim()
+                    .endVolume()
                     .withRestartPolicy("Never")
                 .endSpec()
                 .build();

@@ -130,6 +130,46 @@
       },
       "required": ["runAsNonRoot"]
     },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "hostPath": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "accessModes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"]
+          },
+          "minItems": 1
+        },
+        "pvcName": {
+          "type": "string"
+        },
+        "containerMappingsPath": {
+          "type": "string"
+        },
+        "initContainerStoragePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "hostPath",
+        "size",
+        "accessModes",
+        "pvcName",
+        "containerMappingsPath",
+        "initContainerStoragePath"
+      ]
+    },
     "probes": {
       "type": "object",
       "properties": {
@@ -229,6 +269,7 @@
     "ingress",
     "resources",
     "securityContext",
+    "storage",
     "probes",
     "env",
     "serviceAccount",
