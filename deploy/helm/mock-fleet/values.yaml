@@ -40,6 +40,8 @@ securityContext:
 
 storage:
   enabled: true
+  createPersistentVolume: true
+  storageClassName: ""
   hostPath: /tmp/wiremock/mappings
   size: 1Gi
   accessModes:

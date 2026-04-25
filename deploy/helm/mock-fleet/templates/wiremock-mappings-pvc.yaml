@@ -12,6 +12,8 @@ spec:
   resources:
     requests:
       storage: {{ .Values.storage.size | quote }}
-  storageClassName: ""
+  storageClassName: {{ .Values.storage.storageClassName | quote }}
+  {{- if .Values.storage.createPersistentVolume }}
   volumeName: {{ include "mock-fleet.wiremockMappingsPvName" . }}
+  {{- end }}
 {{- end }}
