@@ -1,0 +1,115 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/letsrokk/mock-fleet
+  CHART_DIR: deploy/helm/mock-fleet
+  CHART_REGISTRY: oci://ghcr.io/letsrokk/charts
+
+jobs:
+  publish:
+    name: Publish image and chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+
+          if [[ -z "${version}" || "${version}" == "${GITHUB_REF_NAME}" ]]; then
+            echo "Expected a tag named v<version>, got ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Expected a SemVer tag like v1.2.3 or v1.2.3-rc.1, got ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
+          stable=false
+          if [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            stable=true
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "stable=${stable}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: src/main/webui/package-lock.json
+
+      - name: Build application
+        run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Log in to GHCR for Docker
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: docker_metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/main/docker/Dockerfile.jvm
+          push: true
+          tags: ${{ steps.docker_metadata.outputs.tags }}
+          labels: ${{ steps.docker_metadata.outputs.labels }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Log in to GHCR for Helm
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Build Helm chart dependencies
+        run: helm dependency build "${CHART_DIR}"
+
+      - name: Lint Helm chart
+        run: helm lint "${CHART_DIR}"
+
+      - name: Package Helm chart
+        run: helm package "${CHART_DIR}" --version "${{ steps.version.outputs.version }}" --app-version "${{ steps.version.outputs.version }}"
+
+      - name: Push Helm chart
+        run: helm push "mock-fleet-${{ steps.version.outputs.version }}.tgz" "${CHART_REGISTRY}"
