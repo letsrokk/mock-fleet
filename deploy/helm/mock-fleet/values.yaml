@@ -38,6 +38,18 @@ resources:
 securityContext:
   runAsNonRoot: true
 
+storage:
+  enabled: true
+  createPersistentVolume: true
+  storageClassName: ""
+  hostPath: /tmp/wiremock/mappings
+  size: 1Gi
+  accessModes:
+    - ReadWriteMany
+  pvcName: ""
+  containerMappingsPath: /home/wiremock/mappings
+  initContainerStoragePath: /storage
+
 probes:
   liveness:
     path: /__fleet/health/live

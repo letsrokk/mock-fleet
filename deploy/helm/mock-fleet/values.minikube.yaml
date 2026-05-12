@@ -12,3 +12,8 @@ resources:
   limits:
     cpu: "2"
     memory: 4Gi
+
+storage:
+  createPersistentVolume: false
+  storageClassName: seaweedfs-s3
+  pvcName: mock-fleet-wiremock-mappings

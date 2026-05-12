@@ -15,7 +15,15 @@ public interface MockFleetConfig {
 
     String wiremockImage();
 
+    StorageConfig storage();
+
     RoutingConfig routing();
+
+    interface StorageConfig {
+        String pvcName();
+        String containerMappingsPath();
+        String initContainerStoragePath();
+    }
 
     interface RoutingConfig {
         RoutingMode mode();

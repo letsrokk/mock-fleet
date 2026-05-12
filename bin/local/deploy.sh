@@ -11,6 +11,7 @@ ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-${DEFAULT_ROUTING_MODE}}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
 LOCAL_IMAGE="ghcr.io/letsrokk/mock-fleet:latest"
+LOCAL_STORAGE_CLASS="seaweedfs-s3"
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
 CLEANUP=false
