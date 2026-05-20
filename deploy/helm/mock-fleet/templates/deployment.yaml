@@ -49,12 +49,16 @@ spec:
               value: {{ .Values.env.quinoaUiDir | quote }}
             - name: QUARKUS_PACKAGE_OUTPUT_DIRECTORY
               value: {{ .Values.env.quarkusPackageOutputDirectory | quote }}
+            {{- with .Values.env.quarkusLaunchDevmode }}
             - name: QUARKUS_LAUNCH_DEVMODE
-              value: {{ .Values.env.quarkusLaunchDevmode | quote }}
+              value: {{ . | quote }}
+            {{- end }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
+            {{- with .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
-              value: {{ .Values.env.javaToolOptions | quote }}
+              value: {{ . | quote }}
+            {{- end }}
             - name: user.dir
               value: {{ .Values.env.userDir | quote }}
           ports:

@@ -230,9 +230,7 @@
         "mockFleetPodCreationTimeout",
         "quinoaUiDir",
         "quarkusPackageOutputDirectory",
-        "quarkusLaunchDevmode",
         "javaOpts",
-        "javaToolOptions",
         "userDir"
       ]
     },
