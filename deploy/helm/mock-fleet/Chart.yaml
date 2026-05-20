@@ -1,9 +1,18 @@
 apiVersion: v2
 name: mock-fleet
-description: Helm chart for the mock-fleet service
+description: Deploy mock-fleet, a Quarkus service that routes requests to per-mock WireMock pods in Kubernetes
 type: application
 version: 1.0.0-SNAPSHOT
 appVersion: "1.0.0-SNAPSHOT"
+home: https://github.com/letsrokk/mock-fleet
+sources:
+  - https://github.com/letsrokk/mock-fleet
+keywords:
+  - mock-fleet
+  - wiremock
+  - quarkus
+  - kubernetes
+  - testing
 dependencies:
   - name: hazelcast
     version: 5.10.1
