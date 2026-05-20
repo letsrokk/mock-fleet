@@ -79,9 +79,7 @@ env:
   mockFleetPodCreationTimeout: 1M
   quinoaUiDir: /workspace/src/main/webui
   quarkusPackageOutputDirectory: /workspace/target
-  quarkusLaunchDevmode: "true"
   javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
-  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
   userDir: /workspace
 
 serviceAccount:

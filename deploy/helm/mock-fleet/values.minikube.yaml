@@ -17,3 +17,7 @@ storage:
   createPersistentVolume: false
   storageClassName: seaweedfs-s3
   pvcName: mock-fleet-wiremock-mappings
+
+env:
+  quarkusLaunchDevmode: "true"
+  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005

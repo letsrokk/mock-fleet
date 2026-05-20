@@ -108,7 +108,7 @@ Run tests with:
 
 ## Minikube workflow
 
-The primary local Kubernetes workflow uses Quarkus remote dev. First deploy the app to Minikube with the standalone `dev` profile:
+The default local Kubernetes workflow builds the Minikube image with the `dev` profile and deploys it:
 
 ```bash
 ./mvnw package -DskipTests -Dquarkus.profile=dev
@@ -119,12 +119,21 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
 ```
 
-Then connect from your workstation with Quarkus remote dev:
+[`bin/local/deploy.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/deploy.sh) wraps that Minikube flow:
+
+```bash
+bin/local/deploy.sh
+```
+
+The generic chart defaults leave ingress disabled. Local Minikube deploys stay ingress-enabled because `bin/local/deploy.sh` applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml), which keeps `ingress.host=mock-fleet.localhost` and `routing.mode=HOST` unless you override routing on the CLI. The deployed image reference is `ghcr.io/letsrokk/mock-fleet:latest`, while `./mvnw package` also keeps the version tag derived from `pom.xml`. The `/__fleet/` dashboard remains available.
+
+The Minikube values enable Quarkus remote-dev runtime settings. Connect from your workstation with:
 
 ```bash
 ./mvnw quarkus:remote-dev -Dquarkus.profile=dev
 ```
-The generic chart defaults now leave ingress disabled. Local Minikube deploys stay ingress-enabled because [`bin/local/deploy.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/deploy.sh) applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml), which keeps `ingress.host=mock-fleet.localhost` and `routing.mode=HOST` unless you override routing on the CLI. The deployed image reference is `ghcr.io/letsrokk/mock-fleet:latest`, while `./mvnw package` also keeps the version tag derived from `pom.xml`. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev. The `/__fleet/` dashboard remains available in this profile.
+
+Use `bin/local/deploy.sh --profile <profile>` to build and print remote-dev instructions for a different Quarkus profile. The container image includes Node.js and the frontend workspace so Quinoa can start inside the pod during remote dev.
 
 If you are not using Minikube ingress, expose the app first and then point remote dev at the port-forwarded URL:
 
@@ -146,10 +155,11 @@ If you want to reach the service through Minikube Ingress on `mock-fleet.localho
 minikube addons enable ingress
 ```
 
-[`bin/local/deploy.sh`](/home/dmitrymayer/projects/github/mock-fleet/bin/local/deploy.sh) remains as a thin wrapper around that flow. It now:
+`bin/local/deploy.sh` remains as a thin wrapper around that flow. It now:
 
 - deploys into namespace `mock-fleet` by default
 - packages the in-cluster app with profile `dev` by default
+- allows selecting another local packaging profile with `--profile <profile>`
 - builds images through the Docker-based Quarkus container-image path
 - creates the namespace if needed
 - deploys the source-controlled chart from `deploy/helm/mock-fleet`

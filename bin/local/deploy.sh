@@ -20,7 +20,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--profile <profile>] [--routing <HOST|PATH>]
 
-Deploy the hand-maintained Helm chart into Minikube using an in-cluster profile.
+Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
   --logs              Tail application logs after deployment.
@@ -138,10 +138,14 @@ require_minikube_running
 echo "Pointing Docker commands at the Minikube daemon..."
 use_minikube_docker_daemon
 
-echo "Packaging application and building image via Maven..."
-./mvnw clean package \
-    -DskipTests \
+MAVEN_ARGS=(
+    clean package
+    -DskipTests
     "-Dquarkus.profile=${PROFILE}"
+)
+
+echo "Packaging application and building image via Maven..."
+./mvnw "${MAVEN_ARGS[@]}"
 
 echo "Resetting Docker commands back to the host daemon..."
 reset_docker_daemon
