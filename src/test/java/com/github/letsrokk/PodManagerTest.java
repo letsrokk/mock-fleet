@@ -568,9 +568,8 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.9.2");
         when(config.storage()).thenReturn(storageConfig);
-        when(storageConfig.pvcName()).thenReturn("mock-fleet-wiremock-mappings");
-        when(storageConfig.containerMappingsPath()).thenReturn("/home/wiremock/mappings");
-        when(storageConfig.initContainerStoragePath()).thenReturn("/storage");
+        when(storageConfig.persistent()).thenReturn(false);
+        when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
         PodFactory podFactory = new PodFactory(config);
 
         Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
@@ -584,37 +583,69 @@ class PodManagerTest {
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getReadinessProbe().getHttpGet().getPath());
         assertEquals(8080, pod.getSpec().getContainers().getFirst().getReadinessProbe().getHttpGet().getPort().getIntVal());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getLivenessProbe().getHttpGet().getPath());
-        assertEquals("mock-fleet-wiremock-mappings",
-                pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
-        assertEquals(PodFactory.WIREMOCK_MAPPINGS_VOLUME,
-                pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getName());
-        assertEquals("/home/wiremock/mappings",
-                pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
-        assertEquals("demo", pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getSubPath());
-        assertEquals(PodFactory.INIT_MAPPINGS_CONTAINER, pod.getSpec().getInitContainers().getFirst().getName());
-        assertEquals(List.of("mkdir", "-p", "/storage/demo"),
-                pod.getSpec().getInitContainers().getFirst().getCommand());
-        assertEquals("/storage", pod.getSpec().getInitContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
+        assertTrue(pod.getSpec().getVolumes() == null || pod.getSpec().getVolumes().isEmpty());
+        assertTrue(pod.getSpec().getInitContainers() == null || pod.getSpec().getInitContainers().isEmpty());
+        assertTrue(pod.getSpec().getContainers().getFirst().getVolumeMounts() == null
+                || pod.getSpec().getContainers().getFirst().getVolumeMounts().isEmpty());
     }
 
     @Test
-    void podFactoryUsesConfiguredStoragePaths() {
+    void podFactoryAllowsUnsupportedStorageTypeWhenStorageIsNotPersistent() {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.9.2");
         when(config.storage()).thenReturn(storageConfig);
-        when(storageConfig.pvcName()).thenReturn("custom-mappings");
-        when(storageConfig.containerMappingsPath()).thenReturn("/custom/mappings");
-        when(storageConfig.initContainerStoragePath()).thenReturn("/custom-storage");
+        when(storageConfig.persistent()).thenReturn(false);
+        when(storageConfig.type()).thenReturn("emptyDir");
         PodFactory podFactory = new PodFactory(config);
 
         Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
 
-        assertEquals("custom-mappings", pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
-        assertEquals("/custom/mappings", pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
+        assertTrue(pod.getSpec().getVolumes() == null || pod.getSpec().getVolumes().isEmpty());
+    }
+
+    @Test
+    void podFactoryMountsPersistentS3Storage() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        MockFleetConfig.S3Config s3Config = mock(MockFleetConfig.S3Config.class);
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.9.2");
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(true);
+        when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
+        when(storageConfig.pvcName()).thenReturn("mock-fleet-pvc");
+        when(storageConfig.s3()).thenReturn(s3Config);
+        when(s3Config.path()).thenReturn("/mock-fleet");
+        PodFactory podFactory = new PodFactory(config);
+
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+
+        assertEquals("mock-fleet-pvc",
+                pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
+        assertEquals(PodFactory.WIREMOCK_MAPPINGS_VOLUME,
+                pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getName());
+        assertEquals(PodFactory.WIREMOCK_MAPPINGS_PATH,
+                pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
         assertEquals("demo", pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getSubPath());
-        assertEquals(List.of("mkdir", "-p", "/custom-storage/demo"),
+        assertEquals(PodFactory.INIT_MAPPINGS_CONTAINER, pod.getSpec().getInitContainers().getFirst().getName());
+        assertEquals(List.of("mkdir", "-p", "/mock-fleet/demo"),
                 pod.getSpec().getInitContainers().getFirst().getCommand());
+        assertEquals("/mock-fleet", pod.getSpec().getInitContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
+    }
+
+    @Test
+    void podFactoryRejectsUnsupportedPersistentStorageType() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.9.2");
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(true);
+        when(storageConfig.type()).thenReturn("emptyDir");
+        PodFactory podFactory = new PodFactory(config);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo"));
+        assertEquals("Unsupported persistent storage type: emptyDir", exception.getMessage());
     }
 
     private Pod pod(String name, String phase) {

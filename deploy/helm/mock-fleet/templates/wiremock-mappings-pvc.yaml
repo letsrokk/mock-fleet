@@ -1,19 +1,23 @@
-{{- if .Values.storage.enabled }}
+{{- include "mock-fleet.validateStorage" . -}}
+{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") }}
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "mock-fleet.wiremockMappingsPvcName" . }}
+  name: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
+  {{- with .Values.storage.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   accessModes:
-    {{- toYaml .Values.storage.accessModes | nindent 4 }}
+    - ReadWriteMany
+  storageClassName: {{ .Values.storage.s3.storageClassName | quote }}
   resources:
     requests:
-      storage: {{ .Values.storage.size | quote }}
-  storageClassName: {{ .Values.storage.storageClassName | quote }}
-  {{- if .Values.storage.createPersistentVolume }}
-  volumeName: {{ include "mock-fleet.wiremockMappingsPvName" . }}
-  {{- end }}
+      storage: 10Gi
+  volumeName: {{ printf "%s-pv" (include "mock-fleet.fullname" .) }}
 {{- end }}

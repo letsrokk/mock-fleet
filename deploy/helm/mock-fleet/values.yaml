@@ -39,16 +39,16 @@ securityContext:
   runAsNonRoot: true
 
 storage:
-  enabled: true
-  createPersistentVolume: true
-  storageClassName: ""
-  hostPath: /tmp/wiremock/mappings
-  size: 1Gi
-  accessModes:
-    - ReadWriteMany
-  pvcName: ""
-  containerMappingsPath: /home/wiremock/mappings
-  initContainerStoragePath: /storage
+  persistent: false
+  type: s3
+  annotations: {}
+  s3:
+    provisioner: s3.csi.aws.com
+    storageClassName: ""
+    bucket: ""
+    path: /mock-fleet
+    cacheSize: 1Gi
+    mountOptions: []
 
 probes:
   liveness:

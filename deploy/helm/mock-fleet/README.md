@@ -63,9 +63,15 @@ When `routing.mode=HOST`, the rendered ingress includes both the fleet host and 
 | `ingress.host` | `mock-fleet.localhost` | Public fleet host |
 | `service.ports.http` | `80` | Service HTTP port |
 | `service.ports.debug` | `5005` | Service debug port |
-| `storage.enabled` | `true` | Mount WireMock mappings storage |
-| `storage.createPersistentVolume` | `true` | Create a chart-managed persistent volume |
-| `storage.pvcName` | `""` | Existing PVC name when not creating the default claim |
+| `storage.persistent` | `false` | Enable persistent WireMock mappings storage |
+| `storage.type` | `s3` | Persistent storage type. Only `s3` is supported for now |
+| `storage.annotations` | `{}` | Annotations added to the persistent storage volume |
+| `storage.s3.bucket` | `""` | S3 bucket used by the S3 CSI persistent volume. Required when `storage.persistent=true` |
+| `storage.s3.provisioner` | `s3.csi.aws.com` | CSI driver used by the S3 persistent volume |
+| `storage.s3.storageClassName` | `""` | Storage class name used by the S3 PV and PVC |
+| `storage.s3.path` | `/mock-fleet` | Path where the S3-backed storage is mounted while preparing per-mock mapping directories |
+| `storage.s3.cacheSize` | `1Gi` | Mountpoint S3 CSI `emptyDir` cache size limit |
+| `storage.s3.mountOptions` | `[]` | Mount options added to the S3 CSI persistent volume |
 | `rbac.create` | `true` | Create RBAC resources for pod and service management |
 | `serviceAccount.create` | `true` | Create a service account |
 | `hazelcast.cluster.memberCount` | `1` | Hazelcast dependency member count |
@@ -74,7 +80,7 @@ See `values.yaml` and `values.schema.json` in the chart for the complete value s
 
 ## Local Minikube values
 
-The repository includes `values.minikube.yaml` for the local Minikube workflow. It enables ingress at `mock-fleet.localhost`, keeps `HOST` routing, uses larger local resource requests, and points storage at an existing PVC named `mock-fleet-wiremock-mappings`.
+The repository includes `values.minikube.yaml` for the local Minikube workflow. It enables ingress at `mock-fleet.localhost`, keeps `HOST` routing, uses larger local resource requests, and keeps persistent storage disabled by default.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
