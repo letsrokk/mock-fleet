@@ -20,9 +20,14 @@ public interface MockFleetConfig {
     RoutingConfig routing();
 
     interface StorageConfig {
+        boolean persistent();
+        String type();
         String pvcName();
-        String containerMappingsPath();
-        String initContainerStoragePath();
+        S3Config s3();
+    }
+
+    interface S3Config {
+        String path();
     }
 
     interface RoutingConfig {

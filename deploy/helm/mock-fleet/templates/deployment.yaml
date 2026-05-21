@@ -39,12 +39,14 @@ spec:
               value: {{ .Values.env.mockFleetInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.env.mockFleetPodCreationTimeout | quote }}
+            - name: MOCK_FLEET_STORAGE_PERSISTENT
+              value: {{ .Values.storage.persistent | quote }}
+            - name: MOCK_FLEET_STORAGE_TYPE
+              value: {{ .Values.storage.type | quote }}
             - name: MOCK_FLEET_STORAGE_PVC_NAME
-              value: {{ include "mock-fleet.wiremockMappingsPvcName" . | quote }}
-            - name: MOCK_FLEET_STORAGE_CONTAINER_MAPPINGS_PATH
-              value: {{ .Values.storage.containerMappingsPath | quote }}
-            - name: MOCK_FLEET_STORAGE_INIT_CONTAINER_STORAGE_PATH
-              value: {{ .Values.storage.initContainerStoragePath | quote }}
+              value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
+            - name: MOCK_FLEET_STORAGE_S3_PATH
+              value: {{ .Values.storage.s3.path | quote }}
             - name: QUINOA_UI_DIR
               value: {{ .Values.env.quinoaUiDir | quote }}
             - name: QUARKUS_PACKAGE_OUTPUT_DIRECTORY

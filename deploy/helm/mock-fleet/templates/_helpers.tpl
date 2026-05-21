@@ -55,14 +55,11 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}
 
-{{- define "mock-fleet.wiremockMappingsPvcName" -}}
-{{- if .Values.storage.pvcName -}}
-{{- .Values.storage.pvcName -}}
-{{- else -}}
-{{- printf "%s-wiremock-mappings" (include "mock-fleet.fullname" .) -}}
+{{- define "mock-fleet.validateStorage" -}}
+{{- if and .Values.storage.persistent (ne .Values.storage.type "s3") -}}
+{{- fail (printf "Unsupported persistent storage.type %q. Supported values: s3" .Values.storage.type) -}}
 {{- end -}}
+{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") (not .Values.storage.s3.bucket) -}}
+{{- fail "storage.s3.bucket is required when storage.persistent=true and storage.type=s3" -}}
 {{- end -}}
-
-{{- define "mock-fleet.wiremockMappingsPvName" -}}
-{{- printf "%s-pv" (include "mock-fleet.wiremockMappingsPvcName" .) -}}
 {{- end -}}

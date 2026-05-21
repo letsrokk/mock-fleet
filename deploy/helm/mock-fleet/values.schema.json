@@ -133,49 +133,56 @@
     "storage": {
       "type": "object",
       "properties": {
-        "enabled": {
+        "persistent": {
           "type": "boolean"
         },
-        "createPersistentVolume": {
-          "type": "boolean"
+        "type": {
+          "type": "string",
+          "enum": ["s3"]
         },
-        "storageClassName": {
-          "type": "string"
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         },
-        "hostPath": {
-          "type": "string"
-        },
-        "size": {
-          "type": "string"
-        },
-        "accessModes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["ReadWriteOnce", "ReadOnlyMany", "ReadWriteMany", "ReadWriteOncePod"]
+        "s3": {
+          "type": "object",
+          "properties": {
+            "bucket": {
+              "type": "string"
+            },
+            "provisioner": {
+              "type": "string"
+            },
+            "storageClassName": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "authenticationSource": {
+              "type": "string",
+              "enum": ["driver", "pod"]
+            },
+            "cacheSize": {
+              "type": "string"
+            },
+            "mountOptions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
           },
-          "minItems": 1
-        },
-        "pvcName": {
-          "type": "string"
-        },
-        "containerMappingsPath": {
-          "type": "string"
-        },
-        "initContainerStoragePath": {
-          "type": "string"
+          "required": ["bucket", "provisioner", "storageClassName", "path", "authenticationSource", "cacheSize", "mountOptions"]
         }
       },
       "required": [
-        "enabled",
-        "createPersistentVolume",
-        "storageClassName",
-        "hostPath",
-        "size",
-        "accessModes",
-        "pvcName",
-        "containerMappingsPath",
-        "initContainerStoragePath"
+        "persistent",
+        "type",
+        "annotations",
+        "s3"
       ]
     },
     "probes": {
@@ -242,9 +249,15 @@
         },
         "name": {
           "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
-      "required": ["create", "name"]
+      "required": ["create", "name", "annotations"]
     },
     "rbac": {
       "type": "object",

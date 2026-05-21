@@ -4,6 +4,7 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.PodSpecBuilder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -17,8 +18,10 @@ public class PodFactory {
     public static final String LABEL_MOCK_ID = "mock-fleet/mock-id";
     static final String WIREMOCK_HEALTH_PATH = "/__admin/health";
     static final String WIREMOCK_MAPPINGS_VOLUME = "wiremock-mappings";
+    static final String WIREMOCK_MAPPINGS_PATH = "/home/wiremock/mappings";
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
+    static final String STORAGE_TYPE_S3 = "s3";
 
     private final MockFleetConfig config;
 
@@ -29,27 +32,10 @@ public class PodFactory {
 
     public Pod createPodSpec(String podName, String mockId) {
         MockFleetConfig.StorageConfig storage = config.storage();
-        String storageMountPath = storage.initContainerStoragePath();
 
-        Container initContainer = new ContainerBuilder()
-                .withName(INIT_MAPPINGS_CONTAINER)
-                .withImage(INIT_CONTAINER_IMAGE)
-                .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
-                .addNewVolumeMount()
-                    .withName(WIREMOCK_MAPPINGS_VOLUME)
-                    .withMountPath(storageMountPath)
-                .endVolumeMount()
-                .build();
-
-        // Define the container
-        Container container = new ContainerBuilder()
+        ContainerBuilder containerBuilder = new ContainerBuilder()
                 .withName("wiremock")
                 .withImage(config.wiremockImage())
-                .addNewVolumeMount()
-                    .withName(WIREMOCK_MAPPINGS_VOLUME)
-                    .withMountPath(storage.containerMappingsPath())
-                    .withSubPath(mockId)
-                .endVolumeMount()
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
@@ -82,10 +68,50 @@ public class PodFactory {
                     .withPeriodSeconds(10)
                     .withTimeoutSeconds(1)
                     .withFailureThreshold(3)
-                .endLivenessProbe()
-                .build();
+                .endLivenessProbe();
 
-        // Build the Pod
+        if (storage.persistent() && !STORAGE_TYPE_S3.equals(storage.type())) {
+            throw new IllegalArgumentException("Unsupported persistent storage type: " + storage.type());
+        }
+
+        Container initContainer = null;
+        if (storage.persistent()) {
+            String storageMountPath = storage.s3().path();
+            initContainer = new ContainerBuilder()
+                    .withName(INIT_MAPPINGS_CONTAINER)
+                    .withImage(INIT_CONTAINER_IMAGE)
+                    .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
+                    .addNewVolumeMount()
+                        .withName(WIREMOCK_MAPPINGS_VOLUME)
+                        .withMountPath(storageMountPath)
+                    .endVolumeMount()
+                    .build();
+
+            containerBuilder
+                    .addNewVolumeMount()
+                        .withName(WIREMOCK_MAPPINGS_VOLUME)
+                        .withMountPath(WIREMOCK_MAPPINGS_PATH)
+                        .withSubPath(mockId)
+                    .endVolumeMount();
+        }
+
+        Container container = containerBuilder.build();
+
+        PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
+                .withContainers(container)
+                .withRestartPolicy("Never");
+
+        if (storage.persistent()) {
+            podSpecBuilder
+                    .withInitContainers(initContainer)
+                    .addNewVolume()
+                        .withName(WIREMOCK_MAPPINGS_VOLUME)
+                        .withNewPersistentVolumeClaim()
+                            .withClaimName(storage.pvcName())
+                        .endPersistentVolumeClaim()
+                    .endVolume();
+        }
+
         return new PodBuilder()
                 .withNewMetadata()
                     .withGenerateName(podName)
@@ -93,17 +119,7 @@ public class PodFactory {
                     .addToLabels(LABEL_MANAGED_BY, MANAGED_BY_VALUE)
                     .addToLabels(LABEL_MOCK_ID, mockId)
                 .endMetadata()
-                .withNewSpec()
-                    .withInitContainers(initContainer)
-                    .withContainers(container)
-                    .addNewVolume()
-                        .withName(WIREMOCK_MAPPINGS_VOLUME)
-                        .withNewPersistentVolumeClaim()
-                            .withClaimName(storage.pvcName())
-                        .endPersistentVolumeClaim()
-                    .endVolume()
-                    .withRestartPolicy("Never")
-                .endSpec()
+                .withSpec(podSpecBuilder.build())
                 .build();
     }
 }

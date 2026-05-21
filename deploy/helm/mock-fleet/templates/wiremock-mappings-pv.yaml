@@ -1,18 +1,33 @@
-{{- if and .Values.storage.enabled .Values.storage.createPersistentVolume }}
+{{- include "mock-fleet.validateStorage" . -}}
+{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") }}
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: {{ include "mock-fleet.wiremockMappingsPvName" . }}
+  name: {{ printf "%s-pv" (include "mock-fleet.fullname" .) }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
+  {{- with .Values.storage.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  capacity:
-    storage: {{ .Values.storage.size | quote }}
   accessModes:
-    {{- toYaml .Values.storage.accessModes | nindent 4 }}
-  persistentVolumeReclaimPolicy: Retain
-  storageClassName: {{ .Values.storage.storageClassName | quote }}
-  hostPath:
-    path: {{ .Values.storage.hostPath | quote }}
-    type: DirectoryOrCreate
+    - ReadWriteMany
+  capacity:
+    storage: 10Gi
+  storageClassName: {{ .Values.storage.s3.storageClassName | quote }}
+  {{- with .Values.storage.s3.mountOptions }}
+  mountOptions:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  csi:
+    driver: {{ .Values.storage.s3.provisioner | quote }}
+    volumeHandle: {{ printf "%s-volume" (include "mock-fleet.fullname" .) }}
+    volumeAttributes:
+      bucketName: {{ .Values.storage.s3.bucket | quote }}
+      authenticationSource: {{ .Values.storage.s3.authenticationSource | quote }}
+      cache: emptyDir
+      cacheEmptyDirSizeLimit: {{ .Values.storage.s3.cacheSize | quote }}
+      cacheEmptyDirMedium: ""
 {{- end }}
