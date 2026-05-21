@@ -47,6 +47,7 @@ storage:
     storageClassName: ""
     bucket: ""
     path: /mock-fleet
+    authenticationSource: driver
     cacheSize: 1Gi
     mountOptions: []
 
@@ -85,6 +86,7 @@ env:
 serviceAccount:
   create: true
   name: ""
+  annotations: {}
 
 rbac:
   create: true

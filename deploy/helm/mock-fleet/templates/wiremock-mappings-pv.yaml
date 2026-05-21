@@ -26,7 +26,7 @@ spec:
     volumeHandle: {{ printf "%s-volume" (include "mock-fleet.fullname" .) }}
     volumeAttributes:
       bucketName: {{ .Values.storage.s3.bucket | quote }}
-      authenticationSource: driver
+      authenticationSource: {{ .Values.storage.s3.authenticationSource | quote }}
       cache: emptyDir
       cacheEmptyDirSizeLimit: {{ .Values.storage.s3.cacheSize | quote }}
       cacheEmptyDirMedium: ""

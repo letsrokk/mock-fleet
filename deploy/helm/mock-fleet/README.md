@@ -70,13 +70,17 @@ When `routing.mode=HOST`, the rendered ingress includes both the fleet host and 
 | `storage.s3.provisioner` | `s3.csi.aws.com` | CSI driver used by the S3 persistent volume |
 | `storage.s3.storageClassName` | `""` | Storage class name used by the S3 PV and PVC |
 | `storage.s3.path` | `/mock-fleet` | Path where the S3-backed storage is mounted while preparing per-mock mapping directories |
+| `storage.s3.authenticationSource` | `driver` | Mountpoint S3 CSI authentication source, `driver` or `pod` |
 | `storage.s3.cacheSize` | `1Gi` | Mountpoint S3 CSI `emptyDir` cache size limit |
 | `storage.s3.mountOptions` | `[]` | Mount options added to the S3 CSI persistent volume |
 | `rbac.create` | `true` | Create RBAC resources for pod and service management |
 | `serviceAccount.create` | `true` | Create a service account |
+| `serviceAccount.annotations` | `{}` | Annotations added to the created service account |
 | `hazelcast.cluster.memberCount` | `1` | Hazelcast dependency member count |
 
 See `values.yaml` and `values.schema.json` in the chart for the complete value surface.
+
+When `storage.s3.authenticationSource=pod`, Mountpoint S3 CSI uses the workload pod's ServiceAccount credentials. In that mode, configure the ServiceAccount for the AWS identity mechanism in use, for example by setting `serviceAccount.annotations.eks.amazonaws.com/role-arn` for IRSA. The default `storage.s3.authenticationSource=driver` continues to use driver-level credentials.
 
 ## Local Minikube values
 

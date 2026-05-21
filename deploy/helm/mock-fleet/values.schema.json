@@ -161,6 +161,10 @@
             "path": {
               "type": "string"
             },
+            "authenticationSource": {
+              "type": "string",
+              "enum": ["driver", "pod"]
+            },
             "cacheSize": {
               "type": "string"
             },
@@ -171,7 +175,7 @@
               }
             }
           },
-          "required": ["bucket", "provisioner", "storageClassName", "path", "cacheSize", "mountOptions"]
+          "required": ["bucket", "provisioner", "storageClassName", "path", "authenticationSource", "cacheSize", "mountOptions"]
         }
       },
       "required": [
@@ -245,9 +249,15 @@
         },
         "name": {
           "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
-      "required": ["create", "name"]
+      "required": ["create", "name", "annotations"]
     },
     "rbac": {
       "type": "object",
