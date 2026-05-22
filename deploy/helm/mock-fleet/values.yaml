@@ -7,6 +7,10 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+wiremock:
+  containerName: wiremock
+  containerImage: wiremock/wiremock:latest
+
 service:
   type: ClusterIP
   ports:
@@ -74,10 +78,12 @@ probes:
     successThreshold: 1
     failureThreshold: 3
 
+fleet:
+  namespace: mock-fleet
+  podInactivityThreshold: 1M
+  podCreationTimeout: 1M
+
 env:
-  mockFleetNamespace: mock-fleet
-  mockFleetInactivityThreshold: 1M
-  mockFleetPodCreationTimeout: 1M
   quinoaUiDir: /workspace/src/main/webui
   quarkusPackageOutputDirectory: /workspace/target
   javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml

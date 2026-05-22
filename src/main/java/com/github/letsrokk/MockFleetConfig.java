@@ -13,6 +13,8 @@ public interface MockFleetConfig {
 
     Duration podCreationTimeout();
 
+    String wiremockContainerName();
+
     String wiremockImage();
 
     StorageConfig storage();
