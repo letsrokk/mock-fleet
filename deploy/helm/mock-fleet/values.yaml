@@ -24,6 +24,7 @@ fleet:
 wiremock:
   containerName: wiremock
   containerImage: wiremock/wiremock:latest
+  containerImagePullPolicy: IfNotPresent
   config:
     default:
       options: []

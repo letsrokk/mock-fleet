@@ -66,6 +66,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-container-name`: WireMock container name used for spawned mock pods
 - `mock-fleet.wiremock-image`: WireMock image used for spawned mock pods
+- `mock-fleet.wiremock-image-pull-policy`: image pull policy used for spawned mock pods
 - `mock-fleet.wiremock-config-path`: optional YAML file with default and per-mock WireMock CLI options
 - `mock-fleet.namespace`: fallback namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`

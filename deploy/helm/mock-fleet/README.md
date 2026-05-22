@@ -60,6 +60,7 @@ When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet hos
 | `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
 | `wiremock.containerName` | `wiremock` | Container name used in spawned WireMock pods |
 | `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
+| `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy used by spawned WireMock pods |
 | `wiremock.config.default.options` | `[]` | WireMock CLI options applied to every spawned mock pod |
 | `wiremock.config.default.resources` | CPU `0.5`/`1`, memory `512Mi`/`1Gi` | Default resources applied to every spawned mock pod |
 | `wiremock.config.mocks` | `[]` | Per-mock WireMock CLI options and resource overrides keyed by mock ID |

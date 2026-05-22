@@ -437,6 +437,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("Always");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -449,6 +450,7 @@ class PodManagerTest {
         assertEquals("demo", pod.getMetadata().getLabels().get(PodFactory.LABEL_MOCK_ID));
         assertEquals("wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("wiremock/wiremock:latest", pod.getSpec().getContainers().getFirst().getImage());
+        assertEquals("Always", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
         assertTrue(pod.getSpec().getContainers().getFirst().getArgs() == null
                 || pod.getSpec().getContainers().getFirst().getArgs().isEmpty());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getStartupProbe().getHttpGet().getPath());
@@ -468,6 +470,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -486,6 +489,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -503,6 +507,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("custom-wiremock");
         when(config.wiremockImage()).thenReturn("example.com/wiremock:test");
+        when(config.wiremockImagePullPolicy()).thenReturn("Never");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn("emptyDir");
@@ -512,6 +517,7 @@ class PodManagerTest {
 
         assertEquals("custom-wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("example.com/wiremock:test", pod.getSpec().getContainers().getFirst().getImage());
+        assertEquals("Never", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
         assertTrue(pod.getSpec().getVolumes() == null || pod.getSpec().getVolumes().isEmpty());
     }
 
@@ -522,6 +528,7 @@ class PodManagerTest {
         MockFleetConfig.S3Config s3Config = mock(MockFleetConfig.S3Config.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(true);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -551,6 +558,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(true);
         when(storageConfig.type()).thenReturn("emptyDir");

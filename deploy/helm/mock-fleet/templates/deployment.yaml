@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.wiremock.containerName | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE
               value: {{ .Values.wiremock.containerImage | quote }}
+            - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
+              value: {{ .Values.wiremock.containerImagePullPolicy | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
               value: /etc/mock-fleet/wiremock-options.yaml
             - name: MOCK_FLEET_STORAGE_PERSISTENT

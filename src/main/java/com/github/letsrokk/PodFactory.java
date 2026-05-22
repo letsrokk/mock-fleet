@@ -46,6 +46,7 @@ public class PodFactory {
         MockFleetConfig.StorageConfig storage = config.storage();
 
         ContainerBuilder containerBuilder = new ContainerBuilder()
+                .withImagePullPolicy(config.wiremockImagePullPolicy())
                 .withName(config.wiremockContainerName())
                 .withImage(config.wiremockImage())
                 .addNewPort()

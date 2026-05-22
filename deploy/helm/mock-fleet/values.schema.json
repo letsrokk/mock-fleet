@@ -36,6 +36,10 @@
         "containerImage": {
           "type": "string"
         },
+        "containerImagePullPolicy": {
+          "type": "string",
+          "enum": ["Always", "IfNotPresent", "Never"]
+        },
         "config": {
           "type": "object",
           "properties": {
@@ -79,7 +83,7 @@
           "required": ["default", "mocks"]
         }
       },
-      "required": ["containerName", "containerImage", "config"]
+      "required": ["containerName", "containerImage", "containerImagePullPolicy", "config"]
     },
     "service": {
       "type": "object",

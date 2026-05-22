@@ -18,6 +18,8 @@ public interface MockFleetConfig {
 
     String wiremockImage();
 
+    String wiremockImagePullPolicy();
+
     Optional<String> wiremockConfigPath();
 
     StorageConfig storage();
