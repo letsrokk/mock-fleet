@@ -67,7 +67,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.wiremock-container-name`: WireMock container name used for spawned mock pods
 - `mock-fleet.wiremock-image`: WireMock image used for spawned mock pods
 - `mock-fleet.wiremock-config-path`: optional YAML file with default and per-mock WireMock CLI options
-- `mock-fleet.namespace`: default namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
+- `mock-fleet.namespace`: fallback namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
@@ -87,8 +87,9 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 Namespace behavior:
 
 - runtime-created mock pods use the Fabric8 client namespace when one is available
+- Helm deployments set `MOCK_FLEET_NAMESPACE` from the running pod's `metadata.namespace`
 - otherwise, the app falls back to `mock-fleet.namespace`, which defaults to `mock-fleet`
-- the Helm chart defaults to namespace `mock-fleet`, while still allowing namespace overrides at install time
+- the Helm chart defaults rendered resources to the release namespace, while still allowing `namespaceOverride`
 
 ## Tests
 

@@ -64,7 +64,6 @@ When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet hos
 | `wiremock.config.default.resources` | CPU `0.5`/`1`, memory `512Mi`/`1Gi` | Default resources applied to every spawned mock pod |
 | `wiremock.config.mocks` | `[]` | Per-mock WireMock CLI options and resource overrides keyed by mock ID |
 | `fleet.replicas` | `2` | Number of mock-fleet application replicas |
-| `fleet.namespace` | `mock-fleet` | Namespace used for runtime-created mock pods when the Kubernetes client has no active namespace |
 | `fleet.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
 | `fleet.podCreationTimeout` | `1M` | How long to wait for a newly created mock pod to become ready |
 | `fleet.routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
@@ -91,6 +90,8 @@ When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet hos
 | `hazelcast.mancenter.enabled` | `false` | Enable Hazelcast Management Center |
 
 See `values.yaml` and `values.schema.json` in the chart for the complete value surface.
+
+Helm deployments derive the runtime namespace from the mock-fleet pod metadata. Direct or custom deployments can still set `MOCK_FLEET_NAMESPACE` when the Kubernetes client has no active namespace.
 
 WireMock CLI options and mock pod resource settings are rendered into a ConfigMap. Helm upgrades roll the mock-fleet Deployment when that ConfigMap changes.
 

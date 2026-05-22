@@ -8,12 +8,11 @@ image:
   pullPolicy: IfNotPresent
 
 fleet:
-  replicas: 2
-  namespace: mock-fleet
-  podInactivityThreshold: 1M
-  podCreationTimeout: 1M
   routing:
     mode: HOST
+  podInactivityThreshold: 1M
+  podCreationTimeout: 1M
+  replicas: 2
   resources:
     requests:
       cpu: "0.5"

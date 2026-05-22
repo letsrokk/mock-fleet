@@ -31,7 +31,9 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: MOCK_FLEET_NAMESPACE
-              value: {{ .Values.fleet.namespace | quote }}
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: MOCK_FLEET_ROUTING_MODE
               value: {{ .Values.fleet.routing.mode | quote }}
             - name: MOCK_FLEET_ROUTING_HOST

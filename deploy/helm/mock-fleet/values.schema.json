@@ -221,9 +221,6 @@
           "type": "integer",
           "minimum": 1
         },
-        "namespace": {
-          "type": "string"
-        },
         "podInactivityThreshold": {
           "type": "string"
         },
@@ -244,7 +241,7 @@
           "$ref": "#/definitions/containerResources"
         }
       },
-      "required": ["replicas", "namespace", "podInactivityThreshold", "podCreationTimeout", "routing", "resources"]
+      "required": ["replicas", "podInactivityThreshold", "podCreationTimeout", "routing", "resources"]
     },
     "env": {
       "type": "object",
