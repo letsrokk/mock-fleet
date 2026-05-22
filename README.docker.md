@@ -23,6 +23,7 @@ Common runtime settings:
 - `mock-fleet.routing.mode`: `HOST` or `PATH`
 - `mock-fleet.routing.host`: public host used by `HOST` routing
 - `mock-fleet.namespace`: namespace used for created mock pods when the Kubernetes client has no active namespace
+- `mock-fleet.wiremock-container-name`: WireMock container name used for spawned mock pods
 - `mock-fleet.wiremock-image`: WireMock image used for spawned mock pods
 
 The service expects Kubernetes credentials inside the running environment and a Hazelcast client configuration at `/etc/hazelcast/hazelcast-client.yaml` for Kubernetes deployments.

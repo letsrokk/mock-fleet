@@ -20,7 +20,8 @@ mock-fleet:
   namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
-  wiremock-image: wiremock/wiremock:3.9.2
+  wiremock-container-name: ${MOCK_FLEET_WIREMOCK_CONTAINER_NAME:wiremock}
+  wiremock-image: ${MOCK_FLEET_WIREMOCK_IMAGE:wiremock/wiremock:latest}
   storage:
     persistent: ${MOCK_FLEET_STORAGE_PERSISTENT:false}
     type: ${MOCK_FLEET_STORAGE_TYPE:s3}

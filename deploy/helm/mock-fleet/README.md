@@ -58,6 +58,11 @@ When `routing.mode=HOST`, the rendered ingress includes both the fleet host and 
 | `image.repository` | `ghcr.io/letsrokk/mock-fleet` | Application image repository |
 | `image.tag` | `latest` | Application image tag |
 | `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
+| `wiremock.containerName` | `wiremock` | Container name used in spawned WireMock pods |
+| `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
+| `fleet.namespace` | `mock-fleet` | Namespace used for runtime-created mock pods when the Kubernetes client has no active namespace |
+| `fleet.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
+| `fleet.podCreationTimeout` | `1M` | How long to wait for a newly created mock pod to become ready |
 | `routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
 | `ingress.enabled` | `false` | Create an ingress resource |
 | `ingress.host` | `mock-fleet.localhost` | Public fleet host |

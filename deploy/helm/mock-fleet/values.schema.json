@@ -27,6 +27,18 @@
       },
       "required": ["repository", "tag", "pullPolicy"]
     },
+    "wiremock": {
+      "type": "object",
+      "properties": {
+        "containerName": {
+          "type": "string"
+        },
+        "containerImage": {
+          "type": "string"
+        }
+      },
+      "required": ["containerName", "containerImage"]
+    },
     "service": {
       "type": "object",
       "properties": {
@@ -200,18 +212,24 @@
       },
       "required": ["liveness", "readiness", "startup"]
     },
+    "fleet": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "podInactivityThreshold": {
+          "type": "string"
+        },
+        "podCreationTimeout": {
+          "type": "string"
+        }
+      },
+      "required": ["namespace", "podInactivityThreshold", "podCreationTimeout"]
+    },
     "env": {
       "type": "object",
       "properties": {
-        "mockFleetNamespace": {
-          "type": "string"
-        },
-        "mockFleetInactivityThreshold": {
-          "type": "string"
-        },
-        "mockFleetPodCreationTimeout": {
-          "type": "string"
-        },
         "quinoaUiDir": {
           "type": "string"
         },
@@ -232,9 +250,6 @@
         }
       },
       "required": [
-        "mockFleetNamespace",
-        "mockFleetInactivityThreshold",
-        "mockFleetPodCreationTimeout",
         "quinoaUiDir",
         "quarkusPackageOutputDirectory",
         "javaOpts",
@@ -283,6 +298,7 @@
   },
   "required": [
     "image",
+    "wiremock",
     "service",
     "routing",
     "ingress",
@@ -290,6 +306,7 @@
     "securityContext",
     "storage",
     "probes",
+    "fleet",
     "env",
     "serviceAccount",
     "rbac",

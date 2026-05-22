@@ -64,7 +64,8 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 
 - `mock-fleet.inactivity-threshold`: how long an inactive mock pod may live before cleanup
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
-- `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
+- `mock-fleet.wiremock-container-name`: WireMock container name used for spawned mock pods
+- `mock-fleet.wiremock-image`: WireMock image used for spawned mock pods
 - `mock-fleet.namespace`: default namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
@@ -79,7 +80,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - routing-aware ingress behavior is chart-owned:
   `routing.mode=HOST` adds both `mock-fleet.localhost` and `*.mock-fleet.localhost`
   `routing.mode=PATH` adds only `mock-fleet.localhost`
-- chart values are exposed through a cleaner manual interface such as `image.*`, `routing.mode`, `ingress.*`, `resources.*`, and `env.*`
+- chart values are exposed through a cleaner manual interface such as `image.*`, `wiremock.*`, `routing.mode`, `ingress.*`, `resources.*`, and `env.*`
 - the `/` to `/__fleet/` redirect is handled by the application, so it works regardless of ingress controller
 
 Namespace behavior:

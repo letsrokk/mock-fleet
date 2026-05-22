@@ -30,15 +30,19 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: MOCK_FLEET_NAMESPACE
-              value: {{ .Values.env.mockFleetNamespace | quote }}
+              value: {{ .Values.fleet.namespace | quote }}
             - name: MOCK_FLEET_ROUTING_MODE
               value: {{ .Values.routing.mode | quote }}
             - name: MOCK_FLEET_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_INACTIVITY_THRESHOLD
-              value: {{ .Values.env.mockFleetInactivityThreshold | quote }}
+              value: {{ .Values.fleet.podInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
-              value: {{ .Values.env.mockFleetPodCreationTimeout | quote }}
+              value: {{ .Values.fleet.podCreationTimeout | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
+              value: {{ .Values.wiremock.containerName | quote }}
+            - name: MOCK_FLEET_WIREMOCK_IMAGE
+              value: {{ .Values.wiremock.containerImage | quote }}
             - name: MOCK_FLEET_STORAGE_PERSISTENT
               value: {{ .Values.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
