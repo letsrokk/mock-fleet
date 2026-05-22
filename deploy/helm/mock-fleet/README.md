@@ -35,8 +35,8 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 
 The chart supports two routing modes:
 
-- `routing.mode=HOST`: requests for single-label subdomains of `ingress.host` route to matching mock IDs
-- `routing.mode=PATH`: the first URL path segment is used as the mock ID
+- `fleet.routing.mode=HOST`: requests for single-label subdomains of `ingress.host` route to matching mock IDs
+- `fleet.routing.mode=PATH`: the first URL path segment is used as the mock ID
 
 Ingress is disabled by default. To expose the service through an ingress controller:
 
@@ -49,7 +49,7 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --set ingress.host=mock-fleet.example.com
 ```
 
-When `routing.mode=HOST`, the rendered ingress includes both the fleet host and wildcard mock subdomains for that host.
+When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet host and wildcard mock subdomains for that host.
 
 ## Common values
 
@@ -60,10 +60,15 @@ When `routing.mode=HOST`, the rendered ingress includes both the fleet host and 
 | `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
 | `wiremock.containerName` | `wiremock` | Container name used in spawned WireMock pods |
 | `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
-| `fleet.namespace` | `mock-fleet` | Namespace used for runtime-created mock pods when the Kubernetes client has no active namespace |
+| `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy used by spawned WireMock pods |
+| `wiremock.config.default.options` | `[]` | WireMock CLI options applied to every spawned mock pod |
+| `wiremock.config.default.resources` | CPU `0.5`/`1`, memory `512Mi`/`1Gi` | Default resources applied to every spawned mock pod |
+| `wiremock.config.mocks` | `[]` | Per-mock WireMock CLI options and resource overrides keyed by mock ID |
+| `fleet.replicas` | `2` | Number of mock-fleet application replicas |
 | `fleet.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
 | `fleet.podCreationTimeout` | `1M` | How long to wait for a newly created mock pod to become ready |
-| `routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
+| `fleet.routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
+| `fleet.resources` | CPU `0.5`/`2`, memory `512Mi`/`2Gi` | Resources applied to the mock-fleet application container |
 | `ingress.enabled` | `false` | Create an ingress resource |
 | `ingress.host` | `mock-fleet.localhost` | Public fleet host |
 | `service.ports.http` | `80` | Service HTTP port |
@@ -81,9 +86,43 @@ When `routing.mode=HOST`, the rendered ingress includes both the fleet host and 
 | `rbac.create` | `true` | Create RBAC resources for pod and service management |
 | `serviceAccount.create` | `true` | Create a service account |
 | `serviceAccount.annotations` | `{}` | Annotations added to the created service account |
-| `hazelcast.cluster.memberCount` | `1` | Hazelcast dependency member count |
+| `hazelcast.client.clusterName` | `dev` | Hazelcast client cluster name used by mock-fleet |
+| `hazelcast.cluster.memberCount` | `2` | Hazelcast dependency member count |
+| `hazelcast.mancenter.enabled` | `false` | Enable Hazelcast Management Center |
 
 See `values.yaml` and `values.schema.json` in the chart for the complete value surface.
+
+Helm deployments derive the runtime namespace from the mock-fleet pod metadata. Direct or custom deployments can still set `MOCK_FLEET_NAMESPACE` when the Kubernetes client has no active namespace.
+
+WireMock CLI options and mock pod resource settings are rendered into a ConfigMap. Helm upgrades roll the mock-fleet Deployment when that ConfigMap changes.
+
+```yaml
+wiremock:
+  config:
+    default:
+      options:
+        - --global-response-templating
+      resources:
+        requests:
+          cpu: "0.5"
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+    mocks:
+      - id: demo
+        options:
+          - --verbose
+        resources:
+          requests:
+            cpu: "2"
+            memory: 2Gi
+          limits:
+            cpu: "3"
+            memory: 3Gi
+      - id: empty-options
+        options: []
+```
 
 When `storage.s3.authenticationSource=pod`, Mountpoint S3 CSI uses the workload pod's ServiceAccount credentials. In that mode, configure the ServiceAccount for the AWS identity mechanism in use, for example by setting `serviceAccount.annotations.eks.amazonaws.com/role-arn` for IRSA. The default `storage.s3.authenticationSource=driver` continues to use driver-level credentials.
 

@@ -30,7 +30,7 @@ spec:
                   name: http
             path: {{ .Values.ingress.path }}
             pathType: {{ .Values.ingress.pathType }}
-    {{- if eq .Values.routing.mode "HOST" }}
+    {{- if eq .Values.fleet.routing.mode "HOST" }}
     - host: {{ printf "*.%s" $host | quote }}
       http:
         paths:

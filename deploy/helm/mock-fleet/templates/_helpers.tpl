@@ -51,6 +51,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-hazelcast-client" (include "mock-fleet.fullname" .) -}}
 {{- end -}}
 
+{{- define "mock-fleet.wiremockConfigMapName" -}}
+{{- printf "%s-wiremock-config" (include "mock-fleet.fullname" .) -}}
+{{- end -}}
+
 {{- define "mock-fleet.hazelcastServiceName" -}}
 {{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}

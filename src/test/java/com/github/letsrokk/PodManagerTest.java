@@ -8,6 +8,9 @@ import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodConditionBuilder;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.PodStatusBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NamespaceableResource;
@@ -259,21 +262,26 @@ class PodManagerTest {
     void spawnPodCreatesPodWaitsForRunningStateAndReturnsPodRef() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodFactory podFactory = mock(PodFactory.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
         Pod podSpec = podWithGenerateName("mock-fleet-demo-");
         Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
         Pod runningPod = pod("mock-fleet-demo-1", "Running", true);
+        ResourceRequirements resources = resources("0.5", "512Mi", "1", "1Gi");
         when(config.namespace()).thenReturn("mock-fleet");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of("--verbose"));
+        when(wireMockOptions.resourcesFor("demo")).thenReturn(resources);
         when(kubernetesClient.getNamespace()).thenReturn("test");
-        when(podFactory.createPodSpec("mock-fleet-demo-", "demo")).thenReturn(podSpec);
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of("--verbose"), resources)).thenReturn(podSpec);
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
@@ -283,7 +291,7 @@ class PodManagerTest {
         MockPodRef spawnedPod = podManager.spawnPod("demo");
 
         assertEquals(new MockPodRef("mock-fleet-demo-1", "10.0.0.1"), spawnedPod);
-        verify(podFactory).createPodSpec("mock-fleet-demo-", "demo");
+        verify(podFactory).createPodSpec("mock-fleet-demo-", "demo", List.of("--verbose"), resources);
         verify(podHandle).create();
         verify(podHandle).get();
         verify(kubernetesClient, never()).services();
@@ -293,12 +301,14 @@ class PodManagerTest {
     void spawnPodUsesConfiguredNamespaceWhenClientNamespaceIsMissing() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodFactory podFactory = mock(PodFactory.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
@@ -306,8 +316,10 @@ class PodManagerTest {
         Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
         Pod runningPod = pod("mock-fleet-demo-1", "Running", true);
         when(config.namespace()).thenReturn("mock-fleet");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
+        when(wireMockOptions.resourcesFor("demo")).thenReturn(null);
         when(kubernetesClient.getNamespace()).thenReturn(null);
-        when(podFactory.createPodSpec("mock-fleet-demo-", "demo")).thenReturn(podSpec);
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null)).thenReturn(podSpec);
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("mock-fleet")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
@@ -325,12 +337,14 @@ class PodManagerTest {
     void spawnPodFailsWhenReadyPodHasNoPodIp() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodFactory podFactory = mock(PodFactory.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
@@ -338,8 +352,10 @@ class PodManagerTest {
         Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
         Pod runningPodWithoutIp = pod("mock-fleet-demo-1", "Running", true, "");
         when(config.namespace()).thenReturn("mock-fleet");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
+        when(wireMockOptions.resourcesFor("demo")).thenReturn(null);
         when(kubernetesClient.getNamespace()).thenReturn("test");
-        when(podFactory.createPodSpec("mock-fleet-demo-", "demo")).thenReturn(podSpec);
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null)).thenReturn(podSpec);
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
@@ -421,6 +437,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("Always");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -433,6 +450,9 @@ class PodManagerTest {
         assertEquals("demo", pod.getMetadata().getLabels().get(PodFactory.LABEL_MOCK_ID));
         assertEquals("wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("wiremock/wiremock:latest", pod.getSpec().getContainers().getFirst().getImage());
+        assertEquals("Always", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
+        assertTrue(pod.getSpec().getContainers().getFirst().getArgs() == null
+                || pod.getSpec().getContainers().getFirst().getArgs().isEmpty());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getStartupProbe().getHttpGet().getPath());
         assertEquals(8080, pod.getSpec().getContainers().getFirst().getStartupProbe().getHttpGet().getPort().getIntVal());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getReadinessProbe().getHttpGet().getPath());
@@ -445,11 +465,49 @@ class PodManagerTest {
     }
 
     @Test
+    void podFactoryAddsWireMockOptionsAsContainerArgs() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        when(config.wiremockContainerName()).thenReturn("wiremock");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(false);
+        when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
+        PodFactory podFactory = new PodFactory(config);
+
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo",
+                List.of("--global-response-templating", "--verbose"));
+
+        assertEquals(List.of("--global-response-templating", "--verbose"),
+                pod.getSpec().getContainers().getFirst().getArgs());
+    }
+
+    @Test
+    void podFactoryAddsWireMockResourcesToContainer() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        when(config.wiremockContainerName()).thenReturn("wiremock");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(false);
+        when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
+        PodFactory podFactory = new PodFactory(config);
+
+        ResourceRequirements resources = resources("0.5", "512Mi", "1", "1Gi");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), resources);
+
+        assertEquals(resources, pod.getSpec().getContainers().getFirst().getResources());
+    }
+
+    @Test
     void podFactoryAllowsUnsupportedStorageTypeWhenStorageIsNotPersistent() {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("custom-wiremock");
         when(config.wiremockImage()).thenReturn("example.com/wiremock:test");
+        when(config.wiremockImagePullPolicy()).thenReturn("Never");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(false);
         when(storageConfig.type()).thenReturn("emptyDir");
@@ -459,6 +517,7 @@ class PodManagerTest {
 
         assertEquals("custom-wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("example.com/wiremock:test", pod.getSpec().getContainers().getFirst().getImage());
+        assertEquals("Never", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
         assertTrue(pod.getSpec().getVolumes() == null || pod.getSpec().getVolumes().isEmpty());
     }
 
@@ -469,6 +528,7 @@ class PodManagerTest {
         MockFleetConfig.S3Config s3Config = mock(MockFleetConfig.S3Config.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(true);
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
@@ -498,6 +558,7 @@ class PodManagerTest {
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
         when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.storage()).thenReturn(storageConfig);
         when(storageConfig.persistent()).thenReturn(true);
         when(storageConfig.type()).thenReturn("emptyDir");
@@ -536,6 +597,15 @@ class PodManagerTest {
     private Pod podWithGenerateName(String generateName) {
         return new PodBuilder()
                 .withMetadata(new ObjectMetaBuilder().withGenerateName(generateName).build())
+                .build();
+    }
+
+    private ResourceRequirements resources(String requestCpu, String requestMemory, String limitCpu, String limitMemory) {
+        return new ResourceRequirementsBuilder()
+                .addToRequests("cpu", new Quantity(requestCpu))
+                .addToRequests("memory", new Quantity(requestMemory))
+                .addToLimits("cpu", new Quantity(limitCpu))
+                .addToLimits("memory", new Quantity(limitMemory))
                 .build();
     }
 }

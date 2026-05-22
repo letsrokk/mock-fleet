@@ -7,9 +7,35 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
+fleet:
+  routing:
+    mode: HOST
+  podInactivityThreshold: 1M
+  podCreationTimeout: 1M
+  replicas: 2
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
 wiremock:
   containerName: wiremock
   containerImage: wiremock/wiremock:latest
+  containerImagePullPolicy: IfNotPresent
+  config:
+    default:
+      options: []
+      resources:
+        requests:
+          cpu: "0.5"
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+    mocks: []
 
 service:
   type: ClusterIP
@@ -19,9 +45,6 @@ service:
     debug: 5005
     targetDebug: 5005
 
-routing:
-  mode: HOST
-
 ingress:
   enabled: false
   host: mock-fleet.localhost
@@ -30,14 +53,6 @@ ingress:
   tls: []
   path: /
   pathType: Prefix
-
-resources:
-  requests:
-    cpu: "0.5"
-    memory: 512Mi
-  limits:
-    cpu: "2"
-    memory: 2Gi
 
 securityContext:
   runAsNonRoot: true
@@ -78,11 +93,6 @@ probes:
     successThreshold: 1
     failureThreshold: 3
 
-fleet:
-  namespace: mock-fleet
-  podInactivityThreshold: 1M
-  podCreationTimeout: 1M
-
 env:
   quinoaUiDir: /workspace/src/main/webui
   quarkusPackageOutputDirectory: /workspace/target
@@ -97,9 +107,10 @@ serviceAccount:
 rbac:
   create: true
 
-hazelcastClient:
-  clusterName: dev
-
 hazelcast:
+  client:
+    clusterName: dev
   cluster:
-    memberCount: 1
+    memberCount: 2
+  mancenter:
+    enabled: false

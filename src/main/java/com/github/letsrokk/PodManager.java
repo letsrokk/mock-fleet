@@ -32,6 +32,9 @@ public class PodManager {
     PodFactory podFactory;
 
     @Inject
+    WireMockOptions wireMockOptions;
+
+    @Inject
     MockFleetConfig config;
 
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
@@ -76,7 +79,9 @@ public class PodManager {
         LOG.infof("Creating pod for mock id '%s'...", mockId);
 
         String podNamePrefix = String.format("mock-fleet-%s-", mockId);
-        Pod pod = podFactory.createPodSpec(podNamePrefix, mockId);
+        Pod pod = podFactory.createPodSpec(podNamePrefix, mockId,
+                wireMockOptions.optionsFor(mockId),
+                wireMockOptions.resourcesFor(mockId));
         String namespace = currentNamespace();
 
         pod = kubernetesClient.resource(pod)
