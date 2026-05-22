@@ -3,17 +3,6 @@ ingress:
   host: mock-fleet.localhost
   className: nginx
 
-fleet:
-  routing:
-    mode: PATH
-  resources:
-    requests:
-      cpu: "1"
-      memory: 4Gi
-    limits:
-      cpu: "2"
-      memory: 4Gi
-
 storage:
   persistent: true
   type: s3
@@ -26,6 +15,6 @@ storage:
       - region us-east-1
       - prefix mock-fleet/
 
-env:
-  quarkusLaunchDevmode: "true"
-  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+#env:
+#  quarkusLaunchDevmode: "true"
+#  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
