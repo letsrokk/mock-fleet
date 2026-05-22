@@ -3,11 +3,8 @@ package com.github.letsrokk;
 import com.github.letsrokk.exceptions.PodCreationException;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
-import io.fabric8.kubernetes.api.model.Service;
-import io.fabric8.kubernetes.api.model.ServiceList;
 import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -35,9 +32,6 @@ public class PodManager {
     PodFactory podFactory;
 
     @Inject
-    ServiceFactory serviceFactory;
-
-    @Inject
     MockFleetConfig config;
 
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
@@ -47,24 +41,20 @@ public class PodManager {
     Duration podCreationTimeout;
 
     public String getUpstreamBaseUrl(String mockId) {
-        Pod existingPod = podState.getPod(mockId);
-        Pod pod = existingPod != null ? existingPod : podState.getPod(mockId, this::spawnPod);
-        podState.setLastAccessTime(pod.getMetadata().getName(), Instant.now().toEpochMilli());
-        if (existingPod != null) {
-            ensureServiceExists(mockId);
-        }
-        return buildServiceBaseUrl(mockId);
+        MockPodRef pod = podState.getPod(mockId, this::spawnPod);
+        podState.setLastAccessTime(pod.podName(), Instant.now().toEpochMilli());
+        return buildPodBaseUrl(pod);
     }
 
     public List<ActiveMockPod> listActiveMocks() {
         return podState.getPods().entrySet().stream()
-                .map(entry -> new ActiveMockPod(entry.getKey(), entry.getValue().getMetadata().getName()))
+                .map(entry -> new ActiveMockPod(entry.getKey(), entry.getValue().podName()))
                 .sorted(Comparator.comparing(ActiveMockPod::mockId))
                 .toList();
     }
 
     public DeleteMockResult deleteMock(String mockId) {
-        Pod pod = podState.getPod(mockId);
+        MockPodRef pod = podState.getPod(mockId);
         if (pod == null) {
             return DeleteMockResult.NOT_FOUND;
         }
@@ -72,8 +62,7 @@ public class PodManager {
             return DeleteMockResult.FAILED;
         }
 
-        LOG.infof("Pod '%s' deleted manually for mock id '%s'.", pod.getMetadata().getName(), mockId);
-        deleteService(mockId);
+        LOG.infof("Pod '%s' deleted manually for mock id '%s'.", pod.podName(), mockId);
         podState.removePod(mockId);
         return DeleteMockResult.DELETED;
     }
@@ -81,9 +70,9 @@ public class PodManager {
     /**
      * Spawn a new mock pod
      * @param mockId mock id
-     * @return mock pod
+     * @return mock pod reference
      */
-    public Pod spawnPod(String mockId) {
+    public MockPodRef spawnPod(String mockId) {
         LOG.infof("Creating pod for mock id '%s'...", mockId);
 
         String podNamePrefix = String.format("mock-fleet-%s-", mockId);
@@ -95,40 +84,23 @@ public class PodManager {
                 .create();
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
-        ensureServiceExists(mockId);
-
-        return pod;
+        return podRef(pod);
     }
 
-    void ensureServiceExists(String mockId) {
-        String namespace = currentNamespace();
-        String serviceName = serviceFactory.serviceName(mockId);
-        Service existingService = kubernetesClient.services()
-                .inNamespace(namespace)
-                .withName(serviceName)
-                .get();
-
-        if (existingService != null) {
-            return;
-        }
-
-        LOG.infof("Creating service '%s' for mock id '%s'.", serviceName, mockId);
-        Service service = serviceFactory.createServiceSpec(mockId);
-        try {
-            kubernetesClient.resource(service)
-                    .inNamespace(namespace)
-                    .create();
-        } catch (KubernetesClientException e) {
-            if (e.getCode() == 409) {
-                LOG.debugf("Service '%s' already exists for mock id '%s'.", serviceName, mockId);
-                return;
-            }
-            throw e;
-        }
+    String buildPodBaseUrl(MockPodRef pod) {
+        return String.format("http://%s:8080", pod.podIp());
     }
 
-    String buildServiceBaseUrl(String mockId) {
-        return String.format("http://%s.%s.svc.cluster.local:8080", serviceFactory.serviceName(mockId), currentNamespace());
+    MockPodRef podRef(Pod pod) {
+        String podName = pod.getMetadata() == null ? null : pod.getMetadata().getName();
+        String podIp = pod.getStatus() == null ? null : pod.getStatus().getPodIP();
+        if (podName == null || podName.isBlank()) {
+            throw new PodCreationException("Created pod is missing its name.");
+        }
+        if (podIp == null || podIp.isBlank()) {
+            throw new PodCreationException("Pod '" + podName + "' did not receive a pod IP.");
+        }
+        return new MockPodRef(podName, podIp);
     }
 
     String currentNamespace() {
@@ -199,9 +171,9 @@ public class PodManager {
         long now = System.currentTimeMillis();
 
         podState.getPods().forEach((mockId, pod) -> {
-            Long lastAccess = podState.getLastAccessTime(pod.getMetadata().getName());
+            Long lastAccess = podState.getLastAccessTime(pod.podName());
             if (lastAccess == null) {
-                LOG.warnf("Skipping idle cleanup for pod '%s' because no last access time is recorded.", pod.getMetadata().getName());
+                LOG.warnf("Skipping idle cleanup for pod '%s' because no last access time is recorded.", pod.podName());
                 return;
             }
 
@@ -211,11 +183,10 @@ public class PodManager {
                 boolean deleted = deletePod(pod);
 
                 if (deleted) {
-                    LOG.infof("Pod '%s' deleted successfully.", pod.getMetadata().getName());
-                    deleteService(mockId);
+                    LOG.infof("Pod '%s' deleted successfully.", pod.podName());
                     podState.removePod(mockId);
                 } else {
-                    LOG.warnf("Failed to delete Pod '%s'.", pod.getMetadata().getName());
+                    LOG.warnf("Failed to delete Pod '%s'.", pod.podName());
                 }
             }
         });
@@ -233,7 +204,7 @@ public class PodManager {
                 .withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
                 .list();
 
-        List<String> ownedPods = podState.getPods().values().stream().map(pod -> pod.getMetadata().getName()).toList();
+        List<String> ownedPods = podState.getPods().values().stream().map(MockPodRef::podName).toList();
 
         podList.getItems().forEach(p -> {
             String podName = p.getMetadata().getName();
@@ -247,44 +218,17 @@ public class PodManager {
                 }
             }
         });
-
-        ServiceList serviceList = kubernetesClient.services()
-                .inNamespace(namespace)
-                .withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
-                .list();
-
-        List<String> ownedServiceNames = podState.getPods().keySet().stream()
-                .map(serviceFactory::serviceName)
-                .toList();
-
-        serviceList.getItems().forEach(service -> {
-            String serviceName = service.getMetadata().getName();
-            boolean isOrphaned = ownedServiceNames.stream().noneMatch(serviceName::equals);
-            if (isOrphaned) {
-                boolean deleted = deleteService(service);
-                if (deleted) {
-                    LOG.infof("Service '%s' deleted successfully.", serviceName);
-                } else {
-                    LOG.warnf("Failed to delete Service '%s'.", serviceName);
-                }
-            }
-        });
     }
 
     boolean deletePod(Pod pod) {
         return wasDeleteSuccessful(kubernetesClient.resource(pod).delete());
     }
 
-    boolean deleteService(String mockId) {
-        Service service = kubernetesClient.services()
+    boolean deletePod(MockPodRef pod) {
+        return wasDeleteSuccessful(kubernetesClient.pods()
                 .inNamespace(currentNamespace())
-                .withName(serviceFactory.serviceName(mockId))
-                .get();
-        return service == null || deleteService(service);
-    }
-
-    boolean deleteService(Service service) {
-        return wasDeleteSuccessful(kubernetesClient.resource(service).delete());
+                .withName(pod.podName())
+                .delete());
     }
 
     boolean wasDeleteSuccessful(List<StatusDetails> details) {

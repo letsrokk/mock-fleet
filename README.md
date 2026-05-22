@@ -65,7 +65,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.inactivity-threshold`: how long an inactive mock pod may live before cleanup
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-image`: pinned WireMock image used for spawned mock pods
-- `mock-fleet.namespace`: default namespace used for runtime-created mock pods and services when the Kubernetes client has no active namespace
+- `mock-fleet.namespace`: default namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
 - `quarkus.quinoa.*`: frontend build/serve settings for the internal React dashboard
@@ -84,7 +84,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 
 Namespace behavior:
 
-- runtime-created mock pods and services use the Fabric8 client namespace when one is available
+- runtime-created mock pods use the Fabric8 client namespace when one is available
 - otherwise, the app falls back to `mock-fleet.namespace`, which defaults to `mock-fleet`
 - the Helm chart defaults to namespace `mock-fleet`, while still allowing namespace overrides at install time
 

@@ -2,7 +2,6 @@ package com.github.letsrokk;
 
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
-import io.fabric8.kubernetes.api.model.Pod;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -11,7 +10,7 @@ import java.util.function.Function;
 @ApplicationScoped
 public class PodState {
 
-    private final IMap<String, Pod> podMap;
+    private final IMap<String, MockPodRef> podMap;
     private final IMap<String, Long> lastAccessTimeMap;
 
     @Inject
@@ -20,15 +19,15 @@ public class PodState {
         this.lastAccessTimeMap = hazelcastInstance.getMap("last-access-time-map");
     }
 
-    public Pod getPod(String mockId) {
+    public MockPodRef getPod(String mockId) {
         return this.podMap.get(mockId);
     }
 
-    public Pod getPod(String mockId, Function<String, Pod> mappingFunction) {
+    public MockPodRef getPod(String mockId, Function<String, MockPodRef> mappingFunction) {
         return this.podMap.computeIfAbsent(mockId, mappingFunction);
     }
 
-    public IMap<String, Pod> getPods() {
+    public IMap<String, MockPodRef> getPods() {
         return this.podMap;
     }
 
@@ -41,9 +40,9 @@ public class PodState {
     }
 
     public void removePod(String mockId) {
-        Pod pod = this.podMap.remove(mockId);
-        if (pod != null && pod.getMetadata() != null) {
-            this.lastAccessTimeMap.remove(pod.getMetadata().getName());
+        MockPodRef pod = this.podMap.remove(mockId);
+        if (pod != null) {
+            this.lastAccessTimeMap.remove(pod.podName());
         }
     }
 

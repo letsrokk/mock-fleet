@@ -95,7 +95,7 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 
 ## Runtime notes
 
-The service expects Kubernetes API access so it can create, reuse, and delete WireMock pods and services. The chart creates the required service account and RBAC resources by default.
+The service expects Kubernetes API access so it can create, reuse, and delete WireMock pods. The chart creates the required service account and RBAC resources by default.
 
 The chart configures Hazelcast through the bundled Hazelcast dependency and passes the client configuration location to the application with `env.javaOpts`.
 

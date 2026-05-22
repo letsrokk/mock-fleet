@@ -10,22 +10,6 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - services
-    verbs:
-      - get
-      - list
-      - create
-      - delete
-  - apiGroups:
-      - ""
-    resources:
-      - endpoints
-    verbs:
-      - get
-      - list
-  - apiGroups:
-      - ""
-    resources:
       - pods
     verbs:
       - get
