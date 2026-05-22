@@ -3,16 +3,16 @@ ingress:
   host: mock-fleet.localhost
   className: nginx
 
-routing:
-  mode: PATH
-
-resources:
-  requests:
-    cpu: "1"
-    memory: 4Gi
-  limits:
-    cpu: "2"
-    memory: 4Gi
+fleet:
+  routing:
+    mode: PATH
+  resources:
+    requests:
+      cpu: "1"
+      memory: 4Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
 
 storage:
   persistent: true

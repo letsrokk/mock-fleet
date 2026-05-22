@@ -5,8 +5,11 @@ import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import java.util.List;
 
 @ApplicationScoped
 public class PodFactory {
@@ -31,6 +34,15 @@ public class PodFactory {
     }
 
     public Pod createPodSpec(String podName, String mockId) {
+        return createPodSpec(podName, mockId, List.of(), null);
+    }
+
+    public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions) {
+        return createPodSpec(podName, mockId, wireMockOptions, null);
+    }
+
+    public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
+                             ResourceRequirements resources) {
         MockFleetConfig.StorageConfig storage = config.storage();
 
         ContainerBuilder containerBuilder = new ContainerBuilder()
@@ -69,6 +81,13 @@ public class PodFactory {
                     .withTimeoutSeconds(1)
                     .withFailureThreshold(3)
                 .endLivenessProbe();
+
+        if (wireMockOptions != null && !wireMockOptions.isEmpty()) {
+            containerBuilder.withArgs(wireMockOptions);
+        }
+        if (resources != null) {
+            containerBuilder.withResources(resources);
+        }
 
         if (storage.persistent() && !STORAGE_TYPE_S3.equals(storage.type())) {
             throw new IllegalArgumentException("Unsupported persistent storage type: " + storage.type());

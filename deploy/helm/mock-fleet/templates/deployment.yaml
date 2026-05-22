@@ -6,7 +6,7 @@ metadata:
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.fleet.replicas }}
   selector:
     matchLabels:
       {{- include "mock-fleet.selectorLabels" . | nindent 6 }}
@@ -14,6 +14,7 @@ spec:
     metadata:
       annotations:
         checksum/hazelcast-client-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/wiremock-config: {{ include (print $.Template.BasePath "/wiremock-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "mock-fleet.selectorLabels" . | nindent 8 }}
     spec:
@@ -32,7 +33,7 @@ spec:
             - name: MOCK_FLEET_NAMESPACE
               value: {{ .Values.fleet.namespace | quote }}
             - name: MOCK_FLEET_ROUTING_MODE
-              value: {{ .Values.routing.mode | quote }}
+              value: {{ .Values.fleet.routing.mode | quote }}
             - name: MOCK_FLEET_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_INACTIVITY_THRESHOLD
@@ -43,6 +44,8 @@ spec:
               value: {{ .Values.wiremock.containerName | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE
               value: {{ .Values.wiremock.containerImage | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
+              value: /etc/mock-fleet/wiremock-options.yaml
             - name: MOCK_FLEET_STORAGE_PERSISTENT
               value: {{ .Values.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
@@ -105,13 +108,20 @@ spec:
             successThreshold: {{ .Values.probes.startup.successThreshold }}
             timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml .Values.fleet.resources | nindent 12 }}
           volumeMounts:
             - mountPath: /etc/hazelcast
               name: hazelcast-config
+              readOnly: true
+            - mountPath: /etc/mock-fleet
+              name: wiremock-config
               readOnly: true
       volumes:
         - name: hazelcast-config
           configMap:
             name: {{ include "mock-fleet.hazelcastConfigMapName" . }}
+            optional: false
+        - name: wiremock-config
+          configMap:
+            name: {{ include "mock-fleet.wiremockConfigMapName" . }}
             optional: false

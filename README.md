@@ -66,6 +66,7 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - `mock-fleet.pod-creation-timeout`: how long to wait for a newly created pod to reach `Running`
 - `mock-fleet.wiremock-container-name`: WireMock container name used for spawned mock pods
 - `mock-fleet.wiremock-image`: WireMock image used for spawned mock pods
+- `mock-fleet.wiremock-config-path`: optional YAML file with default and per-mock WireMock CLI options
 - `mock-fleet.namespace`: default namespace used for runtime-created mock pods when the Kubernetes client has no active namespace
 - `mock-fleet.routing.mode`: routing strategy, either `HOST` or `PATH`
 - `mock-fleet.routing.host`: public host name of mock-fleet itself, used by `HOST` mode to distinguish local requests from mock subdomains
@@ -78,9 +79,9 @@ Main application settings live in [`application.yaml`](/home/dmitrymayer/project
 - the source-controlled Helm chart preserves the current Deployment, Service, RBAC, probes, and Hazelcast wiring
 - the chart keeps ingress enabled by default for the local `dev` workflow at `mock-fleet.localhost`
 - routing-aware ingress behavior is chart-owned:
-  `routing.mode=HOST` adds both `mock-fleet.localhost` and `*.mock-fleet.localhost`
-  `routing.mode=PATH` adds only `mock-fleet.localhost`
-- chart values are exposed through a cleaner manual interface such as `image.*`, `wiremock.*`, `routing.mode`, `ingress.*`, `resources.*`, and `env.*`
+  `fleet.routing.mode=HOST` adds both `mock-fleet.localhost` and `*.mock-fleet.localhost`
+  `fleet.routing.mode=PATH` adds only `mock-fleet.localhost`
+- chart values are exposed through a cleaner manual interface such as `image.*`, `wiremock.*`, `fleet.*`, `ingress.*`, and `env.*`
 - the `/` to `/__fleet/` redirect is handled by the application, so it works regardless of ingress controller
 
 Namespace behavior:
@@ -126,7 +127,7 @@ kubectl wait --namespace mock-fleet --for=condition=Ready pod --timeout=1m -l ap
 bin/local/deploy.sh
 ```
 
-The generic chart defaults leave ingress disabled. Local Minikube deploys stay ingress-enabled because `bin/local/deploy.sh` applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml), which keeps `ingress.host=mock-fleet.localhost` and `routing.mode=HOST` unless you override routing on the CLI. The deployed image reference is `ghcr.io/letsrokk/mock-fleet:latest`, while `./mvnw package` also keeps the version tag derived from `pom.xml`. The `/__fleet/` dashboard remains available.
+The generic chart defaults leave ingress disabled. Local Minikube deploys stay ingress-enabled because `bin/local/deploy.sh` applies [`values.minikube.yaml`](/home/dmitrymayer/projects/github/mock-fleet/deploy/helm/mock-fleet/values.minikube.yaml), which keeps `ingress.host=mock-fleet.localhost` and `fleet.routing.mode=HOST` unless you override routing on the CLI. The deployed image reference is `ghcr.io/letsrokk/mock-fleet:latest`, while `./mvnw package` also keeps the version tag derived from `pom.xml`. The `/__fleet/` dashboard remains available.
 
 The Minikube values enable Quarkus remote-dev runtime settings. Connect from your workstation with:
 
@@ -168,7 +169,7 @@ minikube addons enable ingress
 - checks that Minikube is running before doing any build or deploy work
 - relies on `./mvnw package` to build `ghcr.io/letsrokk/mock-fleet` locally and imports only `ghcr.io/letsrokk/mock-fleet:latest` into Minikube with `minikube image load`
 - allows switching routing mode with `--routing HOST|PATH`, defaulting to `HOST`
-- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` when `routing.mode=HOST`
+- renders both `mock-fleet.localhost` and `*.mock-fleet.localhost` when `fleet.routing.mode=HOST`
 - prints the exact `quarkus:remote-dev` command to run locally after deployment
 - keeps logs and remote debug port-forwarding opt-in via `--logs` and `--port-forward`
 - only uninstalls the release when explicitly requested with `--cleanup`

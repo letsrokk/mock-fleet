@@ -8,7 +8,7 @@ metadata:
 data:
   hazelcast-client.yaml: |
     hazelcast-client:
-      cluster-name: {{ .Values.hazelcastClient.clusterName }}
+      cluster-name: {{ .Values.hazelcast.client.clusterName }}
       network:
         cluster-members:
           - {{ include "mock-fleet.hazelcastServiceName" . }}:5701

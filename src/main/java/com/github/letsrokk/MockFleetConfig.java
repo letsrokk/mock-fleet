@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.smallrye.config.ConfigMapping;
 
 import java.time.Duration;
+import java.util.Optional;
 
 @ConfigMapping(prefix = "mock-fleet")
 public interface MockFleetConfig {
@@ -16,6 +17,8 @@ public interface MockFleetConfig {
     String wiremockContainerName();
 
     String wiremockImage();
+
+    Optional<String> wiremockConfigPath();
 
     StorageConfig storage();
 

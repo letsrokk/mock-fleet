@@ -158,10 +158,10 @@ HELM_ARGS=(
     --create-namespace
     -f "${CHART_DIR}/values.yaml"
     -f "${MINIKUBE_VALUES_FILE}"
-    --set "routing.mode=${ROUTING_MODE}"
+    --set "fleet.routing.mode=${ROUTING_MODE}"
 )
 
-echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with image=${LOCAL_IMAGE}, routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
+echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with image=${LOCAL_IMAGE}, fleet.routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
 deployment_name=$(
