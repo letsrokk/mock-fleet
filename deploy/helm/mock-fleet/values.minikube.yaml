@@ -3,6 +3,10 @@ ingress:
   host: mock-fleet.localhost
   className: nginx
 
+fleet:
+  routing:
+    mode: "PATH"
+
 storage:
   persistent: true
   type: s3

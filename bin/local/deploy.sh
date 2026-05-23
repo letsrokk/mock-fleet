@@ -6,8 +6,7 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
 PROFILE=${QUARKUS_PROFILE:-dev}
-DEFAULT_ROUTING_MODE=HOST
-ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-${DEFAULT_ROUTING_MODE}}
+ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
 LOCAL_IMAGE="ghcr.io/letsrokk/mock-fleet:latest"
@@ -29,7 +28,7 @@ Options:
   --cleanup           Uninstall the Helm release before exiting.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
   --profile <value>   Quarkus profile for packaging. Defaults to ${PROFILE}.
-  --routing <mode>    Routing mode to deploy. Allowed: HOST, PATH. Defaults to ${DEFAULT_ROUTING_MODE}.
+  --routing <mode>    Override fleet.routing.mode from Helm values. Allowed: HOST, PATH.
   --help              Show this help.
 EOF
 }
@@ -91,7 +90,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "${ROUTING_MODE}" != "HOST" && "${ROUTING_MODE}" != "PATH" ]]; then
+if [[ -n "${ROUTING_MODE}" && "${ROUTING_MODE}" != "HOST" && "${ROUTING_MODE}" != "PATH" ]]; then
     echo "Invalid routing mode: ${ROUTING_MODE}. Expected HOST or PATH." >&2
     usage >&2
     exit 1
@@ -165,14 +164,20 @@ HELM_ARGS=(
     --create-namespace
     -f "${CHART_DIR}/values.yaml"
     -f "${MINIKUBE_VALUES_FILE}"
-    --set "fleet.routing.mode=${ROUTING_MODE}"
     --set "fleet.image.repository=ghcr.io/letsrokk/mock-fleet"
     --set "fleet.image.tag=latest"
     --set "dash.image.repository=ghcr.io/letsrokk/mock-fleet-dash"
     --set "dash.image.tag=latest"
 )
 
-echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with fleet image=${LOCAL_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, fleet.routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
+if [[ -n "${ROUTING_MODE}" ]]; then
+    HELM_ARGS+=(--set "fleet.routing.mode=${ROUTING_MODE}")
+    routing_message="fleet.routing.mode override=${ROUTING_MODE}"
+else
+    routing_message="fleet.routing.mode from Helm values"
+fi
+
+echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with fleet image=${LOCAL_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, ${routing_message}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
 fleet_deployment_name=$(
