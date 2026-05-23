@@ -29,10 +29,6 @@ spec:
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_API_BASE_URL
               value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
-            {{- with .Values.env.quarkusLaunchDevmode }}
-            - name: QUARKUS_LAUNCH_DEVMODE
-              value: {{ . | quote }}
-            {{- end }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
             {{- with .Values.env.javaToolOptions }}

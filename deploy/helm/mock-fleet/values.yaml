@@ -83,7 +83,7 @@ fleet:
         periodSeconds: 10
         timeoutSeconds: 10
         successThreshold: 1
-        failureThreshold: 3
+        failureThreshold: 30
     resources:
       requests:
         cpu: "0.5"

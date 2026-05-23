@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
-PROFILE=${QUARKUS_PROFILE:-dev}
+PROFILE=${QUARKUS_PROFILE:-prod}
 ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
@@ -27,29 +27,22 @@ Options:
   --port-forward      Forward service/${RELEASE_NAME} remote debug port 5005 to localhost:5005.
   --cleanup           Uninstall the Helm release before exiting.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
-  --profile <value>   Quarkus profile for packaging. Defaults to ${PROFILE}.
+  --profile <value>   Quarkus profile for packaging. Defaults to ${PROFILE}. Use prod for Kubernetes probes on port 8080.
   --routing <mode>    Override fleet.proxy.routing.mode from Helm values. Allowed: HOST, PATH.
   --help              Show this help.
 EOF
 }
 
-print_remote_dev_instructions() {
+print_follow_up_instructions() {
     local release_name="$1"
     local namespace="$2"
-    local profile="$3"
 
     echo
-    echo "Remote dev follow-up:"
-    if [[ "${profile}" == "dev" ]]; then
-        echo "1. In another terminal, start Quarkus remote dev:"
-        echo "   cd fleet-proxy && ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile}"
-    else
-        live_reload_url="http://127.0.0.1:8080"
-        echo "1. In a separate terminal, expose the app:"
-        echo "   kubectl port-forward --namespace ${namespace} service/${release_name} 8080:8080"
-        echo "2. In another terminal, start Quarkus remote dev:"
-        echo "   cd fleet-proxy && ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile} -Dquarkus.live-reload.url=${live_reload_url}"
-    fi
+    echo "Follow-up:"
+    echo "1. Expose the proxy service if needed:"
+    echo "   kubectl port-forward --namespace ${namespace} service/${release_name}-proxy 8080:80"
+    echo "2. Open:"
+    echo "   http://127.0.0.1:8080/__fleet/"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -141,8 +134,11 @@ use_minikube_docker_daemon
 MAVEN_ARGS=(
     clean package
     -DskipTests
-    "-Dquarkus.profile=${PROFILE}"
 )
+
+if [[ "${PROFILE}" != "prod" ]]; then
+    MAVEN_ARGS+=("-Dquarkus.profile=${PROFILE}")
+fi
 
 echo "Packaging proxy application and building image via Maven..."
 (
@@ -242,16 +238,12 @@ kubectl rollout status \
   "deployment/${dash_deployment_name}" \
   --timeout=1m
 
-kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=proxy
-kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=api
-kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=dash
-
 if [[ "${ENABLE_PORT_FORWARD}" == "true" ]]; then
     kubectl port-forward --namespace "${NAMESPACE}" service/"${RELEASE_NAME}-proxy" 5005:5005 &
 fi
 
-print_remote_dev_instructions "${RELEASE_NAME}" "${NAMESPACE}" "${PROFILE}"
+print_follow_up_instructions "${RELEASE_NAME}" "${NAMESPACE}"
 
 if [[ "${ENABLE_LOGS}" == "true" ]]; then
-    kubectl logs --namespace "${NAMESPACE}" -f -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=proxy
+    kubectl logs --namespace "${NAMESPACE}" --follow=true --max-log-requests=7 --selector=app.kubernetes.io/name=mock-fleet
 fi

@@ -55,10 +55,6 @@ spec:
               value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
             - name: MOCK_FLEET_STORAGE_S3_PATH
               value: {{ .Values.fleet.api.storage.s3.path | quote }}
-            {{- with .Values.env.quarkusLaunchDevmode }}
-            - name: QUARKUS_LAUNCH_DEVMODE
-              value: {{ . | quote }}
-            {{- end }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
             {{- with .Values.env.javaToolOptions }}

@@ -6,7 +6,7 @@ ingress:
 fleet:
   proxy:
     routing:
-      mode: "PATH"
+      mode: "HOST"
   api:
     storage:
       persistent: true
@@ -21,5 +21,4 @@ fleet:
           - prefix mock-fleet/
 
 #env:
-#  quarkusLaunchDevmode: "true"
 #  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
