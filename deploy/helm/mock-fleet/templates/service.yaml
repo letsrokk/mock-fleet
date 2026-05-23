@@ -5,16 +5,17 @@ metadata:
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fleet
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.fleet.service.type }}
   selector:
-    {{- include "mock-fleet.selectorLabels" . | nindent 4 }}
+    {{- include "mock-fleet.fleetSelectorLabels" . | nindent 4 }}
   ports:
     - name: debug
-      port: {{ .Values.service.ports.debug }}
+      port: {{ .Values.fleet.service.ports.debug }}
       protocol: TCP
-      targetPort: {{ .Values.service.ports.targetDebug }}
+      targetPort: {{ .Values.fleet.service.ports.targetDebug }}
     - name: http
-      port: {{ .Values.service.ports.http }}
+      port: {{ .Values.fleet.service.ports.http }}
       protocol: TCP
-      targetPort: {{ .Values.service.ports.targetHttp }}
+      targetPort: {{ .Values.fleet.service.ports.targetHttp }}

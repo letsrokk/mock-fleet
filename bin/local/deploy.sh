@@ -11,6 +11,7 @@ ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-${DEFAULT_ROUTING_MODE}}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
 LOCAL_IMAGE="ghcr.io/letsrokk/mock-fleet:latest"
+LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet-dash:latest"
 LOCAL_STORAGE_CLASS="seaweedfs-s3"
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
@@ -42,13 +43,13 @@ print_remote_dev_instructions() {
     echo "Remote dev follow-up:"
     if [[ "${profile}" == "dev" ]]; then
         echo "1. In another terminal, start Quarkus remote dev:"
-        echo "   ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile}"
+        echo "   cd fleet && ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile}"
     else
         live_reload_url="http://127.0.0.1:8080"
         echo "1. In a separate terminal, expose the app:"
         echo "   kubectl port-forward --namespace ${namespace} service/${release_name} 8080:8080"
         echo "2. In another terminal, start Quarkus remote dev:"
-        echo "   ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile} -Dquarkus.live-reload.url=${live_reload_url}"
+        echo "   cd fleet && ./mvnw quarkus:remote-dev -Dquarkus.profile=${profile} -Dquarkus.live-reload.url=${live_reload_url}"
     fi
 }
 
@@ -145,7 +146,13 @@ MAVEN_ARGS=(
 )
 
 echo "Packaging application and building image via Maven..."
-./mvnw "${MAVEN_ARGS[@]}"
+(
+    cd "${REPO_ROOT}/fleet"
+    ./mvnw "${MAVEN_ARGS[@]}"
+)
+
+echo "Building dashboard image..."
+docker build -t "${LOCAL_DASH_IMAGE}" "${REPO_ROOT}/dash"
 
 echo "Resetting Docker commands back to the host daemon..."
 reset_docker_daemon
@@ -159,32 +166,54 @@ HELM_ARGS=(
     -f "${CHART_DIR}/values.yaml"
     -f "${MINIKUBE_VALUES_FILE}"
     --set "fleet.routing.mode=${ROUTING_MODE}"
+    --set "fleet.image.repository=ghcr.io/letsrokk/mock-fleet"
+    --set "fleet.image.tag=latest"
+    --set "dash.image.repository=ghcr.io/letsrokk/mock-fleet-dash"
+    --set "dash.image.tag=latest"
 )
 
-echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with image=${LOCAL_IMAGE}, fleet.routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
+echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with fleet image=${LOCAL_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, fleet.routing.mode=${ROUTING_MODE}, profile=${PROFILE}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
-deployment_name=$(
+fleet_deployment_name=$(
   kubectl get deployment \
     --namespace "${NAMESPACE}" \
-    -l app.kubernetes.io/name=mock-fleet \
+    -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=fleet \
     -o jsonpath='{.items[0].metadata.name}'
 )
 
-if [[ -z "${deployment_name}" ]]; then
+dash_deployment_name=$(
+  kubectl get deployment \
+    --namespace "${NAMESPACE}" \
+    -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=dash \
+    -o jsonpath='{.items[0].metadata.name}'
+)
+
+if [[ -z "${fleet_deployment_name}" ]]; then
   echo "No mock-fleet deployment found in namespace ${NAMESPACE} after Helm upgrade." >&2
   exit 1
 fi
 
-echo "Restarting deployment to pick up the refreshed local image..."
-kubectl rollout restart --namespace "${NAMESPACE}" "deployment/${deployment_name}"
+if [[ -z "${dash_deployment_name}" ]]; then
+  echo "No mock-fleet dashboard deployment found in namespace ${NAMESPACE} after Helm upgrade." >&2
+  exit 1
+fi
+
+echo "Restarting deployments to pick up the refreshed local images..."
+kubectl rollout restart --namespace "${NAMESPACE}" "deployment/${fleet_deployment_name}" "deployment/${dash_deployment_name}"
 
 kubectl rollout status \
   --namespace "${NAMESPACE}" \
-  "deployment/${deployment_name}" \
+  "deployment/${fleet_deployment_name}" \
   --timeout=1m
 
-kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet
+kubectl rollout status \
+  --namespace "${NAMESPACE}" \
+  "deployment/${dash_deployment_name}" \
+  --timeout=1m
+
+kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=fleet
+kubectl wait --namespace "${NAMESPACE}" --for=condition=Ready pod --timeout=1m -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=dash
 
 if [[ "${ENABLE_PORT_FORWARD}" == "true" ]]; then
     kubectl port-forward --namespace "${NAMESPACE}" service/"${RELEASE_NAME}" 5005:5005 &
@@ -193,5 +222,5 @@ fi
 print_remote_dev_instructions "${RELEASE_NAME}" "${NAMESPACE}" "${PROFILE}"
 
 if [[ "${ENABLE_LOGS}" == "true" ]]; then
-    kubectl logs --namespace "${NAMESPACE}" -f -l app.kubernetes.io/name=mock-fleet
+    kubectl logs --namespace "${NAMESPACE}" -f -l app.kubernetes.io/name=mock-fleet,app.kubernetes.io/component=fleet
 fi

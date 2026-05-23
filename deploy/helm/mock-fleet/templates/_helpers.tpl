@@ -31,6 +31,20 @@ app.kubernetes.io/name: {{ include "mock-fleet.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "mock-fleet.fleetSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: fleet
+{{- end -}}
+
+{{- define "mock-fleet.dashSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: dash
+{{- end -}}
+
+{{- define "mock-fleet.dashFullname" -}}
+{{- printf "%s-dash" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "mock-fleet.serviceAccountName" -}}
 {{- if .Values.serviceAccount.name -}}
 {{- .Values.serviceAccount.name -}}

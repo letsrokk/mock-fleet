@@ -1,20 +1,27 @@
-# mock-fleet Docker image
+# mock-fleet Docker images
 
-Published image:
+Published backend image:
 
 ```bash
 docker pull ghcr.io/letsrokk/mock-fleet:<version>
 ```
 
-Stable releases also publish `latest`:
+Published dashboard image:
+
+```bash
+docker pull ghcr.io/letsrokk/mock-fleet-dash:<version>
+```
+
+Stable releases also publish `latest` tags:
 
 ```bash
 docker pull ghcr.io/letsrokk/mock-fleet:latest
+docker pull ghcr.io/letsrokk/mock-fleet-dash:latest
 ```
 
 `mock-fleet` is a Quarkus service that routes incoming HTTP requests to per-mock WireMock pods in Kubernetes. It creates or reuses WireMock pods for each mock ID, then proxies requests to the selected pod.
 
-## Runtime
+## Backend runtime
 
 The container listens on port `8080`. Port `5005` is exposed for optional remote debugging when Java debug settings are enabled.
 
@@ -38,8 +45,10 @@ The repository includes a Helm chart under `deploy/helm/mock-fleet`. A typical i
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --namespace mock-fleet \
   --create-namespace \
-  --set image.repository=ghcr.io/letsrokk/mock-fleet \
-  --set image.tag=<version>
+  --set fleet.image.repository=ghcr.io/letsrokk/mock-fleet \
+  --set fleet.image.tag=<version> \
+  --set dash.image.repository=ghcr.io/letsrokk/mock-fleet-dash \
+  --set dash.image.tag=<version>
 ```
 
 See the main repository README for local development, routing examples, chart values, and test details:

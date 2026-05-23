@@ -1,6 +1,6 @@
 # mock-fleet Helm chart
 
-This chart installs `mock-fleet`, a Quarkus service that routes HTTP requests to per-mock WireMock pods in Kubernetes. It deploys the application, service, RBAC, probes, optional ingress, WireMock mappings storage, and a Hazelcast dependency used by the service.
+This chart installs `mock-fleet`: a Quarkus backend that routes HTTP requests to per-mock WireMock pods and a separate static dashboard deployment. It also deploys backend RBAC, probes, optional ingress, WireMock mappings storage, and a Hazelcast dependency used by the backend.
 
 ## Install from GHCR
 
@@ -13,12 +13,17 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --create-namespace
 ```
 
-The chart defaults to the published application image:
+The chart defaults to the published backend and dashboard images:
 
 ```yaml
-image:
-  repository: ghcr.io/letsrokk/mock-fleet
-  tag: latest
+fleet:
+  image:
+    repository: ghcr.io/letsrokk/mock-fleet
+    tag: latest
+dash:
+  image:
+    repository: ghcr.io/letsrokk/mock-fleet-dash
+    tag: latest
 ```
 
 Pin the application image to the same release version when installing a release chart:
@@ -28,7 +33,8 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --version <version> \
   --namespace mock-fleet \
   --create-namespace \
-  --set image.tag=<version>
+  --set fleet.image.tag=<version> \
+  --set dash.image.tag=<version>
 ```
 
 ## Routing and ingress
@@ -49,15 +55,19 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --set ingress.host=mock-fleet.example.com
 ```
 
-When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet host and wildcard mock subdomains for that host.
+For the fleet host, Ingress routes `/__fleet/api/*` to the backend and `/__fleet/*` to the dashboard. When `fleet.routing.mode=HOST`, the rendered ingress also routes wildcard mock subdomains to the backend.
 
 ## Common values
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `image.repository` | `ghcr.io/letsrokk/mock-fleet` | Application image repository |
-| `image.tag` | `latest` | Application image tag |
-| `image.pullPolicy` | `IfNotPresent` | Kubernetes image pull policy |
+| `fleet.image.repository` | `ghcr.io/letsrokk/mock-fleet` | Backend image repository |
+| `fleet.image.tag` | `latest` | Backend image tag |
+| `fleet.image.pullPolicy` | `IfNotPresent` | Backend image pull policy |
+| `dash.enabled` | `true` | Deploy the dashboard |
+| `dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository |
+| `dash.image.tag` | `latest` | Dashboard image tag |
+| `dash.image.pullPolicy` | `IfNotPresent` | Dashboard image pull policy |
 | `wiremock.containerName` | `wiremock` | Container name used in spawned WireMock pods |
 | `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy used by spawned WireMock pods |
@@ -68,11 +78,13 @@ When `fleet.routing.mode=HOST`, the rendered ingress includes both the fleet hos
 | `fleet.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
 | `fleet.podCreationTimeout` | `1M` | How long to wait for a newly created mock pod to become ready |
 | `fleet.routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
+| `fleet.service.ports.http` | `80` | Backend Service HTTP port |
+| `fleet.service.ports.debug` | `5005` | Backend Service debug port |
 | `fleet.resources` | CPU `0.5`/`2`, memory `512Mi`/`2Gi` | Resources applied to the mock-fleet application container |
+| `dash.service.ports.http` | `80` | Dashboard Service HTTP port |
+| `dash.resources` | CPU `0.05`/`0.25`, memory `64Mi`/`128Mi` | Resources applied to the dashboard container |
 | `ingress.enabled` | `false` | Create an ingress resource |
 | `ingress.host` | `mock-fleet.localhost` | Public fleet host |
-| `service.ports.http` | `80` | Service HTTP port |
-| `service.ports.debug` | `5005` | Service debug port |
 | `storage.persistent` | `false` | Enable persistent WireMock mappings storage |
 | `storage.type` | `s3` | Persistent storage type. Only `s3` is supported for now |
 | `storage.annotations` | `{}` | Annotations added to the persistent storage volume |

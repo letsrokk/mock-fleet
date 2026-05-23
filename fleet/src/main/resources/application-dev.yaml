@@ -3,9 +3,6 @@ quarkus:
     category:
       "com.github.letsrokk":
         level: DEBUG
-  quinoa:
-    package-manager-install:
-      node-version: 22.14.0
   package:
     jar:
       type: mutable-jar

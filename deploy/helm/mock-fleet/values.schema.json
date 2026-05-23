@@ -3,439 +3,122 @@
   "title": "mock-fleet values",
   "type": "object",
   "properties": {
-    "nameOverride": {
-      "type": "string"
-    },
-    "fullnameOverride": {
-      "type": "string"
-    },
-    "namespaceOverride": {
-      "type": "string"
-    },
-    "image": {
-      "type": "object",
-      "properties": {
-        "repository": {
-          "type": "string"
-        },
-        "tag": {
-          "type": "string"
-        },
-        "pullPolicy": {
-          "type": "string"
-        }
-      },
-      "required": ["repository", "tag", "pullPolicy"]
-    },
-    "wiremock": {
-      "type": "object",
-      "properties": {
-        "containerName": {
-          "type": "string"
-        },
-        "containerImage": {
-          "type": "string"
-        },
-        "containerImagePullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
-        },
-        "config": {
-          "type": "object",
-          "properties": {
-            "default": {
-              "type": "object",
-              "properties": {
-                "options": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "resources": {
-                  "$ref": "#/definitions/resources"
-                }
-              },
-              "required": ["options", "resources"]
-            },
-            "mocks": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "options": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "resources": {
-                    "$ref": "#/definitions/resources"
-                  }
-                },
-                "required": ["id", "options"]
-              }
-            }
-          },
-          "required": ["default", "mocks"]
-        }
-      },
-      "required": ["containerName", "containerImage", "containerImagePullPolicy", "config"]
-    },
-    "service": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string"
-        },
-        "ports": {
-          "type": "object",
-          "properties": {
-            "http": {
-              "type": "integer"
-            },
-            "targetHttp": {
-              "type": "integer"
-            },
-            "debug": {
-              "type": "integer"
-            },
-            "targetDebug": {
-              "type": "integer"
-            }
-          },
-          "required": ["http", "targetHttp", "debug", "targetDebug"]
-        }
-      },
-      "required": ["type", "ports"]
-    },
-    "ingress": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "host": {
-          "type": "string"
-        },
-        "className": {
-          "type": "string"
-        },
-        "annotations": {
-          "type": "object"
-        },
-        "tls": {
-          "type": "array"
-        },
-        "path": {
-          "type": "string"
-        },
-        "pathType": {
-          "type": "string"
-        }
-      },
-      "required": ["enabled", "host", "path", "pathType"]
-    },
-    "securityContext": {
-      "type": "object",
-      "properties": {
-        "runAsNonRoot": {
-          "type": "boolean"
-        }
-      },
-      "required": ["runAsNonRoot"]
-    },
-    "storage": {
-      "type": "object",
-      "properties": {
-        "persistent": {
-          "type": "boolean"
-        },
-        "type": {
-          "type": "string",
-          "enum": ["s3"]
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "s3": {
-          "type": "object",
-          "properties": {
-            "bucket": {
-              "type": "string"
-            },
-            "provisioner": {
-              "type": "string"
-            },
-            "storageClassName": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            },
-            "authenticationSource": {
-              "type": "string",
-              "enum": ["driver", "pod"]
-            },
-            "cacheSize": {
-              "type": "string"
-            },
-            "mountOptions": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": ["bucket", "provisioner", "storageClassName", "path", "authenticationSource", "cacheSize", "mountOptions"]
-        }
-      },
-      "required": [
-        "persistent",
-        "type",
-        "annotations",
-        "s3"
-      ]
-    },
-    "probes": {
-      "type": "object",
-      "properties": {
-        "liveness": {
-          "$ref": "#/definitions/httpProbe"
-        },
-        "readiness": {
-          "$ref": "#/definitions/httpProbe"
-        },
-        "startup": {
-          "$ref": "#/definitions/httpProbe"
-        }
-      },
-      "required": ["liveness", "readiness", "startup"]
-    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "namespaceOverride": { "type": "string" },
     "fleet": {
       "type": "object",
       "properties": {
-        "replicas": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "podInactivityThreshold": {
-          "type": "string"
-        },
-        "podCreationTimeout": {
-          "type": "string"
-        },
+        "image": { "$ref": "#/definitions/image" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "podInactivityThreshold": { "type": "string" },
+        "podCreationTimeout": { "type": "string" },
         "routing": {
           "type": "object",
           "properties": {
-            "mode": {
-              "type": "string",
-              "enum": ["HOST", "PATH"]
-            }
+            "mode": { "type": "string", "enum": ["HOST", "PATH"] }
           },
           "required": ["mode"]
         },
-        "resources": {
-          "$ref": "#/definitions/containerResources"
-        }
+        "service": { "$ref": "#/definitions/fleetService" },
+        "resources": { "$ref": "#/definitions/containerResources" }
       },
-      "required": ["replicas", "podInactivityThreshold", "podCreationTimeout", "routing", "resources"]
+      "required": ["image", "replicas", "podInactivityThreshold", "podCreationTimeout", "routing", "service", "resources"]
     },
-    "env": {
+    "dash": {
       "type": "object",
       "properties": {
-        "quinoaUiDir": {
-          "type": "string"
-        },
-        "quarkusPackageOutputDirectory": {
-          "type": "string"
-        },
-        "quarkusLaunchDevmode": {
-          "type": "string"
-        },
-        "javaOpts": {
-          "type": "string"
-        },
-        "javaToolOptions": {
-          "type": "string"
-        },
-        "userDir": {
-          "type": "string"
-        }
+        "enabled": { "type": "boolean" },
+        "image": { "$ref": "#/definitions/image" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "service": { "$ref": "#/definitions/dashService" },
+        "resources": { "$ref": "#/definitions/containerResources" }
       },
-      "required": [
-        "quinoaUiDir",
-        "quarkusPackageOutputDirectory",
-        "javaOpts",
-        "userDir"
-      ]
+      "required": ["enabled", "image", "replicas", "service", "resources"]
     },
-    "serviceAccount": {
+    "wiremock": { "type": "object" },
+    "ingress": { "type": "object" },
+    "securityContext": {
       "type": "object",
       "properties": {
-        "create": {
-          "type": "boolean"
-        },
-        "name": {
-          "type": "string"
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
+        "runAsNonRoot": { "type": "boolean" }
       },
-      "required": ["create", "name", "annotations"]
+      "required": ["runAsNonRoot"]
     },
-    "rbac": {
-      "type": "object",
-      "properties": {
-        "create": {
-          "type": "boolean"
-        }
-      },
-      "required": ["create"]
-    },
-    "hazelcast": {
-      "type": "object",
-      "properties": {
-        "client": {
-          "type": "object",
-          "properties": {
-            "clusterName": {
-              "type": "string"
-            }
-          },
-          "required": ["clusterName"]
-        },
-        "cluster": {
-          "type": "object",
-          "properties": {
-            "memberCount": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          "required": ["memberCount"]
-        },
-        "mancenter": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": ["enabled"]
-        }
-      },
-      "required": ["client", "cluster", "mancenter"]
-    }
+    "storage": { "type": "object" },
+    "probes": { "type": "object" },
+    "env": { "type": "object" },
+    "serviceAccount": { "type": "object" },
+    "rbac": { "type": "object" },
+    "hazelcast": { "type": "object" }
   },
   "required": [
-    "image",
+    "fleet",
+    "dash",
     "wiremock",
-    "service",
     "ingress",
     "securityContext",
     "storage",
     "probes",
-    "fleet",
     "env",
     "serviceAccount",
     "rbac",
     "hazelcast"
   ],
   "definitions": {
-    "httpProbe": {
+    "image": {
       "type": "object",
       "properties": {
-        "path": {
-          "type": "string"
-        },
-        "initialDelaySeconds": {
-          "type": "integer"
-        },
-        "periodSeconds": {
-          "type": "integer"
-        },
-        "timeoutSeconds": {
-          "type": "integer"
-        },
-        "successThreshold": {
-          "type": "integer"
-        },
-        "failureThreshold": {
-          "type": "integer"
+        "repository": { "type": "string" },
+        "tag": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      },
+      "required": ["repository", "tag", "pullPolicy"]
+    },
+    "fleetService": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "http": { "type": "integer" },
+            "targetHttp": { "type": "integer" },
+            "debug": { "type": "integer" },
+            "targetDebug": { "type": "integer" }
+          },
+          "required": ["http", "targetHttp", "debug", "targetDebug"]
         }
       },
-      "required": [
-        "path",
-        "initialDelaySeconds",
-        "periodSeconds",
-        "timeoutSeconds",
-        "successThreshold",
-        "failureThreshold"
-      ]
+      "required": ["type", "ports"]
     },
-    "resources": {
+    "dashService": {
       "type": "object",
       "properties": {
-        "requests": {
-          "$ref": "#/definitions/resourceValues"
-        },
-        "limits": {
-          "$ref": "#/definitions/resourceValues"
+        "type": { "type": "string" },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "http": { "type": "integer" },
+            "targetHttp": { "type": "integer" }
+          },
+          "required": ["http", "targetHttp"]
         }
-      }
+      },
+      "required": ["type", "ports"]
     },
     "containerResources": {
       "type": "object",
       "properties": {
-        "requests": {
-          "type": "object",
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": ["cpu", "memory"]
-        },
-        "limits": {
-          "type": "object",
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": ["cpu", "memory"]
-        }
+        "requests": { "$ref": "#/definitions/resourceValues" },
+        "limits": { "$ref": "#/definitions/resourceValues" }
       },
       "required": ["requests", "limits"]
     },
     "resourceValues": {
       "type": "object",
       "additionalProperties": {
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          }
-        ]
+        "oneOf": [{ "type": "string" }, { "type": "number" }]
       }
     }
   }

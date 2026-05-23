@@ -1,6 +1,6 @@
 apiVersion: v2
 name: mock-fleet
-description: Deploy mock-fleet, a Quarkus service that routes requests to per-mock WireMock pods in Kubernetes
+description: Deploy mock-fleet backend and dashboard for routing requests to per-mock WireMock pods in Kubernetes
 type: application
 version: 1.0.0-SNAPSHOT
 appVersion: "1.0.0-SNAPSHOT"

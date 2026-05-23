@@ -149,15 +149,13 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
-    void servesDashboardFromFleetNamespaceInPathMode() {
+    void keepsFleetDashboardPathsLocalInPathMode() {
         given()
                 .header("Host", "mock-fleet.localhost")
         .when()
                 .get("/__fleet/")
         .then()
-                .statusCode(200)
-                .body(containsString("<div id=\"root\"></div>"))
-                .body(containsString("/__fleet/assets/"));
+                .statusCode(404);
 
         assertEquals(null, capturedRequest.get());
     }
@@ -266,15 +264,15 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
-    void keepsDashboardDevSourcesLocalInPathMode() {
+    void keepsDashboardAssetPathsLocalInPathMode() {
         when(podManager.getUpstreamBaseUrl("__fleet")).thenReturn(upstreamBaseUrl);
 
         given()
                 .header("Host", "mock-fleet.localhost")
         .when()
-                .get("/__fleet/src/main.tsx")
+                .get("/__fleet/assets/app.js")
         .then()
-                .statusCode(200);
+                .statusCode(404);
 
         assertEquals(null, capturedRequest.get());
     }

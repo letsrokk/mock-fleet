@@ -1,12 +1,6 @@
 quarkus:
-  quinoa:
-    ui-dir: ${QUINOA_UI_DIR:${user.dir}/src/main/webui}
-    ui-root-path: /__fleet
-    build-dir: dist
-    enable-spa-routing: true
-    ignored-path-prefixes: /__fleet/api
   smallrye-health:
-    root-path: /__fleet/health
+    root-path: /__fleet/api/health
   container-image:
     builder: docker
     registry: ghcr.io

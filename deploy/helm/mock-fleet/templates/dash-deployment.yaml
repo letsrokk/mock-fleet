@@ -1,0 +1,32 @@
+{{- if .Values.dash.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.dashFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dash
+spec:
+  replicas: {{ .Values.dash.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.dashSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mock-fleet.dashSelectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+      containers:
+        - name: dash
+          image: {{ printf "%s:%s" .Values.dash.image.repository .Values.dash.image.tag }}
+          imagePullPolicy: {{ .Values.dash.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dash.service.ports.targetHttp }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.dash.resources | nindent 12 }}
+{{- end }}

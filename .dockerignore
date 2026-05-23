@@ -1,9 +1,9 @@
-*
-!.dockerignore
-!pom.xml
-!src/main/docker/Dockerfile.jvm
-!src/main/webui/**
-src/main/webui/.vite
-src/main/webui/node_modules
-src/main/webui/*.tsbuildinfo
-!target/quarkus-app/**
+# Root Docker builds should choose an app context explicitly:
+# docker build -f fleet/src/main/docker/Dockerfile.jvm fleet
+# docker build -f dash/Dockerfile dash
+target
+fleet/target
+dash/node_modules
+dash/dist
+dash/.vite
+dash/*.tsbuildinfo

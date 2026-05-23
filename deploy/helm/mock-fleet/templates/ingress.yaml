@@ -28,6 +28,22 @@ spec:
                 name: {{ include "mock-fleet.fullname" . }}
                 port:
                   name: http
+            path: /__fleet/api
+            pathType: Prefix
+          {{- if .Values.dash.enabled }}
+          - backend:
+              service:
+                name: {{ include "mock-fleet.dashFullname" . }}
+                port:
+                  name: http
+            path: /__fleet
+            pathType: Prefix
+          {{- end }}
+          - backend:
+              service:
+                name: {{ include "mock-fleet.fullname" . }}
+                port:
+                  name: http
             path: {{ .Values.ingress.path }}
             pathType: {{ .Values.ingress.pathType }}
     {{- if eq .Values.fleet.routing.mode "HOST" }}

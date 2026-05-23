@@ -2,17 +2,23 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
-image:
-  repository: ghcr.io/letsrokk/mock-fleet
-  tag: latest
-  pullPolicy: IfNotPresent
-
 fleet:
+  image:
+    repository: ghcr.io/letsrokk/mock-fleet
+    tag: latest
+    pullPolicy: IfNotPresent
   routing:
     mode: HOST
   podInactivityThreshold: 1M
   podCreationTimeout: 1M
   replicas: 2
+  service:
+    type: ClusterIP
+    ports:
+      http: 80
+      targetHttp: 8080
+      debug: 5005
+      targetDebug: 5005
   resources:
     requests:
       cpu: "0.5"
@@ -37,13 +43,25 @@ wiremock:
           memory: 1Gi
     mocks: []
 
-service:
-  type: ClusterIP
-  ports:
-    http: 80
-    targetHttp: 8080
-    debug: 5005
-    targetDebug: 5005
+dash:
+  enabled: true
+  image:
+    repository: ghcr.io/letsrokk/mock-fleet-dash
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    ports:
+      http: 80
+      targetHttp: 8080
+  resources:
+    requests:
+      cpu: "0.05"
+      memory: 64Mi
+    limits:
+      cpu: "0.25"
+      memory: 128Mi
 
 ingress:
   enabled: false
@@ -72,21 +90,21 @@ storage:
 
 probes:
   liveness:
-    path: /__fleet/health/live
+    path: /__fleet/api/health/live
     initialDelaySeconds: 15
     periodSeconds: 20
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
   readiness:
-    path: /__fleet/health/ready
+    path: /__fleet/api/health/ready
     initialDelaySeconds: 5
     periodSeconds: 10
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
   startup:
-    path: /__fleet/health/started
+    path: /__fleet/api/health/started
     initialDelaySeconds: 5
     periodSeconds: 10
     timeoutSeconds: 10
@@ -94,8 +112,6 @@ probes:
     failureThreshold: 3
 
 env:
-  quinoaUiDir: /workspace/src/main/webui
-  quarkusPackageOutputDirectory: /workspace/target
   javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
   userDir: /workspace
 

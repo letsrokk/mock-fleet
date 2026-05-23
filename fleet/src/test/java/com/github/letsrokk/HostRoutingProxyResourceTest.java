@@ -163,7 +163,7 @@ class HostRoutingProxyResourceTest {
         given()
                 .header("Host", "10.42.0.17:8080")
         .when()
-                .get("/__fleet/health/started")
+                .get("/__fleet/api/health/started")
         .then()
                 .statusCode(200)
                 .body(containsString("\"status\""))
@@ -314,20 +314,20 @@ class HostRoutingProxyResourceTest {
     }
 
     @Test
-    void proxiesFleetHealthRequestsForMockHosts() {
+    void proxiesFleetApiHealthRequestsForMockHosts() {
         when(podManager.getUpstreamBaseUrl("demo")).thenReturn(upstreamBaseUrl);
 
         given()
                 .header("Host", "demo.mock-fleet.localhost")
         .when()
-                .get("/__fleet/health/started")
+                .get("/__fleet/api/health/started")
         .then()
                 .statusCode(200)
                 .body(is("ok"));
 
         CapturedRequest request = capturedRequest.get();
         assertNotNull(request);
-        assertEquals("/__fleet/health/started", request.uri());
+        assertEquals("/__fleet/api/health/started", request.uri());
     }
 
     @Test

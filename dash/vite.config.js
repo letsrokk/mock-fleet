@@ -3,6 +3,14 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
     base: "/__fleet/",
     plugins: [react()],
+    server: {
+        proxy: {
+            "/__fleet/api": {
+                target: "http://localhost:8080",
+                changeOrigin: true
+            }
+        }
+    },
     build: {
         outDir: "dist",
         emptyOutDir: true,
