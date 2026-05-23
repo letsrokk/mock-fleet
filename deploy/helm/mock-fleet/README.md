@@ -1,10 +1,12 @@
 # mock-fleet Helm chart
 
-This chart installs `mock-fleet`: a Quarkus backend that routes HTTP requests to per-mock WireMock pods and a separate static dashboard deployment. It also deploys backend RBAC, probes, optional ingress, WireMock mappings storage, and a Hazelcast dependency used by the backend.
+This chart installs `mock-fleet` as three services:
+
+- `fleet-proxy`: request routing and proxying
+- `fleet-api`: management API, WireMock pod lifecycle, Hazelcast state, cleanup jobs, and Kubernetes access
+- `fleet-dash`: static dashboard
 
 ## Install from GHCR
-
-Install a specific chart version from the OCI registry:
 
 ```bash
 helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
@@ -13,38 +15,29 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --create-namespace
 ```
 
-The chart defaults to the published backend and dashboard images:
-
-```yaml
-fleet:
-  image:
-    repository: ghcr.io/letsrokk/mock-fleet
-    tag: latest
-dash:
-  image:
-    repository: ghcr.io/letsrokk/mock-fleet-dash
-    tag: latest
-```
-
-Pin the application image to the same release version when installing a release chart:
+Pin images when installing a release chart:
 
 ```bash
 helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --version <version> \
   --namespace mock-fleet \
   --create-namespace \
-  --set fleet.image.tag=<version> \
-  --set dash.image.tag=<version>
+  --set fleet.proxy.image.tag=<version> \
+  --set fleet.api.image.tag=<version> \
+  --set fleet.dash.image.tag=<version>
 ```
 
-## Routing and ingress
+## Routing And Ingress
 
-The chart supports two routing modes:
+Ingress is disabled by default. When enabled, path routing is explicit:
 
-- `fleet.routing.mode=HOST`: requests for single-label subdomains of `ingress.host` route to matching mock IDs
-- `fleet.routing.mode=PATH`: the first URL path segment is used as the mock ID
-
-Ingress is disabled by default. To expose the service through an ingress controller:
+- `/__fleet/api/health` -> `fleet-api`
+- `/__fleet/api` -> `fleet-api`
+- `/__fleet/proxy/health` -> `fleet-proxy`
+- `/__fleet/dash/health` -> `fleet-dash`
+- `/__fleet` -> `fleet-dash`
+- `/` -> `fleet-proxy`
+- `*.ingress.host` -> `fleet-proxy` only when `fleet.proxy.routing.mode=HOST`
 
 ```bash
 helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
@@ -55,92 +48,35 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --set ingress.host=mock-fleet.example.com
 ```
 
-For the fleet host, Ingress routes `/__fleet/api/*` to the backend and `/__fleet/*` to the dashboard. When `fleet.routing.mode=HOST`, the rendered ingress also routes wildcard mock subdomains to the backend.
-
-## Common values
+## Common Values
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `fleet.image.repository` | `ghcr.io/letsrokk/mock-fleet` | Backend image repository |
-| `fleet.image.tag` | `latest` | Backend image tag |
-| `fleet.image.pullPolicy` | `IfNotPresent` | Backend image pull policy |
-| `dash.enabled` | `true` | Deploy the dashboard |
-| `dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository |
-| `dash.image.tag` | `latest` | Dashboard image tag |
-| `dash.image.pullPolicy` | `IfNotPresent` | Dashboard image pull policy |
-| `wiremock.containerName` | `wiremock` | Container name used in spawned WireMock pods |
-| `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
-| `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy used by spawned WireMock pods |
-| `wiremock.config.default.options` | `[]` | WireMock CLI options applied to every spawned mock pod |
-| `wiremock.config.default.resources` | CPU `0.5`/`1`, memory `512Mi`/`1Gi` | Default resources applied to every spawned mock pod |
-| `wiremock.config.mocks` | `[]` | Per-mock WireMock CLI options and resource overrides keyed by mock ID |
-| `fleet.replicas` | `2` | Number of mock-fleet application replicas |
-| `fleet.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
-| `fleet.podCreationTimeout` | `1M` | How long to wait for a newly created mock pod to become ready |
-| `fleet.routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
-| `fleet.service.ports.http` | `80` | Backend Service HTTP port |
-| `fleet.service.ports.debug` | `5005` | Backend Service debug port |
-| `fleet.resources` | CPU `0.5`/`2`, memory `512Mi`/`2Gi` | Resources applied to the mock-fleet application container |
-| `dash.service.ports.http` | `80` | Dashboard Service HTTP port |
-| `dash.resources` | CPU `0.05`/`0.25`, memory `64Mi`/`128Mi` | Resources applied to the dashboard container |
+| `fleet.proxy.image.repository` | `ghcr.io/letsrokk/mock-fleet-proxy` | Proxy image repository |
+| `fleet.proxy.image.tag` | `latest` | Proxy image tag |
+| `fleet.proxy.routing.mode` | `HOST` | Routing strategy, `HOST` or `PATH` |
+| `fleet.proxy.probes.*.path` | `/__fleet/proxy/health/*` | Proxy health probe paths |
+| `fleet.api.image.repository` | `ghcr.io/letsrokk/mock-fleet-api` | API image repository |
+| `fleet.api.image.tag` | `latest` | API image tag |
+| `fleet.api.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
+| `fleet.api.podCreationTimeout` | `1M` | How long to wait for a new mock pod to become ready |
+| `fleet.api.wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
+| `fleet.api.storage.persistent` | `false` | Enable persistent WireMock mappings storage |
+| `fleet.api.probes.*.path` | `/__fleet/api/health/*` | API health probe paths |
+| `fleet.dash.enabled` | `true` | Deploy dashboard |
+| `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository |
+| `fleet.dash.probes.*.path` | `/__fleet/dash/health/*` | Dashboard health probe paths |
 | `ingress.enabled` | `false` | Create an ingress resource |
 | `ingress.host` | `mock-fleet.localhost` | Public fleet host |
-| `storage.persistent` | `false` | Enable persistent WireMock mappings storage |
-| `storage.type` | `s3` | Persistent storage type. Only `s3` is supported for now |
-| `storage.annotations` | `{}` | Annotations added to the persistent storage volume |
-| `storage.s3.bucket` | `""` | S3 bucket used by the S3 CSI persistent volume. Required when `storage.persistent=true` |
-| `storage.s3.provisioner` | `s3.csi.aws.com` | CSI driver used by the S3 persistent volume |
-| `storage.s3.storageClassName` | `""` | Storage class name used by the S3 PV and PVC |
-| `storage.s3.path` | `/mock-fleet` | Path where the S3-backed storage is mounted while preparing per-mock mapping directories |
-| `storage.s3.authenticationSource` | `driver` | Mountpoint S3 CSI authentication source, `driver` or `pod` |
-| `storage.s3.cacheSize` | `1Gi` | Mountpoint S3 CSI `emptyDir` cache size limit |
-| `storage.s3.mountOptions` | `[]` | Mount options added to the S3 CSI persistent volume |
-| `rbac.create` | `true` | Create RBAC resources for pod and service management |
-| `serviceAccount.create` | `true` | Create a service account |
-| `serviceAccount.annotations` | `{}` | Annotations added to the created service account |
-| `hazelcast.client.clusterName` | `dev` | Hazelcast client cluster name used by mock-fleet |
-| `hazelcast.cluster.memberCount` | `2` | Hazelcast dependency member count |
-| `hazelcast.mancenter.enabled` | `false` | Enable Hazelcast Management Center |
+| `rbac.create` | `true` | Create RBAC resources for `fleet-api` pod management |
+| `serviceAccount.create` | `true` | Create a service account for `fleet-api` |
+| `hazelcast.client.clusterName` | `dev` | Hazelcast client cluster name used by `fleet-api` |
 
-See `values.yaml` and `values.schema.json` in the chart for the complete value surface.
+See `values.yaml` and `values.schema.json` for the complete value surface.
 
-Helm deployments derive the runtime namespace from the mock-fleet pod metadata. Direct or custom deployments can still set `MOCK_FLEET_NAMESPACE` when the Kubernetes client has no active namespace.
+## Local Minikube Values
 
-WireMock CLI options and mock pod resource settings are rendered into a ConfigMap. Helm upgrades roll the mock-fleet Deployment when that ConfigMap changes.
-
-```yaml
-wiremock:
-  config:
-    default:
-      options:
-        - --global-response-templating
-      resources:
-        requests:
-          cpu: "0.5"
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
-    mocks:
-      - id: demo
-        options:
-          - --verbose
-        resources:
-          requests:
-            cpu: "2"
-            memory: 2Gi
-          limits:
-            cpu: "3"
-            memory: 3Gi
-      - id: empty-options
-        options: []
-```
-
-When `storage.s3.authenticationSource=pod`, Mountpoint S3 CSI uses the workload pod's ServiceAccount credentials. In that mode, configure the ServiceAccount for the AWS identity mechanism in use, for example by setting `serviceAccount.annotations.eks.amazonaws.com/role-arn` for IRSA. The default `storage.s3.authenticationSource=driver` continues to use driver-level credentials.
-
-## Local Minikube values
-
-The repository includes `values.minikube.yaml` for the local Minikube workflow. It enables ingress at `mock-fleet.localhost`, keeps `HOST` routing, uses larger local resource requests, and keeps persistent storage disabled by default.
+The repository includes `values.minikube.yaml` for local Minikube. It enables ingress at `mock-fleet.localhost`, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
@@ -148,13 +84,3 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --create-namespace \
   -f deploy/helm/mock-fleet/values.minikube.yaml
 ```
-
-## Runtime notes
-
-The service expects Kubernetes API access so it can create, reuse, and delete WireMock pods. The chart creates the required service account and RBAC resources by default.
-
-The chart configures Hazelcast through the bundled Hazelcast dependency and passes the client configuration location to the application with `env.javaOpts`.
-
-For application behavior, local development, and routing examples, see the repository README:
-
-https://github.com/letsrokk/mock-fleet

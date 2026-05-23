@@ -1,64 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "mock-fleet.fullname" . }}
+  name: {{ include "mock-fleet.proxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: fleet
+    app.kubernetes.io/component: proxy
 spec:
-  replicas: {{ .Values.fleet.replicas }}
+  replicas: {{ .Values.fleet.proxy.replicas }}
   selector:
     matchLabels:
-      {{- include "mock-fleet.fleetSelectorLabels" . | nindent 6 }}
+      {{- include "mock-fleet.proxySelectorLabels" . | nindent 6 }}
   template:
     metadata:
-      annotations:
-        checksum/hazelcast-client-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
-        checksum/wiremock-config: {{ include (print $.Template.BasePath "/wiremock-configmap.yaml") . | sha256sum }}
       labels:
-        {{- include "mock-fleet.fleetSelectorLabels" . | nindent 8 }}
+        {{- include "mock-fleet.proxySelectorLabels" . | nindent 8 }}
     spec:
-      serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
       containers:
-        - name: {{ include "mock-fleet.name" . }}
-          image: {{ printf "%s:%s" .Values.fleet.image.repository .Values.fleet.image.tag }}
-          imagePullPolicy: {{ .Values.fleet.image.pullPolicy }}
+        - name: proxy
+          image: {{ printf "%s:%s" .Values.fleet.proxy.image.repository .Values.fleet.proxy.image.tag }}
+          imagePullPolicy: {{ .Values.fleet.proxy.image.pullPolicy }}
           env:
-            - name: KUBERNETES_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: MOCK_FLEET_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
             - name: MOCK_FLEET_ROUTING_MODE
-              value: {{ .Values.fleet.routing.mode | quote }}
+              value: {{ .Values.fleet.proxy.routing.mode | quote }}
             - name: MOCK_FLEET_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
-            - name: MOCK_FLEET_INACTIVITY_THRESHOLD
-              value: {{ .Values.fleet.podInactivityThreshold | quote }}
-            - name: MOCK_FLEET_POD_CREATION_TIMEOUT
-              value: {{ .Values.fleet.podCreationTimeout | quote }}
-            - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
-              value: {{ .Values.wiremock.containerName | quote }}
-            - name: MOCK_FLEET_WIREMOCK_IMAGE
-              value: {{ .Values.wiremock.containerImage | quote }}
-            - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
-              value: {{ .Values.wiremock.containerImagePullPolicy | quote }}
-            - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
-              value: /etc/mock-fleet/wiremock-options.yaml
-            - name: MOCK_FLEET_STORAGE_PERSISTENT
-              value: {{ .Values.storage.persistent | quote }}
-            - name: MOCK_FLEET_STORAGE_TYPE
-              value: {{ .Values.storage.type | quote }}
-            - name: MOCK_FLEET_STORAGE_PVC_NAME
-              value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
-            - name: MOCK_FLEET_STORAGE_S3_PATH
-              value: {{ .Values.storage.s3.path | quote }}
+            - name: MOCK_FLEET_API_BASE_URL
+              value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
             {{- with .Values.env.quarkusLaunchDevmode }}
             - name: QUARKUS_LAUNCH_DEVMODE
               value: {{ . | quote }}
@@ -73,56 +43,40 @@ spec:
               value: {{ .Values.env.userDir | quote }}
           ports:
             - name: debug
-              containerPort: {{ .Values.fleet.service.ports.targetDebug }}
+              containerPort: {{ .Values.fleet.proxy.service.ports.targetDebug }}
               protocol: TCP
             - name: http
-              containerPort: {{ .Values.fleet.service.ports.targetHttp }}
+              containerPort: {{ .Values.fleet.proxy.service.ports.targetHttp }}
               protocol: TCP
           livenessProbe:
-            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+            failureThreshold: {{ .Values.fleet.proxy.probes.liveness.failureThreshold }}
             httpGet:
-              path: {{ .Values.probes.liveness.path }}
-              port: {{ .Values.fleet.service.ports.targetHttp }}
+              path: {{ .Values.fleet.proxy.probes.liveness.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
               scheme: HTTP
-            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
-            successThreshold: {{ .Values.probes.liveness.successThreshold }}
-            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.liveness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.liveness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.liveness.timeoutSeconds }}
           readinessProbe:
-            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            failureThreshold: {{ .Values.fleet.proxy.probes.readiness.failureThreshold }}
             httpGet:
-              path: {{ .Values.probes.readiness.path }}
-              port: {{ .Values.fleet.service.ports.targetHttp }}
+              path: {{ .Values.fleet.proxy.probes.readiness.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
               scheme: HTTP
-            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
-            successThreshold: {{ .Values.probes.readiness.successThreshold }}
-            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.readiness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.readiness.timeoutSeconds }}
           startupProbe:
-            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            failureThreshold: {{ .Values.fleet.proxy.probes.startup.failureThreshold }}
             httpGet:
-              path: {{ .Values.probes.startup.path }}
-              port: {{ .Values.fleet.service.ports.targetHttp }}
+              path: {{ .Values.fleet.proxy.probes.startup.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
               scheme: HTTP
-            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
-            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
-            successThreshold: {{ .Values.probes.startup.successThreshold }}
-            timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.startup.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.startup.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.startup.timeoutSeconds }}
           resources:
-            {{- toYaml .Values.fleet.resources | nindent 12 }}
-          volumeMounts:
-            - mountPath: /etc/hazelcast
-              name: hazelcast-config
-              readOnly: true
-            - mountPath: /etc/mock-fleet
-              name: wiremock-config
-              readOnly: true
-      volumes:
-        - name: hazelcast-config
-          configMap:
-            name: {{ include "mock-fleet.hazelcastConfigMapName" . }}
-            optional: false
-        - name: wiremock-config
-          configMap:
-            name: {{ include "mock-fleet.wiremockConfigMapName" . }}
-            optional: false
+            {{- toYaml .Values.fleet.proxy.resources | nindent 12 }}

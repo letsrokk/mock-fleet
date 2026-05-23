@@ -3,65 +3,162 @@ fullnameOverride: ""
 namespaceOverride: ""
 
 fleet:
-  image:
-    repository: ghcr.io/letsrokk/mock-fleet
-    tag: latest
-    pullPolicy: IfNotPresent
-  routing:
-    mode: HOST
-  podInactivityThreshold: 1M
-  podCreationTimeout: 1M
-  replicas: 2
-  service:
-    type: ClusterIP
-    ports:
-      http: 80
-      targetHttp: 8080
-      debug: 5005
-      targetDebug: 5005
-  resources:
-    requests:
-      cpu: "0.5"
-      memory: 512Mi
-    limits:
-      cpu: "2"
-      memory: 2Gi
-
-dash:
-  enabled: true
-  image:
-    repository: ghcr.io/letsrokk/mock-fleet-dash
-    tag: latest
-    pullPolicy: IfNotPresent
-  replicas: 1
-  service:
-    type: ClusterIP
-    ports:
-      http: 80
-      targetHttp: 8080
-  resources:
-    requests:
-      cpu: "0.05"
-      memory: 64Mi
-    limits:
-      cpu: "0.25"
-      memory: 128Mi
-
-wiremock:
-  containerName: wiremock
-  containerImage: wiremock/wiremock:latest
-  containerImagePullPolicy: IfNotPresent
-  config:
-    default:
-      options: []
-      resources:
-        requests:
-          cpu: "0.5"
-          memory: 512Mi
-        limits:
-          cpu: "1"
-          memory: 1Gi
-    mocks: []
+  proxy:
+    image:
+      repository: ghcr.io/letsrokk/mock-fleet-proxy
+      tag: latest
+      pullPolicy: IfNotPresent
+    routing:
+      mode: HOST
+    replicas: 2
+    service:
+      type: ClusterIP
+      ports:
+        http: 80
+        targetHttp: 8080
+        debug: 5005
+        targetDebug: 5005
+    probes:
+      liveness:
+        path: /__fleet/proxy/health/live
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      readiness:
+        path: /__fleet/proxy/health/ready
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      startup:
+        path: /__fleet/proxy/health/started
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: "0.25"
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  api:
+    image:
+      repository: ghcr.io/letsrokk/mock-fleet-api
+      tag: latest
+      pullPolicy: IfNotPresent
+    podInactivityThreshold: 1M
+    podCreationTimeout: 1M
+    replicas: 2
+    service:
+      type: ClusterIP
+      ports:
+        http: 80
+        targetHttp: 8080
+        debug: 5006
+        targetDebug: 5005
+    probes:
+      liveness:
+        path: /__fleet/api/health/live
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      readiness:
+        path: /__fleet/api/health/ready
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      startup:
+        path: /__fleet/api/health/started
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: 512Mi
+      limits:
+        cpu: "2"
+        memory: 2Gi
+    wiremock:
+      containerName: wiremock
+      containerImage: wiremock/wiremock:latest
+      containerImagePullPolicy: IfNotPresent
+      config:
+        default:
+          options: []
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+        mocks: []
+    storage:
+      persistent: false
+      type: s3
+      annotations: {}
+      s3:
+        provisioner: s3.csi.aws.com
+        storageClassName: ""
+        bucket: ""
+        path: /mock-fleet
+        authenticationSource: driver
+        cacheSize: 1Gi
+        mountOptions: []
+  dash:
+    enabled: true
+    image:
+      repository: ghcr.io/letsrokk/mock-fleet-dash
+      tag: latest
+      pullPolicy: IfNotPresent
+    replicas: 1
+    service:
+      type: ClusterIP
+      ports:
+        http: 80
+        targetHttp: 8080
+    probes:
+      liveness:
+        path: /__fleet/dash/health/live
+        initialDelaySeconds: 5
+        periodSeconds: 20
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      readiness:
+        path: /__fleet/dash/health/ready
+        initialDelaySeconds: 2
+        periodSeconds: 10
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      startup:
+        path: /__fleet/dash/health/started
+        initialDelaySeconds: 2
+        periodSeconds: 10
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 3
+    resources:
+      requests:
+        cpu: "0.05"
+        memory: 64Mi
+      limits:
+        cpu: "0.25"
+        memory: 128Mi
 
 ingress:
   enabled: false
@@ -74,42 +171,6 @@ ingress:
 
 securityContext:
   runAsNonRoot: true
-
-storage:
-  persistent: false
-  type: s3
-  annotations: {}
-  s3:
-    provisioner: s3.csi.aws.com
-    storageClassName: ""
-    bucket: ""
-    path: /mock-fleet
-    authenticationSource: driver
-    cacheSize: 1Gi
-    mountOptions: []
-
-probes:
-  liveness:
-    path: /__fleet/api/health/live
-    initialDelaySeconds: 15
-    periodSeconds: 20
-    timeoutSeconds: 5
-    successThreshold: 1
-    failureThreshold: 3
-  readiness:
-    path: /__fleet/api/health/ready
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    timeoutSeconds: 5
-    successThreshold: 1
-    failureThreshold: 3
-  startup:
-    path: /__fleet/api/health/started
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    timeoutSeconds: 10
-    successThreshold: 1
-    failureThreshold: 3
 
 env:
   javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml

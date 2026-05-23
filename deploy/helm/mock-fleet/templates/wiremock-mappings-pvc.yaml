@@ -1,5 +1,5 @@
 {{- include "mock-fleet.validateStorage" . -}}
-{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") }}
+{{- if and .Values.fleet.api.storage.persistent (eq .Values.fleet.api.storage.type "s3") }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -8,14 +8,14 @@ metadata:
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-  {{- with .Values.storage.annotations }}
+  {{- with .Values.fleet.api.storage.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: {{ .Values.storage.s3.storageClassName | quote }}
+  storageClassName: {{ .Values.fleet.api.storage.s3.storageClassName | quote }}
   resources:
     requests:
       storage: 10Gi

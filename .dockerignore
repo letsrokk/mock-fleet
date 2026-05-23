@@ -1,9 +1,13 @@
 # Root Docker builds should choose an app context explicitly:
-# docker build -f fleet/src/main/docker/Dockerfile.jvm fleet
-# docker build -f dash/Dockerfile dash
+# docker build -f fleet-proxy/src/main/docker/Dockerfile.jvm fleet-proxy
+# docker build -f fleet-api/src/main/docker/Dockerfile.jvm fleet-api
+# docker build -f fleet-dash/Dockerfile fleet-dash
 target
-fleet/target
-dash/node_modules
-dash/dist
-dash/.vite
-dash/*.tsbuildinfo
+fleet-proxy/target
+fleet-api/target
+fleet-dash/node_modules
+fleet-dash/dist
+fleet-dash/.vite
+fleet-dash/*.tsbuildinfo
+fleet-dash/vite.config.d.ts
+fleet-dash/vite.config.js

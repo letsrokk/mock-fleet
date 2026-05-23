@@ -1,0 +1,4 @@
+*
+!.dockerignore
+!src/main/docker/Dockerfile.jvm
+!target/quarkus-app/**

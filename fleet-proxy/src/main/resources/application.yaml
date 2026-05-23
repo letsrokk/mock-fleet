@@ -1,0 +1,18 @@
+quarkus:
+  smallrye-health:
+    root-path: /__fleet/proxy/health
+  container-image:
+    builder: docker
+    registry: ghcr.io
+    group: letsrokk
+    name: mock-fleet-proxy
+    additional-tags:
+      - latest
+    build: true
+
+mock-fleet:
+  api:
+    base-url: ${MOCK_FLEET_API_BASE_URL:http://localhost:8081}
+  routing:
+    mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
+    host: ${MOCK_FLEET_ROUTING_HOST:mock-fleet.localhost}

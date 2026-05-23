@@ -1,21 +1,21 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "mock-fleet.fullname" . }}
+  name: {{ include "mock-fleet.proxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: fleet
+    app.kubernetes.io/component: proxy
 spec:
-  type: {{ .Values.fleet.service.type }}
+  type: {{ .Values.fleet.proxy.service.type }}
   selector:
-    {{- include "mock-fleet.fleetSelectorLabels" . | nindent 4 }}
+    {{- include "mock-fleet.proxySelectorLabels" . | nindent 4 }}
   ports:
     - name: debug
-      port: {{ .Values.fleet.service.ports.debug }}
+      port: {{ .Values.fleet.proxy.service.ports.debug }}
       protocol: TCP
-      targetPort: {{ .Values.fleet.service.ports.targetDebug }}
+      targetPort: {{ .Values.fleet.proxy.service.ports.targetDebug }}
     - name: http
-      port: {{ .Values.fleet.service.ports.http }}
+      port: {{ .Values.fleet.proxy.service.ports.http }}
       protocol: TCP
-      targetPort: {{ .Values.fleet.service.ports.targetHttp }}
+      targetPort: {{ .Values.fleet.proxy.service.ports.targetHttp }}

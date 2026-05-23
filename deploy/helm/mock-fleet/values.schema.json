@@ -9,63 +9,58 @@
     "fleet": {
       "type": "object",
       "properties": {
-        "image": { "$ref": "#/definitions/image" },
-        "replicas": { "type": "integer", "minimum": 1 },
-        "podInactivityThreshold": { "type": "string" },
-        "podCreationTimeout": { "type": "string" },
-        "routing": {
-          "type": "object",
-          "properties": {
-            "mode": { "type": "string", "enum": ["HOST", "PATH"] }
-          },
-          "required": ["mode"]
+        "proxy": { "$ref": "#/definitions/app" },
+        "api": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "podInactivityThreshold": { "type": "string" },
+                "podCreationTimeout": { "type": "string" },
+                "wiremock": { "type": "object" },
+                "storage": { "type": "object" }
+              },
+              "required": ["podInactivityThreshold", "podCreationTimeout", "wiremock", "storage"]
+            }
+          ]
         },
-        "service": { "$ref": "#/definitions/fleetService" },
-        "resources": { "$ref": "#/definitions/containerResources" }
+        "dash": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" }
+              },
+              "required": ["enabled"]
+            }
+          ]
+        }
       },
-      "required": ["image", "replicas", "podInactivityThreshold", "podCreationTimeout", "routing", "service", "resources"]
+      "required": ["proxy", "api", "dash"]
     },
-    "dash": {
-      "type": "object",
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "image": { "$ref": "#/definitions/image" },
-        "replicas": { "type": "integer", "minimum": 1 },
-        "service": { "$ref": "#/definitions/dashService" },
-        "resources": { "$ref": "#/definitions/containerResources" }
-      },
-      "required": ["enabled", "image", "replicas", "service", "resources"]
-    },
-    "wiremock": { "type": "object" },
     "ingress": { "type": "object" },
-    "securityContext": {
-      "type": "object",
-      "properties": {
-        "runAsNonRoot": { "type": "boolean" }
-      },
-      "required": ["runAsNonRoot"]
-    },
-    "storage": { "type": "object" },
-    "probes": { "type": "object" },
+    "securityContext": { "type": "object" },
     "env": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "rbac": { "type": "object" },
     "hazelcast": { "type": "object" }
   },
-  "required": [
-    "fleet",
-    "dash",
-    "wiremock",
-    "ingress",
-    "securityContext",
-    "storage",
-    "probes",
-    "env",
-    "serviceAccount",
-    "rbac",
-    "hazelcast"
-  ],
+  "required": ["fleet", "ingress", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
   "definitions": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "image": { "$ref": "#/definitions/image" },
+        "routing": { "type": "object" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "service": { "type": "object" },
+        "probes": { "type": "object" },
+        "resources": { "type": "object" }
+      },
+      "required": ["image", "replicas", "service", "probes", "resources"]
+    },
     "image": {
       "type": "object",
       "properties": {
@@ -74,52 +69,6 @@
         "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
       },
       "required": ["repository", "tag", "pullPolicy"]
-    },
-    "fleetService": {
-      "type": "object",
-      "properties": {
-        "type": { "type": "string" },
-        "ports": {
-          "type": "object",
-          "properties": {
-            "http": { "type": "integer" },
-            "targetHttp": { "type": "integer" },
-            "debug": { "type": "integer" },
-            "targetDebug": { "type": "integer" }
-          },
-          "required": ["http", "targetHttp", "debug", "targetDebug"]
-        }
-      },
-      "required": ["type", "ports"]
-    },
-    "dashService": {
-      "type": "object",
-      "properties": {
-        "type": { "type": "string" },
-        "ports": {
-          "type": "object",
-          "properties": {
-            "http": { "type": "integer" },
-            "targetHttp": { "type": "integer" }
-          },
-          "required": ["http", "targetHttp"]
-        }
-      },
-      "required": ["type", "ports"]
-    },
-    "containerResources": {
-      "type": "object",
-      "properties": {
-        "requests": { "$ref": "#/definitions/resourceValues" },
-        "limits": { "$ref": "#/definitions/resourceValues" }
-      },
-      "required": ["requests", "limits"]
-    },
-    "resourceValues": {
-      "type": "object",
-      "additionalProperties": {
-        "oneOf": [{ "type": "string" }, { "type": "number" }]
-      }
     }
   }
 }
