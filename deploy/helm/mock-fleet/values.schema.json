@@ -3,440 +3,72 @@
   "title": "mock-fleet values",
   "type": "object",
   "properties": {
-    "nameOverride": {
-      "type": "string"
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "namespaceOverride": { "type": "string" },
+    "fleet": {
+      "type": "object",
+      "properties": {
+        "proxy": { "$ref": "#/definitions/app" },
+        "api": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "podInactivityThreshold": { "type": "string" },
+                "podCreationTimeout": { "type": "string" },
+                "wiremock": { "type": "object" },
+                "storage": { "type": "object" }
+              },
+              "required": ["podInactivityThreshold", "podCreationTimeout", "wiremock", "storage"]
+            }
+          ]
+        },
+        "dash": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" }
+              },
+              "required": ["enabled"]
+            }
+          ]
+        }
+      },
+      "required": ["proxy", "api", "dash"]
     },
-    "fullnameOverride": {
-      "type": "string"
-    },
-    "namespaceOverride": {
-      "type": "string"
+    "ingress": { "type": "object" },
+    "securityContext": { "type": "object" },
+    "env": { "type": "object" },
+    "serviceAccount": { "type": "object" },
+    "rbac": { "type": "object" },
+    "hazelcast": { "type": "object" }
+  },
+  "required": ["fleet", "ingress", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
+  "definitions": {
+    "app": {
+      "type": "object",
+      "properties": {
+        "image": { "$ref": "#/definitions/image" },
+        "routing": { "type": "object" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "service": { "type": "object" },
+        "probes": { "type": "object" },
+        "resources": { "type": "object" }
+      },
+      "required": ["image", "replicas", "service", "probes", "resources"]
     },
     "image": {
       "type": "object",
       "properties": {
-        "repository": {
-          "type": "string"
-        },
-        "tag": {
-          "type": "string"
-        },
-        "pullPolicy": {
-          "type": "string"
-        }
+        "repository": { "type": "string" },
+        "tag": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
       },
       "required": ["repository", "tag", "pullPolicy"]
-    },
-    "wiremock": {
-      "type": "object",
-      "properties": {
-        "containerName": {
-          "type": "string"
-        },
-        "containerImage": {
-          "type": "string"
-        },
-        "containerImagePullPolicy": {
-          "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
-        },
-        "config": {
-          "type": "object",
-          "properties": {
-            "default": {
-              "type": "object",
-              "properties": {
-                "options": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "resources": {
-                  "$ref": "#/definitions/resources"
-                }
-              },
-              "required": ["options", "resources"]
-            },
-            "mocks": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "options": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "resources": {
-                    "$ref": "#/definitions/resources"
-                  }
-                },
-                "required": ["id", "options"]
-              }
-            }
-          },
-          "required": ["default", "mocks"]
-        }
-      },
-      "required": ["containerName", "containerImage", "containerImagePullPolicy", "config"]
-    },
-    "service": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "type": "string"
-        },
-        "ports": {
-          "type": "object",
-          "properties": {
-            "http": {
-              "type": "integer"
-            },
-            "targetHttp": {
-              "type": "integer"
-            },
-            "debug": {
-              "type": "integer"
-            },
-            "targetDebug": {
-              "type": "integer"
-            }
-          },
-          "required": ["http", "targetHttp", "debug", "targetDebug"]
-        }
-      },
-      "required": ["type", "ports"]
-    },
-    "ingress": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "host": {
-          "type": "string"
-        },
-        "className": {
-          "type": "string"
-        },
-        "annotations": {
-          "type": "object"
-        },
-        "tls": {
-          "type": "array"
-        },
-        "path": {
-          "type": "string"
-        },
-        "pathType": {
-          "type": "string"
-        }
-      },
-      "required": ["enabled", "host", "path", "pathType"]
-    },
-    "securityContext": {
-      "type": "object",
-      "properties": {
-        "runAsNonRoot": {
-          "type": "boolean"
-        }
-      },
-      "required": ["runAsNonRoot"]
-    },
-    "storage": {
-      "type": "object",
-      "properties": {
-        "persistent": {
-          "type": "boolean"
-        },
-        "type": {
-          "type": "string",
-          "enum": ["s3"]
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "s3": {
-          "type": "object",
-          "properties": {
-            "bucket": {
-              "type": "string"
-            },
-            "provisioner": {
-              "type": "string"
-            },
-            "storageClassName": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            },
-            "authenticationSource": {
-              "type": "string",
-              "enum": ["driver", "pod"]
-            },
-            "cacheSize": {
-              "type": "string"
-            },
-            "mountOptions": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": ["bucket", "provisioner", "storageClassName", "path", "authenticationSource", "cacheSize", "mountOptions"]
-        }
-      },
-      "required": [
-        "persistent",
-        "type",
-        "annotations",
-        "s3"
-      ]
-    },
-    "probes": {
-      "type": "object",
-      "properties": {
-        "liveness": {
-          "$ref": "#/definitions/httpProbe"
-        },
-        "readiness": {
-          "$ref": "#/definitions/httpProbe"
-        },
-        "startup": {
-          "$ref": "#/definitions/httpProbe"
-        }
-      },
-      "required": ["liveness", "readiness", "startup"]
-    },
-    "fleet": {
-      "type": "object",
-      "properties": {
-        "replicas": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "podInactivityThreshold": {
-          "type": "string"
-        },
-        "podCreationTimeout": {
-          "type": "string"
-        },
-        "routing": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": ["HOST", "PATH"]
-            }
-          },
-          "required": ["mode"]
-        },
-        "resources": {
-          "$ref": "#/definitions/containerResources"
-        }
-      },
-      "required": ["replicas", "podInactivityThreshold", "podCreationTimeout", "routing", "resources"]
-    },
-    "env": {
-      "type": "object",
-      "properties": {
-        "quinoaUiDir": {
-          "type": "string"
-        },
-        "quarkusPackageOutputDirectory": {
-          "type": "string"
-        },
-        "quarkusLaunchDevmode": {
-          "type": "string"
-        },
-        "javaOpts": {
-          "type": "string"
-        },
-        "javaToolOptions": {
-          "type": "string"
-        },
-        "userDir": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "quinoaUiDir",
-        "quarkusPackageOutputDirectory",
-        "javaOpts",
-        "userDir"
-      ]
-    },
-    "serviceAccount": {
-      "type": "object",
-      "properties": {
-        "create": {
-          "type": "boolean"
-        },
-        "name": {
-          "type": "string"
-        },
-        "annotations": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "required": ["create", "name", "annotations"]
-    },
-    "rbac": {
-      "type": "object",
-      "properties": {
-        "create": {
-          "type": "boolean"
-        }
-      },
-      "required": ["create"]
-    },
-    "hazelcast": {
-      "type": "object",
-      "properties": {
-        "client": {
-          "type": "object",
-          "properties": {
-            "clusterName": {
-              "type": "string"
-            }
-          },
-          "required": ["clusterName"]
-        },
-        "cluster": {
-          "type": "object",
-          "properties": {
-            "memberCount": {
-              "type": "integer",
-              "minimum": 1
-            }
-          },
-          "required": ["memberCount"]
-        },
-        "mancenter": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            }
-          },
-          "required": ["enabled"]
-        }
-      },
-      "required": ["client", "cluster", "mancenter"]
-    }
-  },
-  "required": [
-    "image",
-    "wiremock",
-    "service",
-    "ingress",
-    "securityContext",
-    "storage",
-    "probes",
-    "fleet",
-    "env",
-    "serviceAccount",
-    "rbac",
-    "hazelcast"
-  ],
-  "definitions": {
-    "httpProbe": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string"
-        },
-        "initialDelaySeconds": {
-          "type": "integer"
-        },
-        "periodSeconds": {
-          "type": "integer"
-        },
-        "timeoutSeconds": {
-          "type": "integer"
-        },
-        "successThreshold": {
-          "type": "integer"
-        },
-        "failureThreshold": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "path",
-        "initialDelaySeconds",
-        "periodSeconds",
-        "timeoutSeconds",
-        "successThreshold",
-        "failureThreshold"
-      ]
-    },
-    "resources": {
-      "type": "object",
-      "properties": {
-        "requests": {
-          "$ref": "#/definitions/resourceValues"
-        },
-        "limits": {
-          "$ref": "#/definitions/resourceValues"
-        }
-      }
-    },
-    "containerResources": {
-      "type": "object",
-      "properties": {
-        "requests": {
-          "type": "object",
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": ["cpu", "memory"]
-        },
-        "limits": {
-          "type": "object",
-          "properties": {
-            "cpu": {
-              "type": "string"
-            },
-            "memory": {
-              "type": "string"
-            }
-          },
-          "required": ["cpu", "memory"]
-        }
-      },
-      "required": ["requests", "limits"]
-    },
-    "resourceValues": {
-      "type": "object",
-      "additionalProperties": {
-        "oneOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "number"
-          }
-        ]
-      }
     }
   }
 }

@@ -31,6 +31,33 @@ app.kubernetes.io/name: {{ include "mock-fleet.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{- define "mock-fleet.proxyFullname" -}}
+{{- printf "%s-proxy" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.apiFullname" -}}
+{{- printf "%s-api" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.dashFullname" -}}
+{{- printf "%s-dash" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.proxySelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: proxy
+{{- end -}}
+
+{{- define "mock-fleet.apiSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: api
+{{- end -}}
+
+{{- define "mock-fleet.dashSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: dash
+{{- end -}}
+
 {{- define "mock-fleet.serviceAccountName" -}}
 {{- if .Values.serviceAccount.name -}}
 {{- .Values.serviceAccount.name -}}
@@ -60,10 +87,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "mock-fleet.validateStorage" -}}
-{{- if and .Values.storage.persistent (ne .Values.storage.type "s3") -}}
-{{- fail (printf "Unsupported persistent storage.type %q. Supported values: s3" .Values.storage.type) -}}
+{{- if and .Values.fleet.api.storage.persistent (ne .Values.fleet.api.storage.type "s3") -}}
+{{- fail (printf "Unsupported persistent storage.type %q. Supported values: s3" .Values.fleet.api.storage.type) -}}
 {{- end -}}
-{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") (not .Values.storage.s3.bucket) -}}
+{{- if and .Values.fleet.api.storage.persistent (eq .Values.fleet.api.storage.type "s3") (not .Values.fleet.api.storage.s3.bucket) -}}
 {{- fail "storage.s3.bucket is required when storage.persistent=true and storage.type=s3" -}}
 {{- end -}}
 {{- end -}}

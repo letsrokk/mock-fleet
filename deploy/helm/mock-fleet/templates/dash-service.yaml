@@ -1,0 +1,19 @@
+{{- if .Values.fleet.dash.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mock-fleet.dashFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dash
+spec:
+  type: {{ .Values.fleet.dash.service.type }}
+  selector:
+    {{- include "mock-fleet.dashSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.fleet.dash.service.ports.http }}
+      protocol: TCP
+      targetPort: {{ .Values.fleet.dash.service.ports.targetHttp }}
+{{- end }}

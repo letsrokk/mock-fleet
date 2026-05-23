@@ -3,5 +3,5 @@ Mock Fleet chart installed.
 If ingress is enabled, the app is exposed at:
   http://{{ .Values.ingress.host }}
 
-When `fleet.routing.mode=HOST`, wildcard host routing is also enabled:
+When `fleet.proxy.routing.mode=HOST`, wildcard host routing is also enabled:
   http://*.{{ .Values.ingress.host }}

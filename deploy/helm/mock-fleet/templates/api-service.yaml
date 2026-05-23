@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mock-fleet.apiFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.fleet.api.service.type }}
+  selector:
+    {{- include "mock-fleet.apiSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: debug
+      port: {{ .Values.fleet.api.service.ports.debug }}
+      protocol: TCP
+      targetPort: {{ .Values.fleet.api.service.ports.targetDebug }}
+    - name: http
+      port: {{ .Values.fleet.api.service.ports.http }}
+      protocol: TCP
+      targetPort: {{ .Values.fleet.api.service.ports.targetHttp }}

@@ -1,0 +1,62 @@
+{{- if .Values.fleet.dash.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.dashFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dash
+spec:
+  replicas: {{ .Values.fleet.dash.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.dashSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mock-fleet.dashSelectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+      containers:
+        - name: dash
+          image: {{ printf "%s:%s" .Values.fleet.dash.image.repository .Values.fleet.dash.image.tag }}
+          imagePullPolicy: {{ .Values.fleet.dash.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.fleet.dash.service.ports.targetHttp }}
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: {{ .Values.fleet.dash.probes.liveness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.dash.probes.liveness.path }}
+              port: {{ .Values.fleet.dash.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.dash.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.dash.probes.liveness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.dash.probes.liveness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.dash.probes.liveness.timeoutSeconds }}
+          readinessProbe:
+            failureThreshold: {{ .Values.fleet.dash.probes.readiness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.dash.probes.readiness.path }}
+              port: {{ .Values.fleet.dash.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.dash.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.dash.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.dash.probes.readiness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.dash.probes.readiness.timeoutSeconds }}
+          startupProbe:
+            failureThreshold: {{ .Values.fleet.dash.probes.startup.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.dash.probes.startup.path }}
+              port: {{ .Values.fleet.dash.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.dash.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.dash.probes.startup.periodSeconds }}
+            successThreshold: {{ .Values.fleet.dash.probes.startup.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.dash.probes.startup.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.fleet.dash.resources | nindent 12 }}
+{{- end }}

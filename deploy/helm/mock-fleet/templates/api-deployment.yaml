@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.apiFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.fleet.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.apiSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/hazelcast-client-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/wiremock-config: {{ include (print $.Template.BasePath "/wiremock-configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+      containers:
+        - name: api
+          image: {{ printf "%s:%s" .Values.fleet.api.image.repository .Values.fleet.api.image.tag }}
+          imagePullPolicy: {{ .Values.fleet.api.image.pullPolicy }}
+          env:
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MOCK_FLEET_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MOCK_FLEET_INACTIVITY_THRESHOLD
+              value: {{ .Values.fleet.api.podInactivityThreshold | quote }}
+            - name: MOCK_FLEET_POD_CREATION_TIMEOUT
+              value: {{ .Values.fleet.api.podCreationTimeout | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
+              value: {{ .Values.fleet.api.wiremock.containerName | quote }}
+            - name: MOCK_FLEET_WIREMOCK_IMAGE
+              value: {{ .Values.fleet.api.wiremock.containerImage | quote }}
+            - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
+              value: {{ .Values.fleet.api.wiremock.containerImagePullPolicy | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
+              value: /etc/mock-fleet/wiremock-options.yaml
+            - name: MOCK_FLEET_STORAGE_PERSISTENT
+              value: {{ .Values.fleet.api.storage.persistent | quote }}
+            - name: MOCK_FLEET_STORAGE_TYPE
+              value: {{ .Values.fleet.api.storage.type | quote }}
+            - name: MOCK_FLEET_STORAGE_PVC_NAME
+              value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
+            - name: MOCK_FLEET_STORAGE_S3_PATH
+              value: {{ .Values.fleet.api.storage.s3.path | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.env.javaOpts | quote }}
+            {{- with .Values.env.javaToolOptions }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: user.dir
+              value: {{ .Values.env.userDir | quote }}
+          ports:
+            - name: debug
+              containerPort: {{ .Values.fleet.api.service.ports.targetDebug }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.fleet.api.service.ports.targetHttp }}
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: {{ .Values.fleet.api.probes.liveness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.api.probes.liveness.path }}
+              port: {{ .Values.fleet.api.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.api.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.api.probes.liveness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.api.probes.liveness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.api.probes.liveness.timeoutSeconds }}
+          readinessProbe:
+            failureThreshold: {{ .Values.fleet.api.probes.readiness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.api.probes.readiness.path }}
+              port: {{ .Values.fleet.api.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.api.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.api.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.api.probes.readiness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.api.probes.readiness.timeoutSeconds }}
+          startupProbe:
+            failureThreshold: {{ .Values.fleet.api.probes.startup.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.api.probes.startup.path }}
+              port: {{ .Values.fleet.api.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.api.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.api.probes.startup.periodSeconds }}
+            successThreshold: {{ .Values.fleet.api.probes.startup.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.api.probes.startup.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.fleet.api.resources | nindent 12 }}
+          volumeMounts:
+            - mountPath: /etc/hazelcast
+              name: hazelcast-config
+              readOnly: true
+            - mountPath: /etc/mock-fleet
+              name: wiremock-config
+              readOnly: true
+      volumes:
+        - name: hazelcast-config
+          configMap:
+            name: {{ include "mock-fleet.hazelcastConfigMapName" . }}
+            optional: false
+        - name: wiremock-config
+          configMap:
+            name: {{ include "mock-fleet.wiremockConfigMapName" . }}
+            optional: false

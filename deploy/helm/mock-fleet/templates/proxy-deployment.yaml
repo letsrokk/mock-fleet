@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.proxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  replicas: {{ .Values.fleet.proxy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.proxySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mock-fleet.proxySelectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+      containers:
+        - name: proxy
+          image: {{ printf "%s:%s" .Values.fleet.proxy.image.repository .Values.fleet.proxy.image.tag }}
+          imagePullPolicy: {{ .Values.fleet.proxy.image.pullPolicy }}
+          env:
+            - name: MOCK_FLEET_ROUTING_MODE
+              value: {{ .Values.fleet.proxy.routing.mode | quote }}
+            - name: MOCK_FLEET_ROUTING_HOST
+              value: {{ .Values.ingress.host | quote }}
+            - name: MOCK_FLEET_API_BASE_URL
+              value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.env.javaOpts | quote }}
+            {{- with .Values.env.javaToolOptions }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: user.dir
+              value: {{ .Values.env.userDir | quote }}
+          ports:
+            - name: debug
+              containerPort: {{ .Values.fleet.proxy.service.ports.targetDebug }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: {{ .Values.fleet.proxy.probes.liveness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.proxy.probes.liveness.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.liveness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.liveness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.liveness.timeoutSeconds }}
+          readinessProbe:
+            failureThreshold: {{ .Values.fleet.proxy.probes.readiness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.proxy.probes.readiness.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.readiness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.readiness.timeoutSeconds }}
+          startupProbe:
+            failureThreshold: {{ .Values.fleet.proxy.probes.startup.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.proxy.probes.startup.path }}
+              port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.proxy.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.proxy.probes.startup.periodSeconds }}
+            successThreshold: {{ .Values.fleet.proxy.probes.startup.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.proxy.probes.startup.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.fleet.proxy.resources | nindent 12 }}

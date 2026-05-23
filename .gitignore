@@ -7,6 +7,8 @@
 
 #Maven
 target/
+fleet-proxy/target/
+fleet-api/target/
 pom.xml.tag
 pom.xml.releaseBackup
 pom.xml.versionsBackup
@@ -26,5 +28,9 @@ release.properties
 .env
 
 # Frontend
-src/main/webui/node_modules/
-src/main/webui/dist/
+fleet-dash/node_modules/
+fleet-dash/dist/
+fleet-dash/.vite/
+fleet-dash/*.tsbuildinfo
+fleet-dash/vite.config.d.ts
+fleet-dash/vite.config.js

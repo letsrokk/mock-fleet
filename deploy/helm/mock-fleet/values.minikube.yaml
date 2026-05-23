@@ -3,18 +3,22 @@ ingress:
   host: mock-fleet.localhost
   className: nginx
 
-storage:
-  persistent: true
-  type: s3
-  s3:
-    storageClassName: seaweedfs-s3
-    bucket: "default-bucket"
-    mountOptions:
-      - endpoint-url http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
-      - force-path-style
-      - region us-east-1
-      - prefix mock-fleet/
+fleet:
+  proxy:
+    routing:
+      mode: "HOST"
+  api:
+    storage:
+      persistent: true
+      type: s3
+      s3:
+        storageClassName: seaweedfs-s3
+        bucket: "default-bucket"
+        mountOptions:
+          - endpoint-url http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
+          - force-path-style
+          - region us-east-1
+          - prefix mock-fleet/
 
 #env:
-#  quarkusLaunchDevmode: "true"
 #  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005

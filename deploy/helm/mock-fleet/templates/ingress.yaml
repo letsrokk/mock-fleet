@@ -25,18 +25,55 @@ spec:
         paths:
           - backend:
               service:
-                name: {{ include "mock-fleet.fullname" . }}
+                name: {{ include "mock-fleet.apiFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/api/health
+            pathType: Prefix
+          - backend:
+              service:
+                name: {{ include "mock-fleet.apiFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/api
+            pathType: Prefix
+          - backend:
+              service:
+                name: {{ include "mock-fleet.proxyFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/proxy/health
+            pathType: Prefix
+          {{- if .Values.fleet.dash.enabled }}
+          - backend:
+              service:
+                name: {{ include "mock-fleet.dashFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/dash/health
+            pathType: Prefix
+          - backend:
+              service:
+                name: {{ include "mock-fleet.dashFullname" . }}
+                port:
+                  name: http
+            path: /__fleet
+            pathType: Prefix
+          {{- end }}
+          - backend:
+              service:
+                name: {{ include "mock-fleet.proxyFullname" . }}
                 port:
                   name: http
             path: {{ .Values.ingress.path }}
             pathType: {{ .Values.ingress.pathType }}
-    {{- if eq .Values.fleet.routing.mode "HOST" }}
+    {{- if eq .Values.fleet.proxy.routing.mode "HOST" }}
     - host: {{ printf "*.%s" $host | quote }}
       http:
         paths:
           - backend:
               service:
-                name: {{ include "mock-fleet.fullname" . }}
+                name: {{ include "mock-fleet.proxyFullname" . }}
                 port:
                   name: http
             path: {{ .Values.ingress.path }}

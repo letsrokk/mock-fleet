@@ -16,7 +16,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE_NAME: ghcr.io/letsrokk/mock-fleet
+  PROXY_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-proxy
+  API_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-api
+  DASH_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-dash
   CHART_DIR: deploy/helm/mock-fleet
   CHART_REGISTRY: oci://ghcr.io/letsrokk/charts
 
@@ -65,11 +67,11 @@ jobs:
             fi
           }
 
-          pom_version="$(sed -nE '0,/<version>[^<]+<\/version>/s/.*<version>([^<]+)<\/version>.*/\1/p' pom.xml)"
+          pom_version="$(sed -nE '0,/<version>[^<]+<\/version>/s/.*<version>([^<]+)<\/version>.*/\1/p' fleet-proxy/pom.xml)"
           chart_base_version="$(sed -nE 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' "${CHART_DIR}/Chart.yaml" | head -n 1)"
 
           if [[ -z "${pom_version}" ]]; then
-            echo "Could not resolve Maven project version from pom.xml" >&2
+            echo "Could not resolve Maven project version from fleet-proxy/pom.xml" >&2
             exit 1
           fi
 
@@ -124,13 +126,27 @@ jobs:
         with:
           node-version: "22.14.0"
           cache: npm
-          cache-dependency-path: src/main/webui/package-lock.json
+          cache-dependency-path: fleet-dash/package-lock.json
 
-      - name: Set application version
+      - name: Set proxy version
+        working-directory: fleet-proxy
         run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.app_version }}" -DgenerateBackupPoms=false
 
-      - name: Build application
+      - name: Set API version
+        working-directory: fleet-api
+        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.app_version }}" -DgenerateBackupPoms=false
+
+      - name: Build proxy
+        working-directory: fleet-proxy
         run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Build API
+        working-directory: fleet-api
+        run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Build dashboard
+        working-directory: fleet-dash
+        run: npm ci && npm run build
 
       - name: Log in to GHCR for Docker
         uses: docker/login-action@v3
@@ -139,36 +155,92 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: docker_metadata
+      - name: Extract proxy Docker metadata
+        id: proxy_docker_metadata
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ env.PROXY_IMAGE_NAME }}
           tags: |
             ${{ steps.version.outputs.image_tags }}
           flavor: |
             latest=false
           labels: |
-            org.opencontainers.image.title=mock-fleet
-            org.opencontainers.image.description=Quarkus service image that routes HTTP requests to per-mock WireMock pods in Kubernetes.
+            org.opencontainers.image.title=mock-fleet-proxy
+            org.opencontainers.image.description=Quarkus proxy image that routes HTTP requests to per-mock WireMock pods.
             org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
           annotations: |
-            org.opencontainers.image.title=mock-fleet
-            org.opencontainers.image.description=Quarkus service image that routes HTTP requests to per-mock WireMock pods in Kubernetes.
+            org.opencontainers.image.title=mock-fleet-proxy
+            org.opencontainers.image.description=Quarkus proxy image that routes HTTP requests to per-mock WireMock pods.
             org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
+      - name: Extract API Docker metadata
+        id: api_docker_metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.API_IMAGE_NAME }}
+          tags: |
+            ${{ steps.version.outputs.image_tags }}
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.title=mock-fleet-api
+            org.opencontainers.image.description=Quarkus API image that manages mock-fleet WireMock pods.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+          annotations: |
+            org.opencontainers.image.title=mock-fleet-api
+            org.opencontainers.image.description=Quarkus API image that manages mock-fleet WireMock pods.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+
+      - name: Extract dashboard Docker metadata
+        id: dash_docker_metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DASH_IMAGE_NAME }}
+          tags: |
+            ${{ steps.version.outputs.image_tags }}
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.title=mock-fleet-dash
+            org.opencontainers.image.description=Static dashboard image for mock-fleet.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+          annotations: |
+            org.opencontainers.image.title=mock-fleet-dash
+            org.opencontainers.image.description=Static dashboard image for mock-fleet.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+
+      - name: Build and push proxy Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: src/main/docker/Dockerfile.jvm
+          context: fleet-proxy
+          file: fleet-proxy/src/main/docker/Dockerfile.jvm
           push: true
-          tags: ${{ steps.docker_metadata.outputs.tags }}
-          labels: ${{ steps.docker_metadata.outputs.labels }}
-          annotations: ${{ steps.docker_metadata.outputs.annotations }}
+          tags: ${{ steps.proxy_docker_metadata.outputs.tags }}
+          labels: ${{ steps.proxy_docker_metadata.outputs.labels }}
+          annotations: ${{ steps.proxy_docker_metadata.outputs.annotations }}
+
+      - name: Build and push API Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: fleet-api
+          file: fleet-api/src/main/docker/Dockerfile.jvm
+          push: true
+          tags: ${{ steps.api_docker_metadata.outputs.tags }}
+          labels: ${{ steps.api_docker_metadata.outputs.labels }}
+          annotations: ${{ steps.api_docker_metadata.outputs.annotations }}
+
+      - name: Build and push dashboard Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: fleet-dash
+          file: fleet-dash/Dockerfile
+          push: true
+          tags: ${{ steps.dash_docker_metadata.outputs.tags }}
+          labels: ${{ steps.dash_docker_metadata.outputs.labels }}
+          annotations: ${{ steps.dash_docker_metadata.outputs.annotations }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v4

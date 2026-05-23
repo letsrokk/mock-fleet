@@ -1,0 +1,11 @@
+quarkus:
+  log:
+    category:
+      "com.github.letsrokk":
+        level: DEBUG
+  package:
+    jar:
+      type: mutable-jar
+  live-reload:
+    url: http://mock-fleet.localhost
+    password: mock-fleet-dev
