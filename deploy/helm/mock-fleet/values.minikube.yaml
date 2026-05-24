@@ -7,7 +7,9 @@ fleet:
   proxy:
     routing:
       mode: "HOST"
+    replicas: 1
   api:
+    replicas: 1
     storage:
       persistent: true
       type: s3

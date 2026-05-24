@@ -1,0 +1,22 @@
+{{- $name := include "mock-fleet.wiremockUserConfigMapName" . -}}
+{{- $namespace := include "mock-fleet.namespace" . -}}
+{{- $existing := lookup "v1" "ConfigMap" $namespace $name -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ $namespace }}
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+data:
+  wiremock-options.yaml: |
+{{- if and $existing $existing.data (index $existing.data "wiremock-options.yaml") }}
+{{ index $existing.data "wiremock-options.yaml" | nindent 4 }}
+{{- else }}
+    wiremock:
+      default:
+        options: []
+      mocks: []
+{{- end }}

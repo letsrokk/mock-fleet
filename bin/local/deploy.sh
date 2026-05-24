@@ -34,18 +34,6 @@ Options:
 EOF
 }
 
-print_follow_up_instructions() {
-    local release_name="$1"
-    local namespace="$2"
-
-    echo
-    echo "Follow-up:"
-    echo "1. Expose the proxy service if needed:"
-    echo "   kubectl port-forward --namespace ${namespace} service/${release_name}-proxy 8080:80"
-    echo "2. Open:"
-    echo "   http://127.0.0.1:8080/__fleet/"
-}
-
 print_remote_dev_instructions() {
     local module="$1"
 
@@ -361,8 +349,6 @@ if [[ "${ENABLE_PORT_FORWARD}" == "true" ]]; then
         kubectl port-forward --namespace "${NAMESPACE}" service/"${RELEASE_NAME}-proxy" 5005:5005 &
     fi
 fi
-
-print_follow_up_instructions "${RELEASE_NAME}" "${NAMESPACE}"
 
 if [[ -n "${REMOTE_DEV_MODULE}" ]]; then
     print_remote_dev_instructions "${REMOTE_DEV_MODULE}"

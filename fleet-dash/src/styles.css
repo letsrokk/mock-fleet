@@ -1,9 +1,6 @@
 :root {
   color: #f3efe6;
-  background:
-    radial-gradient(circle at top left, rgba(244, 182, 99, 0.2), transparent 28%),
-    radial-gradient(circle at 85% 10%, rgba(77, 109, 255, 0.18), transparent 24%),
-    linear-gradient(180deg, #0e1726 0%, #152238 100%);
+  background: linear-gradient(180deg, #101827 0%, #172033 100%);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
@@ -17,8 +14,33 @@ body {
   background: transparent;
 }
 
-button {
+button,
+input,
+select,
+textarea {
   font: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border: 1px solid rgba(198, 207, 222, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 18, 33, 0.72);
+  color: #f3efe6;
+  outline: none;
+}
+
+input,
+select {
+  height: 38px;
+  padding: 0 10px;
+}
+
+textarea {
+  resize: vertical;
+  padding: 10px;
 }
 
 .shell {
@@ -63,6 +85,35 @@ h1 {
   margin: 12px 0 0;
   color: #c6cfde;
   font-size: 1rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tab-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.tab {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(198, 207, 222, 0.14);
+  border-radius: 8px;
+  color: #c6cfde;
+  background: rgba(8, 18, 33, 0.48);
+  cursor: pointer;
+}
+
+.tab.active {
+  border-color: rgba(122, 206, 153, 0.45);
+  color: #f4fff7;
+  background: rgba(63, 139, 91, 0.28);
 }
 
 .refresh-button,
@@ -154,10 +205,49 @@ h1 {
   border: 1px solid rgba(228, 117, 129, 0.25);
 }
 
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 8, 18, 0.62);
+  backdrop-filter: blur(10px);
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  border: 1px solid rgba(198, 207, 222, 0.14);
+  border-radius: 8px;
+  padding: 20px;
+  background: #101827;
+  box-shadow: 0 28px 80px rgba(3, 8, 18, 0.52);
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  color: #f3efe6;
+  font-size: 1.1rem;
+}
+
+.confirm-dialog p {
+  margin: 12px 0 0;
+  color: #c6cfde;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
 .panel {
   overflow: hidden;
   border: 1px solid rgba(198, 207, 222, 0.12);
-  border-radius: 28px;
+  border-radius: 8px;
   background: rgba(8, 18, 33, 0.62);
   box-shadow: 0 28px 80px rgba(3, 8, 18, 0.38);
   backdrop-filter: blur(18px);
@@ -268,6 +358,233 @@ tr:last-child td {
   white-space: nowrap;
 }
 
+.config-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 16px;
+  width: min(1180px, 100%);
+  margin: 0 auto;
+}
+
+.mock-list,
+.editor-panel {
+  width: 100%;
+  margin: 0;
+}
+
+.add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid rgba(198, 207, 222, 0.08);
+}
+
+.mock-buttons {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.mock-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #c6cfde;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mock-button:hover,
+.mock-button.active {
+  color: #f3efe6;
+  background: rgba(198, 207, 222, 0.08);
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #163321;
+  background: #7ace99;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.editor-body {
+  display: grid;
+  gap: 22px;
+  padding: 20px;
+}
+
+.option-list {
+  display: grid;
+  gap: 16px;
+}
+
+.option-group {
+  display: grid;
+  gap: 8px;
+}
+
+.option-group h3 {
+  margin: 0;
+  color: #f3efe6;
+  font-size: 0.96rem;
+}
+
+.option-group-list {
+  display: grid;
+  gap: 8px;
+}
+
+.option-row {
+  min-width: 0;
+  border: 1px solid rgba(198, 207, 222, 0.1);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(8, 18, 33, 0.36);
+}
+
+.check-row,
+.field-row,
+.form-section {
+  display: grid;
+  gap: 7px;
+  color: #c6cfde;
+  font-size: 0.9rem;
+}
+
+.check-row {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+}
+
+.check-row input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-top: 3px;
+}
+
+.field-row {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 240px);
+  align-items: center;
+}
+
+.option-text {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.option-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #f3efe6;
+}
+
+.option-name {
+  color: #90a0bb;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.option-description {
+  color: #90a0bb;
+  line-height: 1.4;
+}
+
+.form-section h2,
+.summary h2 {
+  margin: 0;
+  color: #90a0bb;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-grid label {
+  display: grid;
+  gap: 7px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary {
+  min-width: 0;
+  border: 1px solid rgba(198, 207, 222, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.compact {
+  overflow-wrap: anywhere;
+  margin: 8px 0 0;
+  color: #c6cfde;
+  line-height: 1.45;
+}
+
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(198, 207, 222, 0.08);
+}
+
+.primary-button,
+.secondary-button,
+.danger-text-button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 0;
+  color: #081221;
+  background: #7ace99;
+  font-weight: 700;
+}
+
+.secondary-button {
+  border: 1px solid rgba(198, 207, 222, 0.18);
+  color: #c6cfde;
+  background: rgba(8, 18, 33, 0.55);
+}
+
+.danger-text-button {
+  border: 1px solid rgba(228, 117, 129, 0.28);
+  color: #ffb7bf;
+  background: rgba(161, 43, 57, 0.12);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-text-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 @media (max-width: 720px) {
   .shell {
     padding: 24px 12px 40px;
@@ -276,6 +593,27 @@ tr:last-child td {
   .hero-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .tab-controls,
+  .tabs,
+  .editor-actions,
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .tab-controls {
+    justify-content: flex-start;
+  }
+
+  .config-layout,
+  .resource-grid,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-row {
+    grid-template-columns: 1fr;
   }
 
   .toast {

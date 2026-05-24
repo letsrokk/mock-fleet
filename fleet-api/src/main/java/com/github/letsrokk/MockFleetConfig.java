@@ -22,6 +22,12 @@ public interface MockFleetConfig {
 
     Optional<String> wiremockConfigPath();
 
+    Optional<String> wiremockUserConfigMapName();
+
+    String wiremockConfigKey();
+
+    Optional<String> proxyDeploymentName();
+
     StorageConfig storage();
 
     interface StorageConfig {
