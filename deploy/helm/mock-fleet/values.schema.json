@@ -53,6 +53,7 @@
       "type": "object",
       "properties": {
         "image": { "$ref": "#/definitions/image" },
+        "dev": { "$ref": "#/definitions/dev" },
         "routing": { "type": "object" },
         "replicas": { "type": "integer", "minimum": 1 },
         "service": { "type": "object" },
@@ -69,6 +70,15 @@
         "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
       },
       "required": ["repository", "tag", "pullPolicy"]
+    },
+    "dev": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "quarkusLaunchDevmode": { "type": "string" },
+        "javaToolOptions": { "type": "string" }
+      },
+      "required": ["enabled", "quarkusLaunchDevmode", "javaToolOptions"]
     }
   }
 }

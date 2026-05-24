@@ -7,7 +7,7 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  replicas: {{ .Values.fleet.api.replicas }}
+  replicas: {{ ternary 1 .Values.fleet.api.replicas .Values.fleet.api.dev.enabled }}
   selector:
     matchLabels:
       {{- include "mock-fleet.apiSelectorLabels" . | nindent 6 }}
@@ -55,11 +55,17 @@ spec:
               value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
             - name: MOCK_FLEET_STORAGE_S3_PATH
               value: {{ .Values.fleet.api.storage.s3.path | quote }}
+            {{- if .Values.fleet.api.dev.enabled }}
+            - name: QUARKUS_LAUNCH_DEVMODE
+              value: {{ .Values.fleet.api.dev.quarkusLaunchDevmode | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ .Values.fleet.api.dev.javaToolOptions | quote }}
+            {{- end }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
-            {{- with .Values.env.javaToolOptions }}
+            {{- if and (not .Values.fleet.api.dev.enabled) .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
-              value: {{ . | quote }}
+              value: {{ .Values.env.javaToolOptions | quote }}
             {{- end }}
             - name: user.dir
               value: {{ .Values.env.userDir | quote }}

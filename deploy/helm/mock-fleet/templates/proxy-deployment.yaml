@@ -7,7 +7,7 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
     app.kubernetes.io/component: proxy
 spec:
-  replicas: {{ .Values.fleet.proxy.replicas }}
+  replicas: {{ ternary 1 .Values.fleet.proxy.replicas .Values.fleet.proxy.dev.enabled }}
   selector:
     matchLabels:
       {{- include "mock-fleet.proxySelectorLabels" . | nindent 6 }}
@@ -29,11 +29,17 @@ spec:
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_API_BASE_URL
               value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
+            {{- if .Values.fleet.proxy.dev.enabled }}
+            - name: QUARKUS_LAUNCH_DEVMODE
+              value: {{ .Values.fleet.proxy.dev.quarkusLaunchDevmode | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ .Values.fleet.proxy.dev.javaToolOptions | quote }}
+            {{- end }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
-            {{- with .Values.env.javaToolOptions }}
+            {{- if and (not .Values.fleet.proxy.dev.enabled) .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
-              value: {{ . | quote }}
+              value: {{ .Values.env.javaToolOptions | quote }}
             {{- end }}
             - name: user.dir
               value: {{ .Values.env.userDir | quote }}
