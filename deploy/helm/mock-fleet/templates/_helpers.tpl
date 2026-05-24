@@ -82,6 +82,10 @@ app.kubernetes.io/component: dash
 {{- printf "%s-wiremock-config" (include "mock-fleet.fullname" .) -}}
 {{- end -}}
 
+{{- define "mock-fleet.wiremockUserConfigMapName" -}}
+{{- printf "%s-wiremock-user-config" (include "mock-fleet.fullname" .) -}}
+{{- end -}}
+
 {{- define "mock-fleet.hazelcastServiceName" -}}
 {{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}

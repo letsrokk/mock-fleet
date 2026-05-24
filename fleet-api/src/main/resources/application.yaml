@@ -18,6 +18,9 @@ mock-fleet:
   wiremock-image: ${MOCK_FLEET_WIREMOCK_IMAGE:wiremock/wiremock:latest}
   wiremock-image-pull-policy: ${MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY:IfNotPresent}
   wiremock-config-path: ${MOCK_FLEET_WIREMOCK_CONFIG_PATH:}
+  wiremock-user-config-map-name: ${MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME:}
+  wiremock-config-key: ${MOCK_FLEET_WIREMOCK_CONFIG_KEY:wiremock-options.yaml}
+  proxy-deployment-name: ${MOCK_FLEET_PROXY_DEPLOYMENT_NAME:}
   storage:
     persistent: ${MOCK_FLEET_STORAGE_PERSISTENT:false}
     type: ${MOCK_FLEET_STORAGE_TYPE:s3}

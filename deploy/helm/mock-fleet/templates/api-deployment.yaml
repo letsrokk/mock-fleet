@@ -47,6 +47,12 @@ spec:
               value: {{ .Values.fleet.api.wiremock.containerImagePullPolicy | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
               value: /etc/mock-fleet/wiremock-options.yaml
+            - name: MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME
+              value: {{ include "mock-fleet.wiremockUserConfigMapName" . | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CONFIG_KEY
+              value: wiremock-options.yaml
+            - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
+              value: {{ include "mock-fleet.proxyFullname" . | quote }}
             - name: MOCK_FLEET_STORAGE_PERSISTENT
               value: {{ .Values.fleet.api.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
