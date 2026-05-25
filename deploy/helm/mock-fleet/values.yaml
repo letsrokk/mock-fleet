@@ -99,21 +99,6 @@ fleet:
       limits:
         cpu: "2"
         memory: 2Gi
-    wiremock:
-      containerName: wiremock
-      containerImage: wiremock/wiremock:latest
-      containerImagePullPolicy: IfNotPresent
-      config:
-        default:
-          options: []
-          resources:
-            requests:
-              cpu: "0.5"
-              memory: 512Mi
-            limits:
-              cpu: "1"
-              memory: 1Gi
-        mocks: []
   dash:
     enabled: true
     image:
@@ -155,6 +140,22 @@ fleet:
       limits:
         cpu: "0.25"
         memory: 128Mi
+
+wiremock:
+  containerName: wiremock
+  containerImage: wiremock/wiremock:latest
+  containerImagePullPolicy: IfNotPresent
+  config:
+    default:
+      options: []
+      resources:
+        requests:
+          cpu: "0.5"
+          memory: 512Mi
+        limits:
+          cpu: "1"
+          memory: 1Gi
+    mocks: []
 
 storage:
   persistent: false

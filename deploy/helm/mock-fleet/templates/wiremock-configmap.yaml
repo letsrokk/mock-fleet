@@ -10,10 +10,10 @@ data:
   wiremock-options.yaml: |
     wiremock:
       default:
-{{- toYaml .Values.fleet.api.wiremock.config.default | nindent 8 }}
+{{- toYaml .Values.wiremock.config.default | nindent 8 }}
       mocks:
-{{- if .Values.fleet.api.wiremock.config.mocks }}
-{{- toYaml .Values.fleet.api.wiremock.config.mocks | nindent 8 }}
+{{- if .Values.wiremock.config.mocks }}
+{{- toYaml .Values.wiremock.config.mocks | nindent 8 }}
 {{- else }}
         []
 {{- end }}
