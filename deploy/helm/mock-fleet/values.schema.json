@@ -17,10 +17,9 @@
               "type": "object",
               "properties": {
                 "podInactivityThreshold": { "type": "string" },
-                "podCreationTimeout": { "type": "string" },
-                "wiremock": { "type": "object" }
+                "podCreationTimeout": { "type": "string" }
               },
-              "required": ["podInactivityThreshold", "podCreationTimeout", "wiremock"]
+              "required": ["podInactivityThreshold", "podCreationTimeout"]
             }
           ]
         },
@@ -41,13 +40,14 @@
     },
     "ingress": { "type": "object" },
     "storage": { "type": "object" },
+    "wiremock": { "type": "object" },
     "securityContext": { "type": "object" },
     "env": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "rbac": { "type": "object" },
     "hazelcast": { "type": "object" }
   },
-  "required": ["fleet", "ingress", "storage", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
+  "required": ["fleet", "ingress", "storage", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
   "definitions": {
     "app": {
       "type": "object",

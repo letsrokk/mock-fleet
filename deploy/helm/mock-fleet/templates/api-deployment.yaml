@@ -44,11 +44,11 @@ spec:
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.fleet.api.podCreationTimeout | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
-              value: {{ .Values.fleet.api.wiremock.containerName | quote }}
+              value: {{ .Values.wiremock.containerName | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE
-              value: {{ .Values.fleet.api.wiremock.containerImage | quote }}
+              value: {{ .Values.wiremock.containerImage | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
-              value: {{ .Values.fleet.api.wiremock.containerImagePullPolicy | quote }}
+              value: {{ .Values.wiremock.containerImagePullPolicy | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
               value: /etc/mock-fleet/wiremock-options.yaml
             - name: MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME

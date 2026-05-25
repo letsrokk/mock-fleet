@@ -157,15 +157,15 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `fleet.api.wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
-| `fleet.api.wiremock.containerImage` | `wiremock/wiremock:latest` | Image used for spawned WireMock pods. |
-| `fleet.api.wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
-| `fleet.api.wiremock.config.default.options` | `[]` | Default WireMock CLI options for all mocks. |
-| `fleet.api.wiremock.config.default.resources.requests.cpu` | `"0.5"` | Default WireMock CPU request. |
-| `fleet.api.wiremock.config.default.resources.requests.memory` | `512Mi` | Default WireMock memory request. |
-| `fleet.api.wiremock.config.default.resources.limits.cpu` | `"1"` | Default WireMock CPU limit. |
-| `fleet.api.wiremock.config.default.resources.limits.memory` | `1Gi` | Default WireMock memory limit. |
-| `fleet.api.wiremock.config.mocks` | `[]` | Per-mock WireMock config overrides. |
+| `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
+| `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used for spawned WireMock pods. |
+| `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
+| `wiremock.config.default.options` | `[]` | Default WireMock CLI options for all mocks. |
+| `wiremock.config.default.resources.requests.cpu` | `"0.5"` | Default WireMock CPU request. |
+| `wiremock.config.default.resources.requests.memory` | `512Mi` | Default WireMock memory request. |
+| `wiremock.config.default.resources.limits.cpu` | `"1"` | Default WireMock CPU limit. |
+| `wiremock.config.default.resources.limits.memory` | `1Gi` | Default WireMock memory limit. |
+| `wiremock.config.mocks` | `[]` | Per-mock WireMock config overrides. |
 
 ### Dashboard
 
