@@ -3,7 +3,7 @@ set -euo pipefail
 
 WIREMOCK_HOST=${WIREMOCK_HOST:-wiremock.mock-fleet.localhost}
 WIREMOCK_SCHEME=${WIREMOCK_SCHEME:-http}
-PROXY_BASE_URL=${PROXY_BASE_URL:-https://www.google.com}
+PROXY_BASE_URL=${PROXY_BASE_URL:-https://wiremock.org}
 
 usage() {
     cat <<EOF
@@ -75,7 +75,7 @@ curl --fail-with-body --show-error --silent \
     --header "Content-Type: application/json" \
     --data @- <<JSON
 {
-  "name": "proxy-google",
+  "name": "proxy-all",
   "priority": 10,
   "request": {
     "method": "ANY",
