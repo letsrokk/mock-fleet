@@ -61,7 +61,7 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 | `fleet.api.podInactivityThreshold` | `1M` | How long an inactive mock pod may live before cleanup |
 | `fleet.api.podCreationTimeout` | `1M` | How long to wait for a new mock pod to become ready |
 | `fleet.api.wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
-| `fleet.api.storage.persistent` | `false` | Enable persistent WireMock mappings storage |
+| `storage.persistent` | `false` | Enable persistent WireMock mappings storage |
 | `fleet.api.probes.*.path` | `/__fleet/api/health/*` | API health probe paths |
 | `fleet.dash.enabled` | `true` | Deploy dashboard |
 | `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository |

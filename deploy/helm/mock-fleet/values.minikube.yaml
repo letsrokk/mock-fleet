@@ -10,17 +10,18 @@ fleet:
     replicas: 1
   api:
     replicas: 1
-    storage:
-      persistent: true
-      type: s3
-      s3:
-        storageClassName: seaweedfs-s3
-        bucket: "default-bucket"
-        mountOptions:
-          - endpoint-url http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
-          - force-path-style
-          - region us-east-1
-          - prefix mock-fleet/
+
+storage:
+  persistent: true
+  type: s3
+  s3:
+    storageClassName: seaweedfs-s3
+    bucket: "default-bucket"
+    mountOptions:
+      - endpoint-url http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
+      - force-path-style
+      - region us-east-1
+      - prefix mock-fleet/
 
 #env:
 #  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005

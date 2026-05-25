@@ -114,18 +114,6 @@ fleet:
               cpu: "1"
               memory: 1Gi
         mocks: []
-    storage:
-      persistent: false
-      type: s3
-      annotations: {}
-      s3:
-        provisioner: s3.csi.aws.com
-        storageClassName: ""
-        bucket: ""
-        path: /mock-fleet
-        authenticationSource: driver
-        cacheSize: 1Gi
-        mountOptions: []
   dash:
     enabled: true
     image:
@@ -167,6 +155,19 @@ fleet:
       limits:
         cpu: "0.25"
         memory: 128Mi
+
+storage:
+  persistent: false
+  type: s3
+  annotations: {}
+  s3:
+    provisioner: s3.csi.aws.com
+    storageClassName: ""
+    bucket: ""
+    path: /mock-fleet
+    authenticationSource: driver
+    cacheSize: 1Gi
+    mountOptions: []
 
 ingress:
   enabled: false

@@ -54,13 +54,13 @@ spec:
             - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
               value: {{ include "mock-fleet.proxyFullname" . | quote }}
             - name: MOCK_FLEET_STORAGE_PERSISTENT
-              value: {{ .Values.fleet.api.storage.persistent | quote }}
+              value: {{ .Values.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
-              value: {{ .Values.fleet.api.storage.type | quote }}
+              value: {{ .Values.storage.type | quote }}
             - name: MOCK_FLEET_STORAGE_PVC_NAME
               value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
             - name: MOCK_FLEET_STORAGE_S3_PATH
-              value: {{ .Values.fleet.api.storage.s3.path | quote }}
+              value: {{ .Values.storage.s3.path | quote }}
             {{- if .Values.fleet.api.dev.enabled }}
             - name: QUARKUS_LAUNCH_DEVMODE
               value: {{ .Values.fleet.api.dev.quarkusLaunchDevmode | quote }}
