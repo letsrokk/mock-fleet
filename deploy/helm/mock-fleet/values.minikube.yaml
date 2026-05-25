@@ -20,6 +20,8 @@ storage:
     mountOptions:
       - endpoint-url http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333
       - force-path-style
+      - allow-other
+      - allow-delete
       - region us-east-1
       - prefix mock-fleet/
 

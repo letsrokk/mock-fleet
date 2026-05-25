@@ -25,5 +25,6 @@ mock-fleet:
     persistent: ${MOCK_FLEET_STORAGE_PERSISTENT:false}
     type: ${MOCK_FLEET_STORAGE_TYPE:s3}
     pvc-name: ${MOCK_FLEET_STORAGE_PVC_NAME:mock-fleet-pvc}
+    mappings-path: ${MOCK_FLEET_STORAGE_MAPPINGS_PATH:/workspace/mappings}
     s3:
       path: ${MOCK_FLEET_STORAGE_S3_PATH:/mock-fleet}

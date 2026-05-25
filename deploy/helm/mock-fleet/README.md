@@ -62,6 +62,8 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 | `fleet.api.podCreationTimeout` | `1M` | How long to wait for a new mock pod to become ready |
 | `fleet.api.wiremock.containerImage` | `wiremock/wiremock:latest` | Image used by spawned WireMock pods |
 | `storage.persistent` | `false` | Enable persistent WireMock mappings storage |
+| `storage.mappingsPath` | `/workspace/mappings` | Path where `fleet-api` mounts persistent mappings |
+| `storage.s3.mountOptions` | `[allow-delete]` | S3 CSI mount options; `allow-delete` is required for deleting mapping files |
 | `fleet.api.probes.*.path` | `/__fleet/api/health/*` | API health probe paths |
 | `fleet.dash.enabled` | `true` | Deploy dashboard |
 | `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository |

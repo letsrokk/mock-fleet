@@ -159,6 +159,7 @@ fleet:
 storage:
   persistent: false
   type: s3
+  mappingsPath: /workspace/mappings
   annotations: {}
   s3:
     provisioner: s3.csi.aws.com
@@ -167,7 +168,8 @@ storage:
     path: /mock-fleet
     authenticationSource: driver
     cacheSize: 1Gi
-    mountOptions: []
+    mountOptions:
+      - allow-delete
 
 ingress:
   enabled: false
