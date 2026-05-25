@@ -22,6 +22,10 @@ spec:
       serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        {{- if .Values.storage.persistent }}
+        fsGroup: 185
+        fsGroupChangePolicy: OnRootMismatch
+        {{- end }}
       containers:
         - name: api
           image: {{ printf "%s:%s" .Values.fleet.api.image.repository .Values.fleet.api.image.tag }}
@@ -54,13 +58,15 @@ spec:
             - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
               value: {{ include "mock-fleet.proxyFullname" . | quote }}
             - name: MOCK_FLEET_STORAGE_PERSISTENT
-              value: {{ .Values.fleet.api.storage.persistent | quote }}
+              value: {{ .Values.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
-              value: {{ .Values.fleet.api.storage.type | quote }}
+              value: {{ .Values.storage.type | quote }}
             - name: MOCK_FLEET_STORAGE_PVC_NAME
               value: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }}
+            - name: MOCK_FLEET_STORAGE_MAPPINGS_PATH
+              value: {{ .Values.storage.mappingsPath | quote }}
             - name: MOCK_FLEET_STORAGE_S3_PATH
-              value: {{ .Values.fleet.api.storage.s3.path | quote }}
+              value: {{ .Values.storage.s3.path | quote }}
             {{- if .Values.fleet.api.dev.enabled }}
             - name: QUARKUS_LAUNCH_DEVMODE
               value: {{ .Values.fleet.api.dev.quarkusLaunchDevmode | quote }}
@@ -121,6 +127,10 @@ spec:
             - mountPath: /etc/mock-fleet
               name: wiremock-config
               readOnly: true
+            {{- if .Values.storage.persistent }}
+            - mountPath: {{ .Values.storage.mappingsPath | quote }}
+              name: wiremock-mappings
+            {{- end }}
       volumes:
         - name: hazelcast-config
           configMap:
@@ -130,3 +140,8 @@ spec:
           configMap:
             name: {{ include "mock-fleet.wiremockConfigMapName" . }}
             optional: false
+        {{- if .Values.storage.persistent }}
+        - name: wiremock-mappings
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-pvc" (include "mock-fleet.fullname" .) }}
+        {{- end }}

@@ -116,6 +116,11 @@ h1 {
   background: rgba(63, 139, 91, 0.28);
 }
 
+.tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .refresh-button,
 .danger-button {
   border: 0;
@@ -203,6 +208,14 @@ h1 {
 .notice.error {
   background: rgba(161, 43, 57, 0.22);
   border: 1px solid rgba(228, 117, 129, 0.25);
+}
+
+.notice.warning {
+  width: auto;
+  margin: 12px 14px;
+  background: rgba(244, 182, 99, 0.16);
+  border: 1px solid rgba(244, 182, 99, 0.26);
+  color: #f7d7a9;
 }
 
 .dialog-backdrop {
@@ -550,6 +563,60 @@ tr:last-child td {
   border-top: 1px solid rgba(198, 207, 222, 0.08);
 }
 
+.file-tree {
+  display: grid;
+  gap: 2px;
+  padding: 12px 0;
+}
+
+.file-node {
+  min-width: 0;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(198, 207, 222, 0.06);
+}
+
+.file-row:hover {
+  background: rgba(198, 207, 222, 0.06);
+}
+
+.file-icon {
+  color: #90a0bb;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  text-align: center;
+}
+
+.file-icon.folder {
+  color: #f4b663;
+}
+
+.file-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.small-button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
+.inline-state {
+  padding: 12px 20px;
+}
+
 .primary-button,
 .secondary-button,
 .danger-text-button {
@@ -597,6 +664,7 @@ tr:last-child td {
 
   .tab-controls,
   .tabs,
+  .file-actions,
   .editor-actions,
   .dialog-actions {
     flex-wrap: wrap;
@@ -614,6 +682,14 @@ tr:last-child td {
 
   .field-row {
     grid-template-columns: 1fr;
+  }
+
+  .file-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .file-actions {
+    grid-column: 2;
   }
 
   .toast {

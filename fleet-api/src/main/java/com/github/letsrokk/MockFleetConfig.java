@@ -34,6 +34,7 @@ public interface MockFleetConfig {
         boolean persistent();
         String type();
         String pvcName();
+        String mappingsPath();
         S3Config s3();
     }
 

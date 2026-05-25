@@ -57,27 +57,50 @@ type ConfirmDialogState = {
   onConfirm: () => void | Promise<void>;
 };
 
+type MappingsView = {
+  enabled: boolean;
+  mockIds: string[];
+  error?: string | null;
+};
+
+type MappingFileNode = {
+  name: string;
+  path: string;
+  directory: boolean;
+  children: MappingFileNode[];
+};
+
 const MOCKS_API_PATH = "/__fleet/api/mocks";
 const CONFIG_API_PATH = "/__fleet/api/config";
+const MAPPINGS_API_PATH = "/__fleet/api/mappings";
 const RESOURCE_KEYS = ["cpu", "memory"];
 const VALID_MOCK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const MOCK_ID_VALIDATION_MESSAGE =
   "Mock id must contain 1-63 lowercase letters, numbers, or hyphens, and must start and end with a letter or number.";
 
-type Tab = "mocks" | "config";
+type Tab = "mocks" | "config" | "mappings";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash());
   const [rows, setRows] = useState<MockRow[]>([]);
   const [configView, setConfigView] = useState<ConfigView | null>(null);
+  const [mappingsView, setMappingsView] = useState<MappingsView>({ enabled: false, mockIds: [] });
+  const [mappingsLoaded, setMappingsLoaded] = useState(false);
+  const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
+  const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
+  const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
   const [newMockId, setNewMockId] = useState("");
   const [loadingMocks, setLoadingMocks] = useState(true);
   const [loadingConfig, setLoadingConfig] = useState(false);
+  const [loadingMappings, setLoadingMappings] = useState(false);
+  const [loadingMappingsTree, setLoadingMappingsTree] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyMockId, setBusyMockId] = useState<string | null>(null);
+  const [busyMappingPath, setBusyMappingPath] = useState<string | null>(null);
+  const [busyMappingFolder, setBusyMappingFolder] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [configDirty, setConfigDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -90,6 +113,11 @@ export default function App() {
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
     [configView, selectedMockId]
   );
+  const activeTabLoading = activeTab === "mocks"
+    ? loadingMocks
+    : activeTab === "config"
+      ? loadingConfig
+      : loadingMappings || loadingMappingsTree;
 
   async function loadMocks(showSpinner: boolean) {
     if (showSpinner) {
@@ -150,6 +178,68 @@ export default function App() {
       if (mountedRef.current) {
         setLoadingConfig(false);
         setRefreshing(false);
+      }
+    }
+  }
+
+  async function loadMappings(showSpinner: boolean) {
+    if (showSpinner) {
+      setLoadingMappings(true);
+    } else if (activeTab === "mappings") {
+      setRefreshing(true);
+    }
+
+    try {
+      const response = await fetch(MAPPINGS_API_PATH);
+      if (!response.ok) {
+        throw new Error(`Unable to load mappings (${response.status})`);
+      }
+      const data = (await response.json()) as MappingsView;
+      const nextSelected = selectedMappingsMockId && data.mockIds.includes(selectedMappingsMockId)
+        ? selectedMappingsMockId
+        : data.mockIds[0] ?? null;
+      setMappingsView(data);
+      setMappingsLoaded(true);
+      setMappingsStatusError(data.error ?? null);
+      setSelectedMappingsMockId(nextSelected);
+      if (!data.enabled || nextSelected === null) {
+        setMappingsTree(null);
+      } else {
+        await loadMappingsTree(nextSelected, false);
+      }
+      setError(null);
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "Unable to load mappings.";
+      setMappingsLoaded(true);
+      setMappingsStatusError(message);
+      setError(message);
+    } finally {
+      if (mountedRef.current) {
+        setLoadingMappings(false);
+        setRefreshing(false);
+      }
+    }
+  }
+
+  async function loadMappingsTree(mockId: string, showSpinner: boolean) {
+    if (showSpinner) {
+      setLoadingMappingsTree(true);
+    }
+
+    try {
+      const response = await fetch(`${MAPPINGS_API_PATH}/${encodeURIComponent(mockId)}/tree`);
+      if (!response.ok) {
+        throw new Error(await errorMessage(response, `Unable to load mappings for '${mockId}'.`));
+      }
+      const data = (await response.json()) as MappingFileNode;
+      setMappingsTree(data);
+      setError(null);
+    } catch (loadError) {
+      setMappingsTree(null);
+      setError(loadError instanceof Error ? loadError.message : "Unable to load mappings tree.");
+    } finally {
+      if (mountedRef.current) {
+        setLoadingMappingsTree(false);
       }
     }
   }
@@ -240,6 +330,51 @@ export default function App() {
     }
   }
 
+  async function deleteMappingFile(path: string) {
+    if (!selectedMappingsMockId) {
+      return;
+    }
+    setBusyMappingPath(path);
+    setError(null);
+    try {
+      const response = await fetch(mappingFileUrl(selectedMappingsMockId, path), {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        await loadMappingsTree(selectedMappingsMockId, false);
+        throw new Error(await errorMessage(response, "Unable to delete mapping file."));
+      }
+      await loadMappingsTree(selectedMappingsMockId, false);
+      showToast(`Deleted mapping file '${path}'.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete mapping file.");
+    } finally {
+      setBusyMappingPath(null);
+    }
+  }
+
+  async function deleteMappingFolder(mockId: string) {
+    setBusyMappingFolder(mockId);
+    setError(null);
+    try {
+      const response = await fetch(mappingFolderUrl(mockId), {
+        method: "DELETE"
+      });
+      if (!response.ok) {
+        await loadMappings(false);
+        throw new Error(await errorMessage(response, "Unable to delete mappings folder."));
+      }
+      await loadMappings(false);
+      setSelectedMappingsMockId(null);
+      setMappingsTree(null);
+      showToast(`Deleted mappings folder '${mockId}'.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete mappings folder.");
+    } finally {
+      setBusyMappingFolder(null);
+    }
+  }
+
   function addMockId() {
     const mockId = newMockId.trim();
     if (!mockId || !configView) {
@@ -277,8 +412,16 @@ export default function App() {
     setConfigDirty(false);
   }
 
+  function selectMappingsMock(mockId: string) {
+    setSelectedMappingsMockId(mockId);
+    void loadMappingsTree(mockId, true);
+  }
+
   function selectTab(tab: Tab) {
-    const nextHash = tab === "mocks" ? "#active" : "#config";
+    if (tab === "mappings" && !mappingsView.enabled) {
+      return;
+    }
+    const nextHash = tabHash(tab);
     if (window.location.hash === nextHash) {
       setActiveTab(tab);
       return;
@@ -330,6 +473,40 @@ export default function App() {
     });
   }
 
+  function requestDeleteMappingFile(node: MappingFileNode) {
+    if (!selectedMappingsMockId || node.directory) {
+      return;
+    }
+    setConfirmDialog({
+      title: "Delete mapping file?",
+      body: `Delete '${node.path}' from mappings for '${selectedMappingsMockId}'?`,
+      confirmLabel: "Delete file",
+      danger: true,
+      onConfirm: () => deleteMappingFile(node.path)
+    });
+  }
+
+  function requestDeleteMappingFolder() {
+    if (!selectedMappingsMockId) {
+      return;
+    }
+    const mockId = selectedMappingsMockId;
+    setConfirmDialog({
+      title: "Delete mappings folder?",
+      body: `Delete all persisted mapping files for '${mockId}'? This does not delete the active mock or its configuration.`,
+      confirmLabel: "Delete folder",
+      danger: true,
+      onConfirm: () => deleteMappingFolder(mockId)
+    });
+  }
+
+  function openMappingFile(node: MappingFileNode) {
+    if (!selectedMappingsMockId || node.directory) {
+      return;
+    }
+    window.open(mappingFileUrl(selectedMappingsMockId, node.path), "_blank", "noopener,noreferrer");
+  }
+
   async function confirmAction() {
     if (!confirmDialog) {
       return;
@@ -363,6 +540,7 @@ export default function App() {
 
     window.addEventListener("hashchange", syncTabFromHash);
     syncTabFromHash();
+    void loadMappings(false);
 
     return () => {
       mountedRef.current = false;
@@ -396,6 +574,12 @@ export default function App() {
   }, [activeTab, configView]);
 
   useEffect(() => {
+    if (activeTab === "mappings" && mappingsView.enabled) {
+      void loadMappings(true);
+    }
+  }, [activeTab, mappingsView.enabled]);
+
+  useEffect(() => {
     if (!confirmDialog) {
       return;
     }
@@ -419,12 +603,8 @@ export default function App() {
         <p className="eyebrow">Mock Fleet</p>
         <div className="hero-row">
           <div>
-            <h1>{activeTab === "mocks" ? "Active Mocks" : "Configuration"}</h1>
-            <p className="subtitle">
-              {activeTab === "mocks"
-                ? "Inspect currently active mocks and remove them before inactivity cleanup runs."
-                : "Edit per-mock startup options stored in the user ConfigMap."}
-            </p>
+            <h1>{tabTitle(activeTab)}</h1>
+            <p className="subtitle">{tabSubtitle(activeTab, mappingsView.enabled)}</p>
           </div>
         </div>
         <div className="tab-controls">
@@ -435,14 +615,22 @@ export default function App() {
             <button className={activeTab === "config" ? "tab active" : "tab"} onClick={() => selectTab("config")}>
               Configuration
             </button>
+            <button
+              className={activeTab === "mappings" ? "tab active" : "tab"}
+              onClick={() => selectTab("mappings")}
+              disabled={mappingsLoaded && !mappingsView.enabled}
+              title={mappingsTabTitle(mappingsLoaded, mappingsView.enabled, mappingsStatusError)}
+            >
+              Persisted Mappings
+            </button>
           </div>
           <button
             className="refresh-button"
-            onClick={() => activeTab === "mocks" ? void loadMocks(false) : void loadConfig(false)}
-            disabled={loadingMocks || loadingConfig || refreshing}
+            onClick={() => refreshActiveTab()}
+            disabled={activeTabLoading || refreshing}
             aria-label={refreshing ? "Refreshing" : "Refresh"}
           >
-            {loadingMocks || loadingConfig || refreshing ? (
+            {activeTabLoading || refreshing ? (
               <span className="refresh-spinner" aria-hidden="true"></span>
             ) : (
               <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
@@ -453,9 +641,21 @@ export default function App() {
 
       {error ? <p className="notice error">{error}</p> : null}
 
-      {activeTab === "mocks" ? renderMocksPanel() : renderConfigPanel()}
+      {activeTab === "mocks" ? renderMocksPanel() : null}
+      {activeTab === "config" ? renderConfigPanel() : null}
+      {activeTab === "mappings" ? renderMappingsPanel() : null}
     </main>
   );
+
+  function refreshActiveTab() {
+    if (activeTab === "mocks") {
+      void loadMocks(false);
+    } else if (activeTab === "config") {
+      void loadConfig(false);
+    } else {
+      void loadMappings(false);
+    }
+  }
 
   function renderMocksPanel() {
     return (
@@ -628,6 +828,101 @@ export default function App() {
           )}
         </section>
       </section>
+    );
+  }
+
+  function renderMappingsPanel() {
+    if (!mappingsView.enabled) {
+      return (
+        <section className="panel">
+          <p className="state">
+            {mappingsLoaded
+              ? "Persistent mappings storage is disabled."
+              : "Checking mappings storage..."}
+          </p>
+        </section>
+      );
+    }
+
+    return (
+      <section className="config-layout">
+        <aside className="panel mock-list">
+          <div className="panel-header">
+            <span>{mappingsView.mockIds.length} mapping folders</span>
+            <span className="panel-status">{refreshing ? "Updating..." : mappingsStatusError ? "Listing issue" : "Manual refresh"}</span>
+          </div>
+          {mappingsStatusError ? <p className="notice warning">{mappingsStatusError}</p> : null}
+          {loadingMappings ? <p className="state">Loading mappings...</p> : null}
+          {!loadingMappings && mappingsView.mockIds.length === 0 ? <p className="state">No mapping folders.</p> : null}
+          <div className="mock-buttons">
+            {mappingsView.mockIds.map((mockId) => (
+              <button
+                key={mockId}
+                className={selectedMappingsMockId === mockId ? "mock-button active" : "mock-button"}
+                onClick={() => selectMappingsMock(mockId)}
+              >
+                <span className="mono">{mockId}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <section className="panel editor-panel">
+          <div className="panel-header">
+            <span className="mono">{selectedMappingsMockId ?? "No mock selected"}</span>
+            {selectedMappingsMockId ? (
+              <button
+                className="danger-text-button small-button"
+                onClick={requestDeleteMappingFolder}
+                disabled={busyMappingFolder === selectedMappingsMockId}
+              >
+                {busyMappingFolder === selectedMappingsMockId ? "Deleting..." : "Delete folder"}
+              </button>
+            ) : (
+              <span className="panel-status">Stored mapping files</span>
+            )}
+          </div>
+          {loadingMappingsTree ? <p className="state">Loading file tree...</p> : null}
+          {!loadingMappingsTree && selectedMappingsMockId && mappingsTree ? (
+            <div className="file-tree">
+              {mappingsTree.children.length > 0
+                ? mappingsTree.children.map((child) => renderFileNode(child, 0))
+                : <p className="state inline-state">No mapping files.</p>}
+            </div>
+          ) : null}
+          {!loadingMappingsTree && !selectedMappingsMockId ? (
+            <p className="state">Select a mock folder to view mapping files.</p>
+          ) : null}
+        </section>
+      </section>
+    );
+  }
+
+  function renderFileNode(node: MappingFileNode, depth: number) {
+    return (
+      <div key={node.path || node.name} className="file-node">
+        <div className="file-row" style={{ paddingLeft: `${depth * 18 + 12}px` }}>
+          <span className={node.directory ? "file-icon folder" : "file-icon file"} aria-hidden="true">
+            {node.directory ? ">" : "-"}
+          </span>
+          <span className="mono file-name">{node.name}</span>
+          {!node.directory ? (
+            <span className="file-actions">
+              <button className="secondary-button small-button" onClick={() => openMappingFile(node)}>Open</button>
+              <button
+                className="danger-text-button small-button"
+                onClick={() => requestDeleteMappingFile(node)}
+                disabled={busyMappingPath === node.path}
+              >
+                {busyMappingPath === node.path ? "Deleting..." : "Delete"}
+              </button>
+            </span>
+          ) : null}
+        </div>
+        {node.directory && node.children.length > 0 ? (
+          <div>{node.children.map((child) => renderFileNode(child, depth + 1))}</div>
+        ) : null}
+      </div>
     );
   }
 
@@ -853,7 +1148,64 @@ function resourceSummary(resources: ResourceData) {
 }
 
 function tabFromHash(): Tab {
-  return window.location.hash === "#config" ? "config" : "mocks";
+  if (window.location.hash === "#config") {
+    return "config";
+  }
+  if (window.location.hash === "#mappings") {
+    return "mappings";
+  }
+  return "mocks";
+}
+
+function tabHash(tab: Tab) {
+  if (tab === "config") {
+    return "#config";
+  }
+  if (tab === "mappings") {
+    return "#mappings";
+  }
+  return "#active";
+}
+
+function tabTitle(tab: Tab) {
+  if (tab === "config") {
+    return "Configuration";
+  }
+  if (tab === "mappings") {
+    return "Persisted Mappings";
+  }
+  return "Active Mocks";
+}
+
+function tabSubtitle(tab: Tab, mappingsEnabled: boolean) {
+  if (tab === "config") {
+    return "Edit per-mock startup options.";
+  }
+  if (tab === "mappings") {
+    return mappingsEnabled
+      ? "Inspect persisted mock mapping files."
+      : "Enable persistent mappings storage to inspect stored WireMock mapping files.";
+  }
+  return "Inspect currently active mocks.";
+}
+
+function mappingsTabTitle(loaded: boolean, enabled: boolean, error: string | null) {
+  if (error) {
+    return "Mappings status could not be loaded";
+  }
+  if (!loaded) {
+    return "Checking persistent mappings storage";
+  }
+  return enabled ? undefined : "Enable persistent mappings storage to use this view";
+}
+
+function mappingFileUrl(mockId: string, path: string) {
+  const params = new URLSearchParams({ path });
+  return `${MAPPINGS_API_PATH}/${encodeURIComponent(mockId)}/files?${params.toString()}`;
+}
+
+function mappingFolderUrl(mockId: string) {
+  return `${MAPPINGS_API_PATH}/${encodeURIComponent(mockId)}`;
 }
 
 async function errorMessage(response: Response, fallback: string) {

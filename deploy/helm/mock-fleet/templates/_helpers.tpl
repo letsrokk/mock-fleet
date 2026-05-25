@@ -91,10 +91,10 @@ app.kubernetes.io/component: dash
 {{- end -}}
 
 {{- define "mock-fleet.validateStorage" -}}
-{{- if and .Values.fleet.api.storage.persistent (ne .Values.fleet.api.storage.type "s3") -}}
-{{- fail (printf "Unsupported persistent storage.type %q. Supported values: s3" .Values.fleet.api.storage.type) -}}
+{{- if and .Values.storage.persistent (ne .Values.storage.type "s3") -}}
+{{- fail (printf "Unsupported persistent storage.type %q. Supported values: s3" .Values.storage.type) -}}
 {{- end -}}
-{{- if and .Values.fleet.api.storage.persistent (eq .Values.fleet.api.storage.type "s3") (not .Values.fleet.api.storage.s3.bucket) -}}
+{{- if and .Values.storage.persistent (eq .Values.storage.type "s3") (not .Values.storage.s3.bucket) -}}
 {{- fail "storage.s3.bucket is required when storage.persistent=true and storage.type=s3" -}}
 {{- end -}}
 {{- end -}}
