@@ -444,10 +444,57 @@ tr:last-child td {
   gap: 8px;
 }
 
-.option-group h3 {
-  margin: 0;
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.option-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.option-group-header {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(198, 207, 222, 0.1);
+  border-radius: 8px;
+  padding: 8px 10px;
   color: #f3efe6;
+  background: rgba(198, 207, 222, 0.06);
   font-size: 0.96rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.option-group-header:hover,
+.option-group-header:focus-visible {
+  background: rgba(198, 207, 222, 0.1);
+}
+
+.option-group-header:focus-visible {
+  outline: 2px solid rgba(122, 206, 153, 0.5);
+  outline-offset: 2px;
+}
+
+.option-group-icon {
+  color: #90a0bb;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  text-align: center;
+}
+
+.option-group-count {
+  color: #90a0bb;
+  font-size: 0.78rem;
+  font-weight: 400;
 }
 
 .option-group-list {
@@ -702,6 +749,8 @@ tr:last-child td {
   .tab-controls,
   .tabs,
   .file-actions,
+  .option-toolbar,
+  .section-title-row,
   .editor-actions,
   .dialog-actions {
     flex-wrap: wrap;

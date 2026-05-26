@@ -73,6 +73,7 @@ type MappingFileNode = {
 const MOCKS_API_PATH = "/__fleet/api/mocks";
 const CONFIG_API_PATH = "/__fleet/api/config";
 const MAPPINGS_API_PATH = "/__fleet/api/mappings";
+const RESOURCE_GROUP_NAME = "Resources";
 const RESOURCE_KEYS = ["cpu", "memory"];
 const VALID_MOCK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const MOCK_ID_VALIDATION_MESSAGE =
@@ -89,6 +90,7 @@ export default function App() {
   const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
   const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
   const [collapsedMappingPaths, setCollapsedMappingPaths] = useState<Set<string>>(() => new Set());
+  const [collapsedOptionGroups, setCollapsedOptionGroups] = useState<Set<string>>(() => new Set());
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
@@ -275,6 +277,15 @@ export default function App() {
     if (!selectedMockId || !configView) {
       return;
     }
+
+    let nextOptions: string[];
+    try {
+      nextOptions = optionsFromDraft(draft, configView.options);
+    } catch (validationError) {
+      setError(validationError instanceof Error ? validationError.message : "Invalid WireMock arguments.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -283,7 +294,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resourceVersion: configView.resourceVersion,
-          options: optionsFromDraft(draft, configView.options),
+          options: nextOptions,
           resources: resourcesFromDraft(draft)
         })
       });
@@ -535,6 +546,29 @@ export default function App() {
     setCollapsedMappingPaths(collectDirectoryPaths(mappingsTree));
   }
 
+  function toggleOptionGroup(group: string) {
+    setCollapsedOptionGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) {
+        next.delete(group);
+      } else {
+        next.add(group);
+      }
+      return next;
+    });
+  }
+
+  function expandAllOptionGroups() {
+    setCollapsedOptionGroups(new Set());
+  }
+
+  function collapseAllOptionGroups() {
+    if (!configView) {
+      return;
+    }
+    setCollapsedOptionGroups(new Set(optionGroupNames(configView.options)));
+  }
+
   async function confirmAction() {
     if (!confirmDialog) {
       return;
@@ -738,6 +772,9 @@ export default function App() {
       return <section className="panel"><p className="state">Loading mocks config...</p></section>;
     }
 
+    const groupedOptions = groupOptions(configView.options);
+    const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
+
     return (
       <section className="config-layout">
         <aside className="panel mock-list">
@@ -778,42 +815,76 @@ export default function App() {
               </div>
               <div className="editor-body">
                 <div className="form-section">
-                  <h2>Available options</h2>
-                  <div className="option-list">
-                    {groupOptions(configView.options).map(([group, options]) => (
-                      <section className="option-group" key={group}>
-                        <h3>{group}</h3>
-                        <div className="option-group-list">
-                          {options.map((option) => renderOptionControl(option))}
-                        </div>
-                      </section>
-                    ))}
+                  <div className="section-title-row">
+                    <h2>Available options</h2>
+                    <div className="option-toolbar">
+                      <button className="secondary-button small-button" type="button" onClick={expandAllOptionGroups}>
+                        Expand all
+                      </button>
+                      <button className="secondary-button small-button" type="button" onClick={collapseAllOptionGroups}>
+                        Collapse all
+                      </button>
+                    </div>
                   </div>
-                </div>
-
-                <div className="form-section">
-                  <h2>Resources</h2>
-                  <div className="resource-grid">
-                    {RESOURCE_KEYS.map((key) => (
-                      <label key={`request-${key}`}>
-                        Request {key}
-                        <input
-                          value={draft.requests[key] ?? ""}
-                          onChange={(event) => setDraftField("requests", key, event.target.value)}
-                          placeholder={key === "cpu" ? "0.5" : "512Mi"}
-                        />
-                      </label>
-                    ))}
-                    {RESOURCE_KEYS.map((key) => (
-                      <label key={`limit-${key}`}>
-                        Limit {key}
-                        <input
-                          value={draft.limits[key] ?? ""}
-                          onChange={(event) => setDraftField("limits", key, event.target.value)}
-                          placeholder={key === "cpu" ? "1" : "1Gi"}
-                        />
-                      </label>
-                    ))}
+                  <div className="option-list">
+                    {groupedOptions.map(([group, options]) => {
+                      const collapsed = collapsedOptionGroups.has(group);
+                      return (
+                      <section className="option-group" key={group}>
+                        <button
+                          className="option-group-header"
+                          type="button"
+                          onClick={() => toggleOptionGroup(group)}
+                          aria-expanded={!collapsed}
+                        >
+                          <span className="option-group-icon" aria-hidden="true">{collapsed ? ">" : "v"}</span>
+                          <span>{group}</span>
+                          <span className="option-group-count">{options.length}</span>
+                        </button>
+                        {!collapsed ? (
+                          <div className="option-group-list">
+                            {options.map((option) => renderOptionControl(option))}
+                          </div>
+                        ) : null}
+                      </section>
+                      );
+                    })}
+                    <section className="option-group" key={RESOURCE_GROUP_NAME}>
+                      <button
+                        className="option-group-header"
+                        type="button"
+                        onClick={() => toggleOptionGroup(RESOURCE_GROUP_NAME)}
+                        aria-expanded={!resourcesCollapsed}
+                      >
+                        <span className="option-group-icon" aria-hidden="true">{resourcesCollapsed ? ">" : "v"}</span>
+                        <span>{RESOURCE_GROUP_NAME}</span>
+                        <span className="option-group-count">{RESOURCE_KEYS.length * 2}</span>
+                      </button>
+                      {!resourcesCollapsed ? (
+                        <div className="resource-grid option-group-list">
+                          {RESOURCE_KEYS.map((key) => (
+                            <label key={`request-${key}`}>
+                              Request {key}
+                              <input
+                                value={draft.requests[key] ?? ""}
+                                onChange={(event) => setDraftField("requests", key, event.target.value)}
+                                placeholder={key === "cpu" ? "0.5" : "512Mi"}
+                              />
+                            </label>
+                          ))}
+                          {RESOURCE_KEYS.map((key) => (
+                            <label key={`limit-${key}`}>
+                              Limit {key}
+                              <input
+                                value={draft.limits[key] ?? ""}
+                                onChange={(event) => setDraftField("limits", key, event.target.value)}
+                                placeholder={key === "cpu" ? "1" : "1Gi"}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      ) : null}
+                    </section>
                   </div>
                 </div>
 
@@ -1133,6 +1204,10 @@ function groupOptions(options: OptionDefinition[]) {
   return Array.from(grouped.entries());
 }
 
+function optionGroupNames(options: OptionDefinition[]) {
+  return [...groupOptions(options).map(([group]) => group), RESOURCE_GROUP_NAME];
+}
+
 function draftFromConfig(config: ConfigData, definitions: OptionDefinition[]): DraftConfig {
   const draft = emptyDraft();
   const valueOptions = new Set(definitions.filter((option) => option.kind !== "flag").map((option) => option.name));
@@ -1181,7 +1256,47 @@ function optionsFromDraft(draft: DraftConfig, definitions: OptionDefinition[]) {
       }
     }
   });
-  return [...options, ...splitArgs(draft.rawArgs)];
+  const rawArgs = splitArgs(draft.rawArgs);
+  validateAdvancedArgs(rawArgs, definitions);
+  return [...options, ...rawArgs];
+}
+
+function validateAdvancedArgs(rawArgs: string[], definitions: OptionDefinition[]) {
+  const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]));
+
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const token = rawArgs[index];
+    if (!token.startsWith("--")) {
+      throw new Error(`Advanced args contains '${token}' without an option name.`);
+    }
+
+    const equalsIndex = token.indexOf("=");
+    const optionName = equalsIndex > 0 ? token.slice(0, equalsIndex) : token;
+    const definition = definitionsByName.get(optionName);
+    if (!definition) {
+      throw new Error(`Advanced args contains unsupported WireMock option '${optionName}'.`);
+    }
+
+    if (definition.kind === "flag") {
+      if (equalsIndex > 0) {
+        throw new Error(`Advanced args option '${optionName}' does not accept a value.`);
+      }
+      continue;
+    }
+
+    if (equalsIndex > 0) {
+      if (!token.slice(equalsIndex + 1).trim()) {
+        throw new Error(`Advanced args option '${optionName}' requires a value.`);
+      }
+      continue;
+    }
+
+    const nextValue = rawArgs[index + 1];
+    if (!nextValue || nextValue.startsWith("--")) {
+      throw new Error(`Advanced args option '${optionName}' requires a value.`);
+    }
+    index += 1;
+  }
 }
 
 function resourcesFromDraft(draft: DraftConfig): ResourceData | null {
