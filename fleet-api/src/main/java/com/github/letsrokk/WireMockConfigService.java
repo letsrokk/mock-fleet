@@ -330,32 +330,79 @@ public class WireMockConfigService {
     }
 
     private List<OptionDefinition> optionDefinitions() {
-        List<OptionDefinition> options = List.of(
-                flag("--verbose", "Verbose logging", "Logging", "Log more detail to the console."),
-                flag("--disable-request-logging", "Disable request logging", "Logging", "Stops requests and responses being sent to the notifier."),
-                flag("--no-request-journal", "Disable request journal", "Logging", "Turns off the in-memory journal of received requests."),
-                number("--logged-response-body-size-limit", "Response body log limit", "Logging", "Truncates logged response bodies above this byte limit."),
+        return List.of(
+                flag("--verbose", "Verbose logging", "Logging and Diagnostics", "Log more detail to stdout."),
+                flag("--print-all-network-traffic", "Print network traffic", "Logging and Diagnostics", "Print raw inbound and outbound network traffic."),
+                flag("--disable-request-logging", "Disable request logging", "Logging and Diagnostics", "Stops requests and responses being sent to the notifier."),
+                number("--logged-response-body-size-limit", "Response body log limit", "Logging and Diagnostics", "Truncates logged response bodies above this byte limit."),
+                flag("--disable-banner", "Disable banner", "Logging and Diagnostics", "Prevents the WireMock logo being printed on startup."),
 
-                flag("--global-response-templating", "Global response templating", "Templating", "Renders all response definitions with Handlebars templates."),
-                flag("--local-response-templating", "Local response templating", "Templating", "Allows templating only on stub mappings that opt in."),
-                number("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache."),
+                flag("--no-request-journal", "Disable request journal", "Request Journal and Recording", "Turns off the in-memory journal of received requests."),
+                number("--max-request-journal-entries", "Max journal entries", "Request Journal and Recording", "Sets the maximum number of request journal entries."),
+                flag("--record-mappings", "Record mappings", "Request Journal and Recording", "Records incoming requests as stub mappings."),
+                input("--match-headers", "Match headers", "Request Journal and Recording", "Captures the named request headers when recording."),
+                input("--filename-template", "Filename template", "Request Journal and Recording", "Sets the Handlebars filename template for recorded mappings."),
 
-                input("--proxy-all", "Proxy all", "Proxying and Recording", "Proxies unmatched requests to the supplied base URL."),
-                input("--proxy-via", "Proxy via", "Proxying and Recording", "Routes proxied traffic through another proxy server."),
-                flag("--record-mappings", "Record mappings", "Proxying and Recording", "Records proxied traffic as stub mappings."),
-                flag("--preserve-host-header", "Preserve host header", "Proxying and Recording", "Keeps the original Host header when proxying."),
+                input("--proxy-all", "Proxy all", "Proxying", "Proxies all requests to the supplied base URL."),
+                input("--proxy-via", "Proxy via", "Proxying", "Routes proxied traffic through another proxy server."),
+                flag("--preserve-host-header", "Preserve host header", "Proxying", "Keeps the original Host header when proxying."),
+                flag("--preserve-user-agent-proxy-header", "Preserve user agent", "Proxying", "Keeps the original User-Agent header when proxying."),
+                input("--supported-proxy-encodings", "Proxy encodings", "Proxying", "Sets acceptable compression methods for proxy and recording traffic."),
+                input("--allow-proxy-targets", "Allow proxy targets", "Proxying", "Limits proxying and recording to the supplied targets."),
+                input("--deny-proxy-targets", "Deny proxy targets", "Proxying", "Blocks proxying and recording to the supplied targets."),
+                number("--proxy-timeout", "Proxy timeout ms", "Proxying", "Sets the proxy request timeout in milliseconds."),
+                flag("--proxy-pass-through", "Proxy pass through", "Proxying", "Allows unmatched browser proxy requests to pass through."),
 
+                flag("--enable-browser-proxying", "Browser proxying", "Browser Proxy and Certificates", "Runs WireMock as a browser proxy."),
+                input("--ca-keystore", "CA keystore", "Browser Proxy and Certificates", "Sets the CA keystore used for generated proxy certificates."),
+                input("--ca-keystore-password", "CA keystore password", "Browser Proxy and Certificates", "Sets the CA keystore password."),
+                input("--ca-keystore-type", "CA keystore type", "Browser Proxy and Certificates", "Sets the CA keystore type."),
+                flag("--trust-all-proxy-targets", "Trust all proxy targets", "Browser Proxy and Certificates", "Trusts all remote certificates when proxying HTTPS traffic."),
+                input("--trust-proxy-target", "Trust proxy target", "Browser Proxy and Certificates", "Trusts a specific remote endpoint certificate."),
+                input("--https-keystore", "HTTPS keystore", "Browser Proxy and Certificates", "Sets the HTTPS keystore path."),
+                input("--keystore-type", "Keystore type", "Browser Proxy and Certificates", "Sets the HTTPS keystore type."),
+                input("--keystore-password", "Keystore password", "Browser Proxy and Certificates", "Sets the HTTPS keystore password."),
+                input("--key-manager-password", "Key manager password", "Browser Proxy and Certificates", "Sets the key manager password."),
+                input("--https-truststore", "HTTPS truststore", "Browser Proxy and Certificates", "Sets the HTTPS truststore path."),
+                input("--truststore-type", "Truststore type", "Browser Proxy and Certificates", "Sets the HTTPS truststore type."),
+                input("--truststore-password", "Truststore password", "Browser Proxy and Certificates", "Sets the HTTPS truststore password."),
+                flag("--https-require-client-cert", "Require client cert", "Browser Proxy and Certificates", "Requires clients to authenticate with a certificate."),
+
+                flag("--disable-http2-plain", "Disable HTTP/2 plain", "HTTP Responses", "Disables HTTP/2 over plain HTTP."),
+                flag("--disable-http2-tls", "Disable HTTP/2 TLS", "HTTP Responses", "Disables HTTP/2 over HTTPS."),
                 flag("--disable-gzip", "Disable gzip", "HTTP Responses", "Prevents response bodies from being gzipped."),
                 flag("--enable-stub-cors", "Enable stub CORS", "HTTP Responses", "Adds automatic CORS response headers for stubs."),
                 select("--use-chunked-encoding", "Chunked encoding", "HTTP Responses", "Controls when responses use Transfer-Encoding: chunked.", List.of("always", "never", "body_file")),
+                flag("--disable-connection-reuse", "Disable connection reuse", "HTTP Responses", "Disables HTTP connection reuse."),
+                flag("--disable-strict-http-headers", "Disable strict headers", "HTTP Responses", "Disables strict HTTP header handling."),
 
-                flag("--async-response-enabled", "Async responses", "Performance", "Enables asynchronous request processing for delayed responses."),
-                number("--async-response-threads", "Async response threads", "Performance", "Sets the number of background response threads."),
-                number("--container-threads", "Container threads", "Performance", "Sets the number of Jetty container threads."),
-                number("--timeout", "Timeout ms", "Performance", "Sets the default global timeout in milliseconds."),
+                flag("--global-response-templating", "Global response templating", "Templating", "Renders all response definitions with Handlebars templates."),
+                flag("--local-response-templating", "Local response templating", "Templating", "Allows templating only on stub mappings that opt in."),
+                flag("--disable-response-templating", "Disable response templating", "Templating", "Disables processing responses with Handlebars templates."),
+                number("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache."),
+                input("--permitted-system-keys", "Permitted system keys", "Templating", "Sets permitted system property and environment variable names for templates."),
 
-                flag("--disable-banner", "Disable banner", "Startup", "Prevents the WireMock logo being printed on startup."));
-        return options;
+                input("--extensions", "Extensions", "Extensions", "Sets extension class names."),
+                flag("--disable-extensions-scanning", "Disable extension scanning", "Extensions", "Prevents extensions being scanned and loaded from the classpath."),
+                flag("--disable-optimize-xml-factories-loading", "Disable XML factory optimization", "Extensions", "Disables optimized XML factory loading."),
+
+                flag("--async-response-enabled", "Async responses", "Performance and Jetty", "Enables asynchronous request processing for delayed responses."),
+                number("--async-response-threads", "Async response threads", "Performance and Jetty", "Sets the number of background response threads."),
+                number("--container-threads", "Container threads", "Performance and Jetty", "Sets the number of Jetty container threads."),
+                number("--max-http-client-connections", "Max HTTP client connections", "Performance and Jetty", "Sets the maximum HTTP client connections."),
+                number("--jetty-acceptor-threads", "Jetty acceptor threads", "Performance and Jetty", "Sets the number of Jetty acceptor threads."),
+                number("--jetty-accept-queue-size", "Jetty accept queue size", "Performance and Jetty", "Sets the Jetty accepted request queue size."),
+                number("--jetty-header-buffer-size", "Jetty header buffer size", "Performance and Jetty", "Sets the deprecated Jetty request header buffer size."),
+                number("--jetty-header-request-size", "Jetty request header size", "Performance and Jetty", "Sets the Jetty request header buffer size."),
+                number("--jetty-header-response-size", "Jetty response header size", "Performance and Jetty", "Sets the Jetty response header buffer size."),
+                number("--jetty-idle-timeout", "Jetty idle timeout ms", "Performance and Jetty", "Sets the Jetty connection idle timeout in milliseconds."),
+                number("--jetty-stop-timeout", "Jetty stop timeout ms", "Performance and Jetty", "Sets the Jetty stop timeout in milliseconds."),
+                number("--timeout", "Timeout ms", "Performance and Jetty", "Sets the default global timeout in milliseconds."),
+
+                number("--webhook-threadpool-size", "Webhook thread pool size", "Webhooks and WebSockets", "Sets the webhook processing thread count."),
+                number("--websocket-idle-timeout", "WebSocket idle timeout ms", "Webhooks and WebSockets", "Sets the WebSocket idle timeout in milliseconds."),
+                number("--websocket-max-text-message-size", "Max text message size", "Webhooks and WebSockets", "Sets the maximum WebSocket text message size in bytes."),
+                number("--websocket-max-binary-message-size", "Max binary message size", "Webhooks and WebSockets", "Sets the maximum WebSocket binary message size in bytes."));
     }
 
     private OptionDefinition flag(String name, String label, String group, String description) {
