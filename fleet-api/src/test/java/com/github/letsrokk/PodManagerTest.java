@@ -543,7 +543,7 @@ class PodManagerTest {
                 pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
         assertEquals(PodFactory.WIREMOCK_MAPPINGS_VOLUME,
                 pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getName());
-        assertEquals(PodFactory.WIREMOCK_MAPPINGS_PATH,
+        assertEquals(PodFactory.WIREMOCK_ROOT_DIR,
                 pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getMountPath());
         assertEquals("demo", pod.getSpec().getContainers().getFirst().getVolumeMounts().getFirst().getSubPath());
         assertEquals(PodFactory.INIT_MAPPINGS_CONTAINER, pod.getSpec().getInitContainers().getFirst().getName());

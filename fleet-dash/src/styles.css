@@ -566,7 +566,15 @@ tr:last-child td {
 .file-tree {
   display: grid;
   gap: 2px;
-  padding: 12px 0;
+  padding: 0 0 12px;
+}
+
+.file-tree-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 10px;
+  border-bottom: 1px solid rgba(198, 207, 222, 0.08);
 }
 
 .file-node {
@@ -583,8 +591,25 @@ tr:last-child td {
   border-bottom: 1px solid rgba(198, 207, 222, 0.06);
 }
 
+.folder-row {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  background: rgba(244, 182, 99, 0.08);
+  border-bottom-color: rgba(244, 182, 99, 0.14);
+  cursor: pointer;
+}
+
 .file-row:hover {
   background: rgba(198, 207, 222, 0.06);
+}
+
+.folder-row:hover,
+.folder-row:focus-visible {
+  background: rgba(244, 182, 99, 0.14);
+}
+
+.folder-row:focus-visible {
+  outline: 2px solid rgba(244, 182, 99, 0.5);
+  outline-offset: -2px;
 }
 
 .file-icon {
@@ -595,11 +620,23 @@ tr:last-child td {
 
 .file-icon.folder {
   color: #f4b663;
+  font-weight: 700;
 }
 
 .file-name {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.folder-row .file-name {
+  color: #ffe1b0;
+  font-weight: 700;
+}
+
+.file-count {
+  color: #90a0bb;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .file-actions {
@@ -686,6 +723,19 @@ tr:last-child td {
 
   .file-row {
     grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .file-tree-toolbar {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .folder-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .file-count {
+    grid-column: 2;
   }
 
   .file-actions {

@@ -57,7 +57,7 @@ Persistent mappings are disabled by default. To enable them, set `storage.persis
 
 The chart creates a static S3 CSI PV/PVC and mounts it into:
 
-- spawned WireMock pods at `/home/wiremock/mappings`
+- spawned WireMock pods at `/home/wiremock`
 - `fleet-api` at `storage.mappingsPath`
 
 `storage.s3.mountOptions` includes `allow-delete` by default because the dashboard can delete mapping files and folders.

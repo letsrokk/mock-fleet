@@ -88,6 +88,7 @@ export default function App() {
   const [mappingsLoaded, setMappingsLoaded] = useState(false);
   const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
   const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
+  const [collapsedMappingPaths, setCollapsedMappingPaths] = useState<Set<string>>(() => new Set());
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
@@ -204,6 +205,7 @@ export default function App() {
       setSelectedMappingsMockId(nextSelected);
       if (!data.enabled || nextSelected === null) {
         setMappingsTree(null);
+        setCollapsedMappingPaths(new Set());
       } else {
         await loadMappingsTree(nextSelected, false);
       }
@@ -233,9 +235,11 @@ export default function App() {
       }
       const data = (await response.json()) as MappingFileNode;
       setMappingsTree(data);
+      setCollapsedMappingPaths(new Set());
       setError(null);
     } catch (loadError) {
       setMappingsTree(null);
+      setCollapsedMappingPaths(new Set());
       setError(loadError instanceof Error ? loadError.message : "Unable to load mappings tree.");
     } finally {
       if (mountedRef.current) {
@@ -414,6 +418,7 @@ export default function App() {
 
   function selectMappingsMock(mockId: string) {
     setSelectedMappingsMockId(mockId);
+    setCollapsedMappingPaths(new Set());
     void loadMappingsTree(mockId, true);
   }
 
@@ -505,6 +510,29 @@ export default function App() {
       return;
     }
     window.open(mappingFileUrl(selectedMappingsMockId, node.path), "_blank", "noopener,noreferrer");
+  }
+
+  function toggleMappingFolder(path: string) {
+    setCollapsedMappingPaths((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
+  function expandAllMappingFolders() {
+    setCollapsedMappingPaths(new Set());
+  }
+
+  function collapseAllMappingFolders() {
+    if (!mappingsTree) {
+      return;
+    }
+    setCollapsedMappingPaths(collectDirectoryPaths(mappingsTree));
   }
 
   async function confirmAction() {
@@ -884,11 +912,23 @@ export default function App() {
           </div>
           {loadingMappingsTree ? <p className="state">Loading file tree...</p> : null}
           {!loadingMappingsTree && selectedMappingsMockId && mappingsTree ? (
-            <div className="file-tree">
-              {mappingsTree.children.length > 0
-                ? mappingsTree.children.map((child) => renderFileNode(child, 0))
-                : <p className="state inline-state">No mapping files.</p>}
-            </div>
+            <>
+              {mappingsTree.children.length > 0 ? (
+                <div className="file-tree-toolbar">
+                  <button className="secondary-button small-button" type="button" onClick={expandAllMappingFolders}>
+                    Expand all
+                  </button>
+                  <button className="secondary-button small-button" type="button" onClick={collapseAllMappingFolders}>
+                    Collapse all
+                  </button>
+                </div>
+              ) : null}
+              <div className="file-tree">
+                {mappingsTree.children.length > 0
+                  ? mappingsTree.children.map((child) => renderFileNode(child, 0))
+                  : <p className="state inline-state">No mapping files.</p>}
+              </div>
+            </>
           ) : null}
           {!loadingMappingsTree && !selectedMappingsMockId ? (
             <p className="state">Select a mock folder to view mapping files.</p>
@@ -899,13 +939,34 @@ export default function App() {
   }
 
   function renderFileNode(node: MappingFileNode, depth: number) {
+    const nodeKey = node.path || node.name;
+    const collapsed = node.directory && collapsedMappingPaths.has(nodeKey);
+    const hasChildren = node.children.length > 0;
+    const rowClassName = node.directory ? "file-row folder-row" : "file-row";
+
     return (
-      <div key={node.path || node.name} className="file-node">
-        <div className="file-row" style={{ paddingLeft: `${depth * 18 + 12}px` }}>
+      <div key={nodeKey} className="file-node">
+        <div
+          className={rowClassName}
+          style={{ paddingLeft: `${depth * 18 + 12}px` }}
+          role={node.directory ? "button" : undefined}
+          tabIndex={node.directory ? 0 : undefined}
+          aria-expanded={node.directory ? !collapsed : undefined}
+          onClick={node.directory ? () => toggleMappingFolder(nodeKey) : undefined}
+          onKeyDown={node.directory ? (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggleMappingFolder(nodeKey);
+            }
+          } : undefined}
+        >
           <span className={node.directory ? "file-icon folder" : "file-icon file"} aria-hidden="true">
-            {node.directory ? ">" : "-"}
+            {node.directory ? (collapsed ? ">" : "v") : "-"}
           </span>
           <span className="mono file-name">{node.name}</span>
+          {node.directory ? (
+            <span className="file-count">{folderItemLabel(node.children.length)}</span>
+          ) : null}
           {!node.directory ? (
             <span className="file-actions">
               <button className="secondary-button small-button" onClick={() => openMappingFile(node)}>Open</button>
@@ -919,7 +980,7 @@ export default function App() {
             </span>
           ) : null}
         </div>
-        {node.directory && node.children.length > 0 ? (
+        {node.directory && hasChildren && !collapsed ? (
           <div>{node.children.map((child) => renderFileNode(child, depth + 1))}</div>
         ) : null}
       </div>
@@ -1206,6 +1267,27 @@ function mappingFileUrl(mockId: string, path: string) {
 
 function mappingFolderUrl(mockId: string) {
   return `${MAPPINGS_API_PATH}/${encodeURIComponent(mockId)}`;
+}
+
+function collectDirectoryPaths(node: MappingFileNode) {
+  const paths = new Set<string>();
+
+  function visit(current: MappingFileNode) {
+    if (current.directory && current.path) {
+      paths.add(current.path);
+    }
+    current.children.forEach(visit);
+  }
+
+  node.children.forEach(visit);
+  return paths;
+}
+
+function folderItemLabel(count: number) {
+  if (count === 0) {
+    return "empty";
+  }
+  return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
 async function errorMessage(response: Response, fallback: string) {
