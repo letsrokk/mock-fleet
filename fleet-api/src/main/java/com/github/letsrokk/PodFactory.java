@@ -21,7 +21,7 @@ public class PodFactory {
     public static final String LABEL_MOCK_ID = "mock-fleet/mock-id";
     static final String WIREMOCK_HEALTH_PATH = "/__admin/health";
     static final String WIREMOCK_MAPPINGS_VOLUME = "wiremock-mappings";
-    static final String WIREMOCK_MAPPINGS_PATH = "/home/wiremock/mappings";
+    static final String WIREMOCK_ROOT_DIR = "/home/wiremock";
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
     static final String STORAGE_TYPE_S3 = "s3";
@@ -110,7 +110,7 @@ public class PodFactory {
             containerBuilder
                     .addNewVolumeMount()
                         .withName(WIREMOCK_MAPPINGS_VOLUME)
-                        .withMountPath(WIREMOCK_MAPPINGS_PATH)
+                        .withMountPath(WIREMOCK_ROOT_DIR)
                         .withSubPath(mockId)
                     .endVolumeMount();
         }
