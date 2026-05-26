@@ -10,7 +10,7 @@ fleet:
       javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
       repository: ghcr.io/letsrokk/mock-fleet-proxy
-      tag: latest
+      tag: ""
       pullPolicy: IfNotPresent
     routing:
       mode: HOST
@@ -58,7 +58,7 @@ fleet:
       javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
       repository: ghcr.io/letsrokk/mock-fleet-api
-      tag: latest
+      tag: ""
       pullPolicy: IfNotPresent
     podInactivityThreshold: 1M
     podCreationTimeout: 1M
@@ -103,7 +103,7 @@ fleet:
     enabled: true
     image:
       repository: ghcr.io/letsrokk/mock-fleet-dash
-      tag: latest
+      tag: ""
       pullPolicy: IfNotPresent
     replicas: 1
     service:

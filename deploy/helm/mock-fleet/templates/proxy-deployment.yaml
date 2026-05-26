@@ -20,7 +20,7 @@ spec:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
       containers:
         - name: proxy
-          image: {{ printf "%s:%s" .Values.fleet.proxy.image.repository .Values.fleet.proxy.image.tag }}
+          image: {{ printf "%s:%s" .Values.fleet.proxy.image.repository (.Values.fleet.proxy.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.proxy.image.pullPolicy }}
           env:
             - name: MOCK_FLEET_ROUTING_MODE

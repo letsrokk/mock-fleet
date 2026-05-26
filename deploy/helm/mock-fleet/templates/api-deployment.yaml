@@ -28,7 +28,7 @@ spec:
         {{- end }}
       containers:
         - name: api
-          image: {{ printf "%s:%s" .Values.fleet.api.image.repository .Values.fleet.api.image.tag }}
+          image: {{ printf "%s:%s" .Values.fleet.api.image.repository (.Values.fleet.api.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.api.image.pullPolicy }}
           env:
             - name: KUBERNETES_NAMESPACE

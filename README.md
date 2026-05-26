@@ -36,10 +36,7 @@ Install the published chart from GHCR:
 helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --version <version> \
   --namespace mock-fleet \
-  --create-namespace \
-  --set fleet.proxy.image.tag=<version> \
-  --set fleet.api.image.tag=<version> \
-  --set fleet.dash.image.tag=<version>
+  --create-namespace
 ```
 
 Install from this repository:
