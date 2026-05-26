@@ -1,6 +1,7 @@
 {{- $name := include "mock-fleet.wiremockUserConfigMapName" . -}}
 {{- $namespace := include "mock-fleet.namespace" . -}}
 {{- $existing := lookup "v1" "ConfigMap" $namespace $name -}}
+{{- if and .Release.IsInstall (not $existing) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,9 +13,6 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
 data:
   wiremock-options.yaml: |
-{{- if and $existing $existing.data (index $existing.data "wiremock-options.yaml") }}
-{{ index $existing.data "wiremock-options.yaml" | nindent 4 }}
-{{- else }}
     wiremock:
       default:
         options: []
