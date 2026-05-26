@@ -74,13 +74,11 @@ final class WireMockConfigDocument {
         overrides.mockConfigs.forEach((mockId, override) -> {
             WireMockPodConfig base = mergedMocks.getOrDefault(mockId, new WireMockPodConfig(List.of(), null));
             ResourceRequirements resources = override.resources() == null ? base.resources() : override.resources();
-            List<String> options = new ArrayList<>(base.options());
-            options.addAll(override.options());
+            List<String> options = mergeOptions(base.options(), override.options());
             mergedMocks.put(mockId, new WireMockPodConfig(List.copyOf(options), resources));
         });
 
-        List<String> mergedDefaults = new ArrayList<>(defaultOptions);
-        mergedDefaults.addAll(overrides.defaultOptions);
+        List<String> mergedDefaults = mergeOptions(defaultOptions, overrides.defaultOptions);
         ResourceRequirements mergedDefaultResources = overrides.defaultResources == null
                 ? defaultResources
                 : overrides.defaultResources;
@@ -88,9 +86,8 @@ final class WireMockConfigDocument {
     }
 
     List<String> optionsFor(String mockId) {
-        List<String> options = new ArrayList<>(defaultOptions);
-        options.addAll(mockConfigs.getOrDefault(mockId, new WireMockPodConfig(List.of(), null)).options());
-        return List.copyOf(options);
+        return mergeOptions(defaultOptions,
+                mockConfigs.getOrDefault(mockId, new WireMockPodConfig(List.of(), null)).options());
     }
 
     ResourceRequirements resourcesFor(String mockId) {
@@ -184,6 +181,51 @@ final class WireMockConfigDocument {
         return quantity.getAmount() + (format == null ? "" : format);
     }
 
+    private static List<String> mergeOptions(List<String> baseOptions, List<String> overrideOptions) {
+        List<OptionEntry> entries = new ArrayList<>();
+        Map<String, Integer> entryIndexesByName = new LinkedHashMap<>();
+        appendOrReplaceOptions(entries, entryIndexesByName, baseOptions);
+        appendOrReplaceOptions(entries, entryIndexesByName, overrideOptions);
+        return entries.stream()
+                .flatMap(entry -> entry.tokens().stream())
+                .toList();
+    }
+
+    private static void appendOrReplaceOptions(List<OptionEntry> entries, Map<String, Integer> entryIndexesByName,
+                                               List<String> options) {
+        for (int index = 0; index < options.size(); index++) {
+            String token = options.get(index);
+            List<String> entryTokens = new ArrayList<>();
+            entryTokens.add(token);
+            String optionName = optionName(token);
+
+            if (optionName != null && !token.contains("=")
+                    && index + 1 < options.size()
+                    && !options.get(index + 1).startsWith("--")) {
+                entryTokens.add(options.get(index + 1));
+                index++;
+            }
+
+            OptionEntry entry = new OptionEntry(optionName, List.copyOf(entryTokens));
+            if (optionName != null && entryIndexesByName.containsKey(optionName)) {
+                entries.set(entryIndexesByName.get(optionName), entry);
+            } else {
+                if (optionName != null) {
+                    entryIndexesByName.put(optionName, entries.size());
+                }
+                entries.add(entry);
+            }
+        }
+    }
+
+    private static String optionName(String token) {
+        if (token == null || !token.startsWith("--")) {
+            return null;
+        }
+        int equalsIndex = token.indexOf('=');
+        return equalsIndex > 0 ? token.substring(0, equalsIndex) : token;
+    }
+
     private static Map<String, WireMockPodConfig> parseMockConfigs(Object node) {
         if (node == null) {
             return Map.of();
@@ -270,5 +312,8 @@ final class WireMockConfigDocument {
             return value;
         }
         throw new IllegalStateException(field + " must be a non-blank string.");
+    }
+
+    private record OptionEntry(String optionName, List<String> tokens) {
     }
 }
