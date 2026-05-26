@@ -171,7 +171,7 @@ export default function App() {
       setSelectedMockId(nextSelected);
       if (nextSelected && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
-        setDraft(draftFromConfig(mock?.user ?? emptyConfig(), nextData.options));
+        setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), nextData.options));
         setConfigDirty(false);
       }
       setError(null);
@@ -280,7 +280,7 @@ export default function App() {
 
     let nextOptions: string[];
     try {
-      nextOptions = optionsFromDraft(draft, configView.options);
+      nextOptions = optionsFromDraft(draft, configView.options, selectedMock?.baseline ?? emptyConfig());
     } catch (validationError) {
       setError(validationError instanceof Error ? validationError.message : "Invalid WireMock arguments.");
       return;
@@ -295,7 +295,7 @@ export default function App() {
         body: JSON.stringify({
           resourceVersion: configView.resourceVersion,
           options: nextOptions,
-          resources: resourcesFromDraft(draft)
+          resources: resourcesFromDraft(draft, selectedMock?.baseline ?? emptyConfig())
         })
       });
       if (!response.ok) {
@@ -305,7 +305,7 @@ export default function App() {
       setConfigView(data);
       setSelectedMockId(selectedMockId);
       const mock = data.mocks.find((item) => item.mockId === selectedMockId);
-      setDraft(draftFromConfig(mock?.user ?? emptyConfig(), data.options));
+      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
       setConfigDirty(false);
       showToast(`Saved config for '${selectedMockId}'.`);
     } catch (saveError) {
@@ -335,7 +335,7 @@ export default function App() {
       const nextSelected = data.mockIds.includes(selectedMockId) ? selectedMockId : data.mockIds[0] ?? null;
       setSelectedMockId(nextSelected);
       const mock = data.mocks.find((item) => item.mockId === nextSelected);
-      setDraft(draftFromConfig(mock?.user ?? emptyConfig(), data.options));
+      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
       setConfigDirty(false);
       showToast(`Deleted override for '${selectedMockId}'.`);
     } catch (deleteError) {
@@ -423,7 +423,7 @@ export default function App() {
   function selectMock(mockId: string) {
     setSelectedMockId(mockId);
     const mock = configView?.mocks.find((item) => item.mockId === mockId);
-    setDraft(draftFromConfig(mock?.user ?? emptyConfig(), configView?.options ?? []));
+    setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), configView?.options ?? []));
     setConfigDirty(false);
   }
 
@@ -449,7 +449,7 @@ export default function App() {
     if (!selectedMock || !configView) {
       return;
     }
-    setDraft(draftFromConfig(selectedMock.user, configView.options));
+    setDraft(draftFromConfig(selectedMock.effective, configView.options));
     setConfigDirty(false);
   }
 
@@ -1060,12 +1060,20 @@ export default function App() {
 
   function renderOptionControl(option: OptionDefinition) {
     if (option.kind === "flag") {
+      const inheritedFromBaseline = selectedMock ? hasOption(selectedMock.baseline.options, option.name) : false;
       return (
         <div className="option-row" key={option.name}>
-          <label className="check-row">
+          <label
+            className="check-row"
+            title={inheritedFromBaseline ? "Inherited from default config." : undefined}
+          >
             <input
               type="checkbox"
               checked={Boolean(draft.flags[option.name])}
+              disabled={inheritedFromBaseline}
+              aria-label={inheritedFromBaseline
+                ? `${option.label} is inherited from default config`
+                : option.label}
               onChange={(event) => {
                 setConfigDirty(true);
                 setDraft((current) => ({
@@ -1243,7 +1251,7 @@ function draftFromConfig(config: ConfigData, definitions: OptionDefinition[]): D
   return draft;
 }
 
-function optionsFromDraft(draft: DraftConfig, definitions: OptionDefinition[]) {
+function optionsFromDraft(draft: DraftConfig, definitions: OptionDefinition[], baseline?: ConfigData) {
   const options: string[] = [];
   definitions.forEach((definition) => {
     if (definition.kind === "flag" && draft.flags[definition.name]) {
@@ -1258,7 +1266,8 @@ function optionsFromDraft(draft: DraftConfig, definitions: OptionDefinition[]) {
   });
   const rawArgs = splitArgs(draft.rawArgs);
   validateAdvancedArgs(rawArgs, definitions);
-  return [...options, ...rawArgs];
+  const effectiveOptions = [...options, ...rawArgs];
+  return baseline ? overrideOptions(effectiveOptions, baseline.options) : effectiveOptions;
 }
 
 function validateAdvancedArgs(rawArgs: string[], definitions: OptionDefinition[]) {
@@ -1299,9 +1308,12 @@ function validateAdvancedArgs(rawArgs: string[], definitions: OptionDefinition[]
   }
 }
 
-function resourcesFromDraft(draft: DraftConfig): ResourceData | null {
+function resourcesFromDraft(draft: DraftConfig, baseline?: ConfigData): ResourceData | null {
   const requests = cleanRecord(draft.requests);
   const limits = cleanRecord(draft.limits);
+  if (baseline && recordsEqual(requests, baseline.resources.requests) && recordsEqual(limits, baseline.resources.limits)) {
+    return null;
+  }
   return Object.keys(requests).length || Object.keys(limits).length ? { requests, limits } : null;
 }
 
@@ -1315,6 +1327,71 @@ function cleanRecord(values: Record<string, string>) {
 
 function splitArgs(value: string) {
   return value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((token) => token.replace(/^"|"$/g, "")) ?? [];
+}
+
+function overrideOptions(effectiveOptions: string[], baselineOptions: string[]) {
+  const baselineEntries = new Map<string, string[]>();
+  parseOptionEntries(baselineOptions).forEach((entry) => {
+    if (entry.name) {
+      baselineEntries.set(entry.name, entry.tokens);
+    }
+  });
+
+  return parseOptionEntries(effectiveOptions)
+    .filter((entry) => !entry.name || !tokensEqual(entry.tokens, baselineEntries.get(entry.name)))
+    .flatMap((entry) => entry.tokens);
+}
+
+function hasOption(options: string[], name: string) {
+  return parseOptionEntries(options).some((entry) => entry.name === name);
+}
+
+function parseOptionEntries(options: string[]) {
+  const entries: Array<{ name: string | null; tokens: string[] }> = [];
+  for (let index = 0; index < options.length; index += 1) {
+    const token = options[index];
+    const name = optionName(token);
+    const tokens = [token];
+    if (name && !token.includes("=") && options[index + 1] && !options[index + 1].startsWith("--")) {
+      tokens.push(options[index + 1]);
+      index += 1;
+    }
+    entries.push({ name, tokens });
+  }
+  return entries;
+}
+
+function optionName(token: string) {
+  if (!token.startsWith("--")) {
+    return null;
+  }
+  const equalsIndex = token.indexOf("=");
+  return equalsIndex > 0 ? token.slice(0, equalsIndex) : token;
+}
+
+function tokensEqual(left: string[], right?: string[]) {
+  if (right === undefined) {
+    return false;
+  }
+  if (left.length === right.length && left.every((value, index) => value === right[index])) {
+    return true;
+  }
+  return optionName(left[0]) === optionName(right[0]) && optionValue(left) === optionValue(right);
+}
+
+function optionValue(tokens: string[]) {
+  const equalsIndex = tokens[0].indexOf("=");
+  if (equalsIndex > 0) {
+    return tokens[0].slice(equalsIndex + 1);
+  }
+  return tokens[1] ?? null;
+}
+
+function recordsEqual(left: Record<string, string>, right: Record<string, string>) {
+  const cleanRight = cleanRecord(right);
+  const leftEntries = Object.entries(left);
+  return leftEntries.length === Object.keys(cleanRight).length
+    && leftEntries.every(([key, value]) => cleanRight[key] === value);
 }
 
 function resourceSummary(resources: ResourceData) {

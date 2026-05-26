@@ -70,6 +70,68 @@ class WireMockOptionsTest {
     }
 
     @Test
+    void perMockOptionsReplaceDefaultsWithSameCliOptionName() {
+        WireMockOptions options = new WireMockOptions();
+
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --verbose
+                      - --max-request-journal-entries
+                      - "20"
+                      - --use-chunked-encoding=always
+                  mocks:
+                    - id: demo
+                      options:
+                        - --max-request-journal-entries
+                        - "10"
+                        - --use-chunked-encoding
+                        - never
+                        - --disable-banner
+                """));
+
+        assertEquals(List.of(
+                "--verbose",
+                "--max-request-journal-entries", "10",
+                "--use-chunked-encoding", "never",
+                "--disable-banner"), options.optionsFor("demo"));
+    }
+
+    @Test
+    void userConfigOptionsReplaceBaselineOptionsWithSameCliOptionName() {
+        WireMockOptions options = new WireMockOptions();
+
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --max-request-journal-entries
+                      - "20"
+                  mocks:
+                    - id: demo
+                      options:
+                        - --proxy-timeout=1000
+                """));
+        options.setUserConfig(WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --max-request-journal-entries
+                        - "10"
+                        - --proxy-timeout
+                        - "2000"
+                """));
+
+        assertEquals(List.of(
+                "--max-request-journal-entries", "10",
+                "--proxy-timeout", "2000"), options.optionsFor("demo"));
+    }
+
+    @Test
     void loadAllowsEmptyDefaultAndMocks() {
         WireMockOptions options = new WireMockOptions();
 
