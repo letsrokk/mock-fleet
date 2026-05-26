@@ -2,8 +2,8 @@ apiVersion: v2
 name: mock-fleet
 description: Deploy mock-fleet proxy, API, and dashboard for routing requests to per-mock WireMock pods in Kubernetes
 type: application
-version: 1.0.0-SNAPSHOT
-appVersion: "1.0.0-SNAPSHOT"
+version: 1.2.0-SNAPSHOT
+appVersion: "1.2.0-SNAPSHOT"
 home: https://github.com/letsrokk/mock-fleet
 sources:
   - https://github.com/letsrokk/mock-fleet
