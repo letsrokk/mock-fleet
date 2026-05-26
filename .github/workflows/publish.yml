@@ -96,14 +96,16 @@ jobs:
             image_tag="${version}"
             image_tags="$(printf 'type=raw,value=%s\ntype=raw,value=latest' "${version}")"
             chart_version="${version}"
-            app_version="${version}"
+            maven_version="${version}"
           else
             branch_slug="$(slugify "${GITHUB_REF_NAME}")"
             image_tag="${branch_slug}"
             image_tags="$(printf 'type=raw,value=%s' "${branch_slug}")"
             chart_version="$(append_slug_to_version "${chart_base_version}" "${branch_slug}")"
-            app_version="$(append_slug_to_version "${pom_version}" "${branch_slug}")"
+            maven_version="$(append_slug_to_version "${pom_version}" "${branch_slug}")"
           fi
+
+          app_version="${image_tag}"
 
           echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
           {
@@ -113,6 +115,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
           echo "chart_version=${chart_version}" >> "${GITHUB_OUTPUT}"
           echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
+          echo "maven_version=${maven_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -130,11 +133,11 @@ jobs:
 
       - name: Set proxy version
         working-directory: fleet-proxy
-        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.app_version }}" -DgenerateBackupPoms=false
+        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.maven_version }}" -DgenerateBackupPoms=false
 
       - name: Set API version
         working-directory: fleet-api
-        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.app_version }}" -DgenerateBackupPoms=false
+        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.maven_version }}" -DgenerateBackupPoms=false
 
       - name: Build proxy
         working-directory: fleet-proxy
@@ -212,6 +215,33 @@ jobs:
             org.opencontainers.image.description=Static dashboard image for mock-fleet.
             org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
 
+      - name: Verify Docker image tags
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
+          PROXY_TAGS: ${{ steps.proxy_docker_metadata.outputs.tags }}
+          API_TAGS: ${{ steps.api_docker_metadata.outputs.tags }}
+          DASH_TAGS: ${{ steps.dash_docker_metadata.outputs.tags }}
+        run: |
+          set -euo pipefail
+
+          require_tag() {
+            local name="$1"
+            local tags="$2"
+            local expected="$3"
+
+            if ! grep -Fxq "${expected}" <<< "${tags}"; then
+              echo "${name} Docker metadata did not include expected tag ${expected}" >&2
+              echo "Resolved tags:" >&2
+              echo "${tags}" >&2
+              exit 1
+            fi
+          }
+
+          require_tag "proxy" "${PROXY_TAGS}" "${PROXY_IMAGE_NAME}:${IMAGE_TAG}"
+          require_tag "API" "${API_TAGS}" "${API_IMAGE_NAME}:${IMAGE_TAG}"
+          require_tag "dashboard" "${DASH_TAGS}" "${DASH_IMAGE_NAME}:${IMAGE_TAG}"
+
       - name: Build and push proxy Docker image
         uses: docker/build-push-action@v6
         with:
@@ -256,6 +286,31 @@ jobs:
 
       - name: Package Helm chart
         run: helm package "${CHART_DIR}" --version "${{ steps.version.outputs.chart_version }}" --app-version "${{ steps.version.outputs.app_version }}"
+
+      - name: Verify Helm chart image tag
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
+          CHART_VERSION: ${{ steps.version.outputs.chart_version }}
+        run: |
+          set -euo pipefail
+
+          chart_package="mock-fleet-${CHART_VERSION}.tgz"
+          chart_app_version="$(helm show chart "${chart_package}" | sed -nE 's/^appVersion:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p')"
+
+          if [[ "${chart_app_version}" != "${IMAGE_TAG}" ]]; then
+            echo "Packaged chart appVersion ${chart_app_version} does not match Docker image tag ${IMAGE_TAG}" >&2
+            exit 1
+          fi
+
+          rendered="$(helm template mock-fleet "${chart_package}")"
+
+          for image in "${PROXY_IMAGE_NAME}" "${API_IMAGE_NAME}" "${DASH_IMAGE_NAME}"; do
+            if ! grep -Fq "image: ${image}:${IMAGE_TAG}" <<< "${rendered}"; then
+              echo "Rendered chart did not include image ${image}:${IMAGE_TAG}" >&2
+              exit 1
+            fi
+          done
 
       - name: Push Helm chart
         run: helm push "mock-fleet-${{ steps.version.outputs.chart_version }}.tgz" "${CHART_REGISTRY}"

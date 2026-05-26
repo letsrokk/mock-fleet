@@ -14,10 +14,7 @@ Install from GHCR:
 helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --version <version> \
   --namespace mock-fleet \
-  --create-namespace \
-  --set fleet.proxy.image.tag=<version> \
-  --set fleet.api.image.tag=<version> \
-  --set fleet.dash.image.tag=<version>
+  --create-namespace
 ```
 
 Install from this repository:
@@ -80,7 +77,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.proxy.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when proxy dev mode is enabled. |
 | `fleet.proxy.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | Proxy debug JVM options used in dev mode. |
 | `fleet.proxy.image.repository` | `ghcr.io/letsrokk/mock-fleet-proxy` | Proxy image repository. |
-| `fleet.proxy.image.tag` | `latest` | Proxy image tag. |
+| `fleet.proxy.image.tag` | `""` | Proxy image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.proxy.image.pullPolicy` | `IfNotPresent` | Proxy image pull policy. |
 | `fleet.proxy.routing.mode` | `HOST` | Mock routing mode: `HOST` or `PATH`. |
 | `fleet.proxy.replicas` | `2` | Proxy replica count when dev mode is disabled. |
@@ -120,7 +117,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.api.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when API dev mode is enabled. |
 | `fleet.api.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | API debug JVM options used in dev mode. |
 | `fleet.api.image.repository` | `ghcr.io/letsrokk/mock-fleet-api` | API image repository. |
-| `fleet.api.image.tag` | `latest` | API image tag. |
+| `fleet.api.image.tag` | `""` | API image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
 | `fleet.api.podCreationTimeout` | `1M` | Time to wait for a spawned WireMock pod to become ready. |
@@ -173,7 +170,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | --- | --- | --- |
 | `fleet.dash.enabled` | `true` | Deploy the dashboard service and deployment. |
 | `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository. |
-| `fleet.dash.image.tag` | `latest` | Dashboard image tag. |
+| `fleet.dash.image.tag` | `""` | Dashboard image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.dash.image.pullPolicy` | `IfNotPresent` | Dashboard image pull policy. |
 | `fleet.dash.replicas` | `1` | Dashboard replica count. |
 | `fleet.dash.service.type` | `ClusterIP` | Dashboard service type. |

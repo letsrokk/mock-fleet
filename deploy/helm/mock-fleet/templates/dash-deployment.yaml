@@ -21,7 +21,7 @@ spec:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
       containers:
         - name: dash
-          image: {{ printf "%s:%s" .Values.fleet.dash.image.repository .Values.fleet.dash.image.tag }}
+          image: {{ printf "%s:%s" .Values.fleet.dash.image.repository (.Values.fleet.dash.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.dash.image.pullPolicy }}
           ports:
             - name: http
