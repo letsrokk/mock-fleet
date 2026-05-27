@@ -24,7 +24,19 @@ public class PodState {
     }
 
     public MockPodRef getPod(String mockId, Function<String, MockPodRef> mappingFunction) {
-        return this.podMap.computeIfAbsent(mockId, mappingFunction);
+        this.podMap.lock(mockId);
+        try {
+            MockPodRef pod = this.podMap.get(mockId);
+            if (pod != null) {
+                return pod;
+            }
+
+            pod = mappingFunction.apply(mockId);
+            this.podMap.put(mockId, pod);
+            return pod;
+        } finally {
+            this.podMap.unlock(mockId);
+        }
     }
 
     public IMap<String, MockPodRef> getPods() {
