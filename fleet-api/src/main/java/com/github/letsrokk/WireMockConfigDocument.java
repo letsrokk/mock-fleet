@@ -193,16 +193,17 @@ final class WireMockConfigDocument {
 
     private static void appendOrReplaceOptions(List<OptionEntry> entries, Map<String, Integer> entryIndexesByName,
                                                List<String> options) {
-        for (int index = 0; index < options.size(); index++) {
-            String token = options.get(index);
+        List<String> optionTokens = normalizeOptions(options);
+        for (int index = 0; index < optionTokens.size(); index++) {
+            String token = optionTokens.get(index);
             List<String> entryTokens = new ArrayList<>();
             entryTokens.add(token);
             String optionName = optionName(token);
 
             if (optionName != null && !token.contains("=")
-                    && index + 1 < options.size()
-                    && !options.get(index + 1).startsWith("--")) {
-                entryTokens.add(options.get(index + 1));
+                    && index + 1 < optionTokens.size()
+                    && !optionTokens.get(index + 1).startsWith("--")) {
+                entryTokens.add(optionTokens.get(index + 1));
                 index++;
             }
 
@@ -216,6 +217,46 @@ final class WireMockConfigDocument {
                 entries.add(entry);
             }
         }
+    }
+
+    private static List<String> normalizeOptions(List<String> options) {
+        List<String> normalized = new ArrayList<>();
+        for (String option : options) {
+            String trimmed = option.trim();
+            if (trimmed.startsWith("--")) {
+                normalized.addAll(splitOptionString(trimmed));
+            } else {
+                normalized.add(option);
+            }
+        }
+        return normalized;
+    }
+
+    private static List<String> splitOptionString(String value) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+        boolean quoted = false;
+
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current == '"') {
+                quoted = !quoted;
+                continue;
+            }
+            if (Character.isWhitespace(current) && !quoted) {
+                if (!token.isEmpty()) {
+                    tokens.add(token.toString());
+                    token.setLength(0);
+                }
+                continue;
+            }
+            token.append(current);
+        }
+
+        if (!token.isEmpty()) {
+            tokens.add(token.toString());
+        }
+        return tokens;
     }
 
     private static String optionName(String token) {
