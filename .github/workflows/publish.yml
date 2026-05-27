@@ -2,8 +2,6 @@ name: Publish
 
 on:
   push:
-    branches:
-      - "**"
     tags:
       - "v*"
 
@@ -23,89 +21,38 @@ env:
   CHART_REGISTRY: oci://ghcr.io/letsrokk/charts
 
 jobs:
-  publish:
-    name: Publish image and chart
+  resolve-version:
+    name: Resolve publish version
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    outputs:
+      image_tag: ${{ steps.version.outputs.image_tag }}
+      image_tags: ${{ steps.version.outputs.image_tags }}
+      chart_version: ${{ steps.version.outputs.chart_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      maven_version: ${{ steps.version.outputs.maven_version }}
 
+    steps:
       - name: Resolve publish metadata
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          slugify() {
-            local value="$1"
+          version="${GITHUB_REF_NAME#v}"
 
-            value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
-            value="$(printf '%s' "${value}" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
-            value="${value:0:80}"
-            value="$(printf '%s' "${value}" | sed -E 's/^-+//; s/-+$//')"
-
-            if [[ -z "${value}" ]]; then
-              value="branch"
-            fi
-
-            if [[ "${value}" =~ ^[0-9] ]]; then
-              value="branch-${value}"
-            fi
-
-            printf '%s' "${value}"
-          }
-
-          append_slug_to_version() {
-            local version="$1"
-            local slug="$2"
-
-            if [[ "${version}" == *-SNAPSHOT ]]; then
-              printf '%s-%s-SNAPSHOT' "${version%-SNAPSHOT}" "${slug}"
-            else
-              printf '%s-%s' "${version}" "${slug}"
-            fi
-          }
-
-          pom_version="$(sed -nE '0,/<version>[^<]+<\/version>/s/.*<version>([^<]+)<\/version>.*/\1/p' fleet-proxy/pom.xml)"
-          chart_base_version="$(sed -nE 's/^version:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' "${CHART_DIR}/Chart.yaml" | head -n 1)"
-
-          if [[ -z "${pom_version}" ]]; then
-            echo "Could not resolve Maven project version from fleet-proxy/pom.xml" >&2
+          if [[ -z "${version}" || "${version}" == "${GITHUB_REF_NAME}" ]]; then
+            echo "Expected a tag named v<version>, got ${GITHUB_REF_NAME}" >&2
             exit 1
           fi
 
-          if [[ -z "${chart_base_version}" ]]; then
-            echo "Could not resolve Helm chart version from ${CHART_DIR}/Chart.yaml" >&2
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Expected a SemVer tag like v1.2.3 or v1.2.3-rc.1, got ${GITHUB_REF_NAME}" >&2
             exit 1
           fi
 
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            version="${GITHUB_REF_NAME#v}"
-
-            if [[ -z "${version}" || "${version}" == "${GITHUB_REF_NAME}" ]]; then
-              echo "Expected a tag named v<version>, got ${GITHUB_REF_NAME}" >&2
-              exit 1
-            fi
-
-            if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-              echo "Expected a SemVer tag like v1.2.3 or v1.2.3-rc.1, got ${GITHUB_REF_NAME}" >&2
-              exit 1
-            fi
-
-            image_tag="${version}"
-            image_tags="$(printf 'type=raw,value=%s\ntype=raw,value=latest' "${version}")"
-            chart_version="${version}"
-            maven_version="${version}"
-          else
-            branch_slug="$(slugify "${GITHUB_REF_NAME}")"
-            image_tag="${branch_slug}"
-            image_tags="$(printf 'type=raw,value=%s' "${branch_slug}")"
-            chart_version="$(append_slug_to_version "${chart_base_version}" "${branch_slug}")"
-            maven_version="$(append_slug_to_version "${pom_version}" "${branch_slug}")"
-          fi
-
-          app_version="${image_tag}"
+          image_tag="${version}"
+          image_tags="$(printf 'type=raw,value=%s\ntype=raw,value=latest' "${version}")"
 
           echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
           {
@@ -113,43 +60,45 @@ jobs:
             echo "${image_tags}"
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
-          echo "chart_version=${chart_version}" >> "${GITHUB_OUTPUT}"
-          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
-          echo "maven_version=${maven_version}" >> "${GITHUB_OUTPUT}"
+          echo "chart_version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "app_version=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "maven_version=${version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+  build:
+    name: Build application packages
+    needs: resolve-version
+    uses: ./.github/workflows/build.yml
+    with:
+      maven_version: ${{ needs.resolve-version.outputs.maven_version }}
+
+  publish:
+    name: Publish images and chart
+    needs:
+      - resolve-version
+      - build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download proxy package
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven
+          name: fleet-proxy-package
+          path: fleet-proxy/target/quarkus-app
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Download API package
+        uses: actions/download-artifact@v4
         with:
-          node-version: "22.14.0"
-          cache: npm
-          cache-dependency-path: fleet-dash/package-lock.json
+          name: fleet-api-package
+          path: fleet-api/target/quarkus-app
 
-      - name: Set proxy version
-        working-directory: fleet-proxy
-        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.maven_version }}" -DgenerateBackupPoms=false
-
-      - name: Set API version
-        working-directory: fleet-api
-        run: ./mvnw -B versions:set -DnewVersion="${{ steps.version.outputs.maven_version }}" -DgenerateBackupPoms=false
-
-      - name: Build proxy
-        working-directory: fleet-proxy
-        run: ./mvnw -B package -Dquarkus.container-image.build=false
-
-      - name: Build API
-        working-directory: fleet-api
-        run: ./mvnw -B package -Dquarkus.container-image.build=false
-
-      - name: Build dashboard
-        working-directory: fleet-dash
-        run: npm ci && npm run build
+      - name: Download dashboard package
+        uses: actions/download-artifact@v4
+        with:
+          name: fleet-dash-package
+          path: fleet-dash/dist
 
       - name: Log in to GHCR for Docker
         uses: docker/login-action@v3
@@ -164,7 +113,7 @@ jobs:
         with:
           images: ${{ env.PROXY_IMAGE_NAME }}
           tags: |
-            ${{ steps.version.outputs.image_tags }}
+            ${{ needs.resolve-version.outputs.image_tags }}
           flavor: |
             latest=false
           labels: |
@@ -185,7 +134,7 @@ jobs:
         with:
           images: ${{ env.API_IMAGE_NAME }}
           tags: |
-            ${{ steps.version.outputs.image_tags }}
+            ${{ needs.resolve-version.outputs.image_tags }}
           flavor: |
             latest=false
           labels: |
@@ -203,7 +152,7 @@ jobs:
         with:
           images: ${{ env.DASH_IMAGE_NAME }}
           tags: |
-            ${{ steps.version.outputs.image_tags }}
+            ${{ needs.resolve-version.outputs.image_tags }}
           flavor: |
             latest=false
           labels: |
@@ -218,7 +167,7 @@ jobs:
       - name: Verify Docker image tags
         shell: bash
         env:
-          IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
+          IMAGE_TAG: ${{ needs.resolve-version.outputs.image_tag }}
           PROXY_TAGS: ${{ steps.proxy_docker_metadata.outputs.tags }}
           API_TAGS: ${{ steps.api_docker_metadata.outputs.tags }}
           DASH_TAGS: ${{ steps.dash_docker_metadata.outputs.tags }}
@@ -285,13 +234,13 @@ jobs:
         run: helm lint "${CHART_DIR}"
 
       - name: Package Helm chart
-        run: helm package "${CHART_DIR}" --version "${{ steps.version.outputs.chart_version }}" --app-version "${{ steps.version.outputs.app_version }}"
+        run: helm package "${CHART_DIR}" --version "${{ needs.resolve-version.outputs.chart_version }}" --app-version "${{ needs.resolve-version.outputs.app_version }}"
 
       - name: Verify Helm chart image tag
         shell: bash
         env:
-          IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
-          CHART_VERSION: ${{ steps.version.outputs.chart_version }}
+          IMAGE_TAG: ${{ needs.resolve-version.outputs.image_tag }}
+          CHART_VERSION: ${{ needs.resolve-version.outputs.chart_version }}
         run: |
           set -euo pipefail
 
@@ -313,4 +262,4 @@ jobs:
           done
 
       - name: Push Helm chart
-        run: helm push "mock-fleet-${{ steps.version.outputs.chart_version }}.tgz" "${CHART_REGISTRY}"
+        run: helm push "mock-fleet-${{ needs.resolve-version.outputs.chart_version }}.tgz" "${CHART_REGISTRY}"

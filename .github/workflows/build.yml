@@ -1,0 +1,112 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_call:
+    inputs:
+      maven_version:
+        description: Maven project version to use for packaged API/proxy artifacts.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fleet-proxy:
+    name: Build fleet-proxy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set proxy version
+        if: ${{ inputs.maven_version != '' }}
+        working-directory: fleet-proxy
+        run: ./mvnw -B versions:set -DnewVersion="${{ inputs.maven_version }}" -DgenerateBackupPoms=false
+
+      - name: Build proxy
+        working-directory: fleet-proxy
+        run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Upload proxy package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-proxy-package
+          path: fleet-proxy/target/quarkus-app
+          if-no-files-found: error
+
+  fleet-api:
+    name: Build fleet-api
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set API version
+        if: ${{ inputs.maven_version != '' }}
+        working-directory: fleet-api
+        run: ./mvnw -B versions:set -DnewVersion="${{ inputs.maven_version }}" -DgenerateBackupPoms=false
+
+      - name: Build API
+        working-directory: fleet-api
+        run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Upload API package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-api-package
+          path: fleet-api/target/quarkus-app
+          if-no-files-found: error
+
+  fleet-dash:
+    name: Build fleet-dash
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: fleet-dash/package-lock.json
+
+      - name: Install dashboard dependencies
+        working-directory: fleet-dash
+        run: npm ci
+
+      - name: Build dashboard
+        working-directory: fleet-dash
+        run: npm run build
+
+      - name: Upload dashboard package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-dash-package
+          path: fleet-dash/dist
+          if-no-files-found: error
