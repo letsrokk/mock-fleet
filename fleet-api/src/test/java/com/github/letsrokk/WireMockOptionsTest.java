@@ -132,6 +132,53 @@ class WireMockOptionsTest {
     }
 
     @Test
+    void userConfigOptionsReplaceCombinedBaselineOptionsWithSameCliOptionName() {
+        WireMockOptions options = new WireMockOptions();
+
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --verbose --max-request-journal-entries 15 --disable-request-logging --logged-response-body-size-limit 300
+                  mocks: []
+                """));
+        options.setUserConfig(WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --max-request-journal-entries
+                        - "20"
+                """));
+
+        assertEquals(List.of(
+                "--verbose",
+                "--max-request-journal-entries", "20",
+                "--disable-request-logging",
+                "--logged-response-body-size-limit", "300"), options.optionsFor("demo"));
+    }
+
+    @Test
+    void loadKeepsSeparateValueTokensWithSpaces() {
+        WireMockOptions options = new WireMockOptions();
+
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --filename-template
+                      - "{{request.method}} {{request.url}}"
+                  mocks: []
+                """));
+
+        assertEquals(List.of(
+                "--filename-template",
+                "{{request.method}} {{request.url}}"), options.optionsFor("demo"));
+    }
+
+    @Test
     void loadAllowsEmptyDefaultAndMocks() {
         WireMockOptions options = new WireMockOptions();
 

@@ -11,6 +11,13 @@ fleet:
   api:
     replicas: 1
 
+wiremock:
+  config:
+    default:
+      options:
+        - --verbose
+        - --max-request-journal-entries 15
+
 storage:
   persistent: true
   type: s3
