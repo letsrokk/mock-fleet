@@ -66,6 +66,14 @@ app.kubernetes.io/component: dash
 {{- end -}}
 {{- end -}}
 
+{{- define "mock-fleet.wiremockServiceAccountName" -}}
+{{- if .Values.wiremock.serviceAccount.name -}}
+{{- .Values.wiremock.serviceAccount.name -}}
+{{- else if .Values.wiremock.serviceAccount.create -}}
+{{- printf "%s-wiremock" (include "mock-fleet.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mock-fleet.roleName" -}}
 {{- printf "%s-pod-manager-role" (include "mock-fleet.fullname" .) -}}
 {{- end -}}

@@ -20,6 +20,8 @@ public interface MockFleetConfig {
 
     String wiremockImagePullPolicy();
 
+    Optional<String> wiremockServiceAccountName();
+
     Optional<String> wiremockConfigPath();
 
     Optional<String> wiremockUserConfigMapName();

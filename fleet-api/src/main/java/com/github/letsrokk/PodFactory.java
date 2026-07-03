@@ -121,6 +121,10 @@ public class PodFactory {
                 .withContainers(container)
                 .withRestartPolicy("Never");
 
+        config.wiremockServiceAccountName()
+                .filter(name -> !name.isBlank())
+                .ifPresent(podSpecBuilder::withServiceAccountName);
+
         if (storage.persistent()) {
             podSpecBuilder
                     .withInitContainers(initContainer)
