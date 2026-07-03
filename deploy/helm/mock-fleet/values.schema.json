@@ -16,10 +16,35 @@
             {
               "type": "object",
               "properties": {
+                "replicas": { "type": "integer", "minimum": 2 },
                 "podInactivityThreshold": { "type": "string" },
-                "podCreationTimeout": { "type": "string" }
+                "podCreationTimeout": { "type": "string" },
+                "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
+                "updateStrategy": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string", "enum": ["RollingUpdate", "Recreate"] },
+                    "rollingUpdate": {
+                      "type": "object",
+                      "properties": {
+                        "maxUnavailable": { "type": ["integer", "string"] },
+                        "maxSurge": { "type": ["integer", "string"] }
+                      },
+                      "required": ["maxUnavailable", "maxSurge"]
+                    }
+                  },
+                  "required": ["type", "rollingUpdate"]
+                },
+                "pdb": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "minAvailable": { "type": ["integer", "string"] }
+                  },
+                  "required": ["enabled", "minAvailable"]
+                }
               },
-              "required": ["podInactivityThreshold", "podCreationTimeout"]
+              "required": ["podInactivityThreshold", "podCreationTimeout", "terminationGracePeriodSeconds", "updateStrategy", "pdb"]
             }
           ]
         },
@@ -59,7 +84,16 @@
     "env": { "type": "object" },
     "serviceAccount": { "type": "object" },
     "rbac": { "type": "object" },
-    "hazelcast": { "type": "object" }
+    "hazelcast": {
+      "type": "object",
+      "properties": {
+        "clusterName": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "backupCount": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "gracefulShutdownMaxWaitSeconds": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["clusterName", "port", "backupCount", "gracefulShutdownMaxWaitSeconds"]
+    }
   },
   "required": ["fleet", "ingress", "storage", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
   "definitions": {

@@ -32,6 +32,8 @@ public interface MockFleetConfig {
 
     StorageConfig storage();
 
+    HazelcastConfig hazelcast();
+
     interface StorageConfig {
         boolean persistent();
         String type();
@@ -42,6 +44,14 @@ public interface MockFleetConfig {
 
     interface S3Config {
         String path();
+    }
+
+    interface HazelcastConfig {
+        String clusterName();
+        Optional<String> serviceDns();
+        int port();
+        int backupCount();
+        int gracefulShutdownMaxWaitSeconds();
     }
 
 }

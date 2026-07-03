@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mock-fleet.apiHazelcastFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api-hazelcast
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "mock-fleet.apiSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: hazelcast
+      port: {{ .Values.hazelcast.port }}
+      targetPort: hazelcast
+      protocol: TCP

@@ -15,8 +15,8 @@ public class PodState {
 
     @Inject
     public PodState(HazelcastInstance hazelcastInstance) {
-        this.podMap = hazelcastInstance.getMap("mock-pod-name-map");
-        this.lastAccessTimeMap = hazelcastInstance.getMap("last-access-time-map");
+        this.podMap = hazelcastInstance.getMap(HazelcastMemberConfig.POD_MAP_NAME);
+        this.lastAccessTimeMap = hazelcastInstance.getMap(HazelcastMemberConfig.LAST_ACCESS_MAP_NAME);
     }
 
     public MockPodRef getPod(String mockId) {

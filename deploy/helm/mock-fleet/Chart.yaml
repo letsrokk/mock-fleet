@@ -13,8 +13,3 @@ keywords:
   - quarkus
   - kubernetes
   - testing
-dependencies:
-  - name: hazelcast
-    version: 5.10.1
-    repository: https://hazelcast-charts.s3.amazonaws.com/
-    alias: hazelcast
