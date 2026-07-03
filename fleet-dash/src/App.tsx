@@ -577,10 +577,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "mocks") {
-      return;
-    }
-
     setLoadingMocks(true);
     setSseConnected(false);
     const eventSource = new EventSource(MOCKS_STREAM_PATH);
@@ -621,7 +617,7 @@ export default function App() {
         setSseConnected(false);
       }
     };
-  }, [activeTab]);
+  }, []);
 
   useEffect(() => {
     if (activeTab === "config" && configView === null) {
@@ -680,14 +676,7 @@ export default function App() {
               Persisted Mappings
             </button>
           </div>
-          {activeTab === "mocks" ? (
-            <span
-              className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
-              aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
-            >
-              SSE
-            </span>
-          ) : (
+          {activeTab !== "mocks" ? (
             <button
               className="refresh-button"
               onClick={() => refreshActiveTab()}
@@ -700,7 +689,7 @@ export default function App() {
                 <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
               )}
             </button>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -725,7 +714,12 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <span>{rows.length} active mocks</span>
-          <span className="panel-status">{sseConnected ? "Live updates" : "Waiting for SSE connection"}</span>
+          <span
+            className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
+            aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
+          >
+            SSE
+          </span>
         </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
