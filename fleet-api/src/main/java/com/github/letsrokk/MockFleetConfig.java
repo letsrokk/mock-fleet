@@ -14,6 +14,8 @@ public interface MockFleetConfig {
 
     Duration podCreationTimeout();
 
+    String wiremockPodNamePrefix();
+
     String wiremockContainerName();
 
     String wiremockImage();
