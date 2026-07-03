@@ -50,6 +50,8 @@ spec:
               value: {{ .Values.fleet.api.podInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.fleet.api.podCreationTimeout | quote }}
+            - name: MOCK_FLEET_WIREMOCK_POD_NAME_PREFIX
+              value: {{ .Values.wiremock.podNamePrefix | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
               value: {{ .Values.wiremock.containerName | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE

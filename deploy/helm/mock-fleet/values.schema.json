@@ -68,6 +68,7 @@
     "wiremock": {
       "type": "object",
       "properties": {
+        "podNamePrefix": { "type": "string", "minLength": 1 },
         "serviceAccount": {
           "type": "object",
           "properties": {

@@ -273,15 +273,16 @@ class PodManagerTest {
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
-        Pod podSpec = podWithGenerateName("mock-fleet-demo-");
-        Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
-        Pod runningPod = pod("mock-fleet-demo-1", "Running", true);
+        Pod podSpec = podWithGenerateName("custom-demo-");
+        Pod createdPod = pod("custom-demo-1", "Pending", false);
+        Pod runningPod = pod("custom-demo-1", "Running", true);
         ResourceRequirements resources = resources("0.5", "512Mi", "1", "1Gi");
         when(config.namespace()).thenReturn("mock-fleet");
+        when(config.wiremockPodNamePrefix()).thenReturn("custom");
         when(wireMockOptions.optionsFor("demo")).thenReturn(List.of("--verbose"));
         when(wireMockOptions.resourcesFor("demo")).thenReturn(resources);
         when(kubernetesClient.getNamespace()).thenReturn("test");
-        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of("--verbose"), resources)).thenReturn(podSpec);
+        when(podFactory.createPodSpec("custom-demo-", "demo", List.of("--verbose"), resources)).thenReturn(podSpec);
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
@@ -290,8 +291,8 @@ class PodManagerTest {
 
         MockPodRef spawnedPod = podManager.spawnPod("demo");
 
-        assertEquals(new MockPodRef("mock-fleet-demo-1", "10.0.0.1"), spawnedPod);
-        verify(podFactory).createPodSpec("mock-fleet-demo-", "demo", List.of("--verbose"), resources);
+        assertEquals(new MockPodRef("custom-demo-1", "10.0.0.1"), spawnedPod);
+        verify(podFactory).createPodSpec("custom-demo-", "demo", List.of("--verbose"), resources);
         verify(podHandle).create();
         verify(podHandle).get();
         verify(kubernetesClient, never()).services();
@@ -316,6 +317,7 @@ class PodManagerTest {
         Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
         Pod runningPod = pod("mock-fleet-demo-1", "Running", true);
         when(config.namespace()).thenReturn("mock-fleet");
+        when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
         when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
         when(wireMockOptions.resourcesFor("demo")).thenReturn(null);
         when(kubernetesClient.getNamespace()).thenReturn(null);
@@ -352,6 +354,7 @@ class PodManagerTest {
         Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
         Pod runningPodWithoutIp = pod("mock-fleet-demo-1", "Running", true, "");
         when(config.namespace()).thenReturn("mock-fleet");
+        when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
         when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
         when(wireMockOptions.resourcesFor("demo")).thenReturn(null);
         when(kubernetesClient.getNamespace()).thenReturn("test");

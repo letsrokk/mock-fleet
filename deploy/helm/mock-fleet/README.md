@@ -159,6 +159,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 
 | Value | Default | Description |
 | --- | --- | --- |
+| `wiremock.podNamePrefix` | `mock-fleet` | Base prefix used for spawned WireMock pod names. |
 | `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
 | `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used for spawned WireMock pods. |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |

@@ -78,7 +78,7 @@ public class PodManager {
     public MockPodRef spawnPod(String mockId) {
         LOG.infof("Creating pod for mock id '%s'...", mockId);
 
-        String podNamePrefix = String.format("mock-fleet-%s-", mockId);
+        String podNamePrefix = String.format("%s-%s-", config.wiremockPodNamePrefix(), mockId);
         Pod pod = podFactory.createPodSpec(podNamePrefix, mockId,
                 wireMockOptions.optionsFor(mockId),
                 wireMockOptions.resourcesFor(mockId));
