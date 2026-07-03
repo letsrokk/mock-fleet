@@ -4,8 +4,8 @@ quarkus:
   container-image:
     builder: docker
     registry: ghcr.io
-    group: letsrokk
-    name: mock-fleet-proxy
+    group: letsrokk/mock-fleet
+    name: proxy
     additional-tags:
       - latest
     build: true

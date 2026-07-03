@@ -9,7 +9,7 @@ fleet:
       quarkusLaunchDevmode: "true"
       javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
-      repository: ghcr.io/letsrokk/mock-fleet-proxy
+      repository: ghcr.io/letsrokk/mock-fleet/proxy
       tag: ""
       pullPolicy: IfNotPresent
     routing:
@@ -57,7 +57,7 @@ fleet:
       quarkusLaunchDevmode: "true"
       javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
-      repository: ghcr.io/letsrokk/mock-fleet-api
+      repository: ghcr.io/letsrokk/mock-fleet/api
       tag: ""
       pullPolicy: IfNotPresent
     podInactivityThreshold: 1M
@@ -102,7 +102,7 @@ fleet:
   dash:
     enabled: true
     image:
-      repository: ghcr.io/letsrokk/mock-fleet-dash
+      repository: ghcr.io/letsrokk/mock-fleet/dash
       tag: ""
       pullPolicy: IfNotPresent
     replicas: 1

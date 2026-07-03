@@ -76,7 +76,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.proxy.dev.enabled` | `false` | Run proxy in Quarkus dev mode and force one replica. |
 | `fleet.proxy.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when proxy dev mode is enabled. |
 | `fleet.proxy.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | Proxy debug JVM options used in dev mode. |
-| `fleet.proxy.image.repository` | `ghcr.io/letsrokk/mock-fleet-proxy` | Proxy image repository. |
+| `fleet.proxy.image.repository` | `ghcr.io/letsrokk/mock-fleet/proxy` | Proxy image repository. |
 | `fleet.proxy.image.tag` | `""` | Proxy image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.proxy.image.pullPolicy` | `IfNotPresent` | Proxy image pull policy. |
 | `fleet.proxy.routing.mode` | `HOST` | Mock routing mode: `HOST` or `PATH`. |
@@ -116,7 +116,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.api.dev.enabled` | `false` | Run API in Quarkus dev mode and force one replica. |
 | `fleet.api.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when API dev mode is enabled. |
 | `fleet.api.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | API debug JVM options used in dev mode. |
-| `fleet.api.image.repository` | `ghcr.io/letsrokk/mock-fleet-api` | API image repository. |
+| `fleet.api.image.repository` | `ghcr.io/letsrokk/mock-fleet/api` | API image repository. |
 | `fleet.api.image.tag` | `""` | API image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
@@ -174,7 +174,7 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | Value | Default | Description |
 | --- | --- | --- |
 | `fleet.dash.enabled` | `true` | Deploy the dashboard service and deployment. |
-| `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet-dash` | Dashboard image repository. |
+| `fleet.dash.image.repository` | `ghcr.io/letsrokk/mock-fleet/dash` | Dashboard image repository. |
 | `fleet.dash.image.tag` | `""` | Dashboard image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.dash.image.pullPolicy` | `IfNotPresent` | Dashboard image pull policy. |
 | `fleet.dash.replicas` | `1` | Dashboard replica count. |
