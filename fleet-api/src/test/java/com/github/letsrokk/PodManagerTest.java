@@ -484,6 +484,41 @@ class PodManagerTest {
     }
 
     @Test
+    void podFactoryAddsConfiguredWireMockServiceAccount() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        when(config.wiremockContainerName()).thenReturn("wiremock");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
+        when(config.wiremockServiceAccountName()).thenReturn(java.util.Optional.of("wiremock-workload"));
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(false);
+        PodFactory podFactory = new PodFactory(config);
+
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+
+        assertEquals("wiremock-workload", pod.getSpec().getServiceAccountName());
+    }
+
+    @Test
+    void podFactoryOmitsWireMockServiceAccountWhenNotConfigured() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);
+        when(config.wiremockContainerName()).thenReturn("wiremock");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
+        when(config.wiremockServiceAccountName()).thenReturn(java.util.Optional.empty());
+        when(config.storage()).thenReturn(storageConfig);
+        when(storageConfig.persistent()).thenReturn(false);
+        PodFactory podFactory = new PodFactory(config);
+
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+
+        assertTrue(pod.getSpec().getServiceAccountName() == null
+                || pod.getSpec().getServiceAccountName().isBlank());
+    }
+
+    @Test
     void podFactoryAddsWireMockResourcesToContainer() {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storageConfig = mock(MockFleetConfig.StorageConfig.class);

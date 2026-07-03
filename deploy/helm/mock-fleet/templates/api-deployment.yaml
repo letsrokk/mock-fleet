@@ -49,6 +49,11 @@ spec:
               value: {{ .Values.wiremock.containerImage | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
               value: {{ .Values.wiremock.containerImagePullPolicy | quote }}
+            {{- $wiremockServiceAccountName := include "mock-fleet.wiremockServiceAccountName" . }}
+            {{- if $wiremockServiceAccountName }}
+            - name: MOCK_FLEET_WIREMOCK_SERVICE_ACCOUNT_NAME
+              value: {{ $wiremockServiceAccountName | quote }}
+            {{- end }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_PATH
               value: /etc/mock-fleet/wiremock-options.yaml
             - name: MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME

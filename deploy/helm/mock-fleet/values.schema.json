@@ -40,7 +40,21 @@
     },
     "ingress": { "type": "object" },
     "storage": { "type": "object" },
-    "wiremock": { "type": "object" },
+    "wiremock": {
+      "type": "object",
+      "properties": {
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string" },
+            "annotations": { "type": "object" }
+          },
+          "required": ["create", "name", "annotations"]
+        }
+      },
+      "required": ["serviceAccount"]
+    },
     "securityContext": { "type": "object" },
     "env": { "type": "object" },
     "serviceAccount": { "type": "object" },
