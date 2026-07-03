@@ -8,9 +8,9 @@ NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
 ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
-LOCAL_PROXY_IMAGE="ghcr.io/letsrokk/mock-fleet-proxy:latest"
-LOCAL_API_IMAGE="ghcr.io/letsrokk/mock-fleet-api:latest"
-LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet-dash:latest"
+LOCAL_PROXY_IMAGE="ghcr.io/letsrokk/mock-fleet/proxy:latest"
+LOCAL_API_IMAGE="ghcr.io/letsrokk/mock-fleet/api:latest"
+LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet/dash:latest"
 REMOTE_DEV_MODULE=""
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
@@ -300,11 +300,11 @@ HELM_ARGS=(
     --create-namespace
     -f "${CHART_DIR}/values.yaml"
     -f "${MINIKUBE_VALUES_FILE}"
-    --set "fleet.proxy.image.repository=ghcr.io/letsrokk/mock-fleet-proxy"
+    --set "fleet.proxy.image.repository=ghcr.io/letsrokk/mock-fleet/proxy"
     --set "fleet.proxy.image.tag=latest"
-    --set "fleet.api.image.repository=ghcr.io/letsrokk/mock-fleet-api"
+    --set "fleet.api.image.repository=ghcr.io/letsrokk/mock-fleet/api"
     --set "fleet.api.image.tag=latest"
-    --set "fleet.dash.image.repository=ghcr.io/letsrokk/mock-fleet-dash"
+    --set "fleet.dash.image.repository=ghcr.io/letsrokk/mock-fleet/dash"
     --set "fleet.dash.image.tag=latest"
 )
 
