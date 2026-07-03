@@ -63,6 +63,15 @@ fleet:
     podInactivityThreshold: 1M
     podCreationTimeout: 1M
     replicas: 2
+    terminationGracePeriodSeconds: 300
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxUnavailable: 1
+        maxSurge: 1
+    pdb:
+      enabled: true
+      minAvailable: 1
     service:
       type: ClusterIP
       ports:
@@ -189,7 +198,7 @@ securityContext:
   runAsNonRoot: true
 
 env:
-  javaOpts: -Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml
+  javaOpts: ""
   userDir: /workspace
 
 serviceAccount:
@@ -201,9 +210,7 @@ rbac:
   create: true
 
 hazelcast:
-  client:
-    clusterName: dev
-  cluster:
-    memberCount: 2
-  mancenter:
-    enabled: false
+  clusterName: mock-fleet
+  port: 5701
+  backupCount: 1
+  gracefulShutdownMaxWaitSeconds: 300

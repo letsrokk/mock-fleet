@@ -8,18 +8,25 @@ metadata:
     app.kubernetes.io/component: api
 spec:
   replicas: {{ ternary 1 .Values.fleet.api.replicas .Values.fleet.api.dev.enabled }}
+  strategy:
+    type: {{ .Values.fleet.api.updateStrategy.type }}
+    {{- if eq .Values.fleet.api.updateStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxUnavailable: {{ .Values.fleet.api.updateStrategy.rollingUpdate.maxUnavailable }}
+      maxSurge: {{ .Values.fleet.api.updateStrategy.rollingUpdate.maxSurge }}
+    {{- end }}
   selector:
     matchLabels:
       {{- include "mock-fleet.apiSelectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
-        checksum/hazelcast-client-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/wiremock-config: {{ include (print $.Template.BasePath "/wiremock-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.fleet.api.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
         {{- if .Values.storage.persistent }}
@@ -62,6 +69,16 @@ spec:
               value: wiremock-options.yaml
             - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
               value: {{ include "mock-fleet.proxyFullname" . | quote }}
+            - name: MOCK_FLEET_HAZELCAST_CLUSTER_NAME
+              value: {{ .Values.hazelcast.clusterName | quote }}
+            - name: MOCK_FLEET_HAZELCAST_SERVICE_DNS
+              value: {{ printf "%s.%s.svc.cluster.local" (include "mock-fleet.apiHazelcastFullname" .) (include "mock-fleet.namespace" .) | quote }}
+            - name: MOCK_FLEET_HAZELCAST_PORT
+              value: {{ .Values.hazelcast.port | quote }}
+            - name: MOCK_FLEET_HAZELCAST_BACKUP_COUNT
+              value: {{ .Values.hazelcast.backupCount | quote }}
+            - name: MOCK_FLEET_HAZELCAST_GRACEFUL_SHUTDOWN_MAX_WAIT_SECONDS
+              value: {{ .Values.hazelcast.gracefulShutdownMaxWaitSeconds | quote }}
             - name: MOCK_FLEET_STORAGE_PERSISTENT
               value: {{ .Values.storage.persistent | quote }}
             - name: MOCK_FLEET_STORAGE_TYPE
@@ -87,6 +104,9 @@ spec:
             - name: user.dir
               value: {{ .Values.env.userDir | quote }}
           ports:
+            - name: hazelcast
+              containerPort: {{ .Values.hazelcast.port }}
+              protocol: TCP
             - name: debug
               containerPort: {{ .Values.fleet.api.service.ports.targetDebug }}
               protocol: TCP
@@ -126,9 +146,6 @@ spec:
           resources:
             {{- toYaml .Values.fleet.api.resources | nindent 12 }}
           volumeMounts:
-            - mountPath: /etc/hazelcast
-              name: hazelcast-config
-              readOnly: true
             - mountPath: /etc/mock-fleet
               name: wiremock-config
               readOnly: true
@@ -137,10 +154,6 @@ spec:
               name: wiremock-mappings
             {{- end }}
       volumes:
-        - name: hazelcast-config
-          configMap:
-            name: {{ include "mock-fleet.hazelcastConfigMapName" . }}
-            optional: false
         - name: wiremock-config
           configMap:
             name: {{ include "mock-fleet.wiremockConfigMapName" . }}

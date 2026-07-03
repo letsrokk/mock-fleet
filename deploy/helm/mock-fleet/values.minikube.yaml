@@ -9,7 +9,7 @@ fleet:
       mode: "HOST"
     replicas: 1
   api:
-    replicas: 1
+    replicas: 2
 
 wiremock:
   config:

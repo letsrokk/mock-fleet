@@ -1,0 +1,15 @@
+{{- if .Values.fleet.api.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "mock-fleet.apiFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: {{ .Values.fleet.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.apiSelectorLabels" . | nindent 6 }}
+{{- end }}

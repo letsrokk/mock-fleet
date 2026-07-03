@@ -20,7 +20,6 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 Install from this repository:
 
 ```bash
-helm dependency build deploy/helm/mock-fleet
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --namespace mock-fleet \
   --create-namespace
@@ -121,7 +120,13 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
 | `fleet.api.podCreationTimeout` | `1M` | Time to wait for a spawned WireMock pod to become ready. |
-| `fleet.api.replicas` | `2` | API replica count when dev mode is disabled. |
+| `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
+| `fleet.api.terminationGracePeriodSeconds` | `300` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
+| `fleet.api.updateStrategy.type` | `RollingUpdate` | API deployment update strategy. |
+| `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods during rollout. |
+| `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods during rollout. |
+| `fleet.api.pdb.enabled` | `true` | Create a PodDisruptionBudget for API/Hazelcast members. |
+| `fleet.api.pdb.minAvailable` | `1` | Minimum API pods available during voluntary disruptions. |
 | `fleet.api.service.type` | `ClusterIP` | API service type. |
 | `fleet.api.service.ports.http` | `80` | API service HTTP port. |
 | `fleet.api.service.ports.targetHttp` | `8080` | API container HTTP port. |
@@ -237,16 +242,17 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | Value | Default | Description |
 | --- | --- | --- |
 | `securityContext.runAsNonRoot` | `true` | Set `runAsNonRoot` on app pods. |
-| `env.javaOpts` | `-Dhazelcast.client.config=/etc/hazelcast/hazelcast-client.yaml` | Java options passed to proxy and API pods. |
+| `env.javaOpts` | `""` | Java options passed to proxy and API pods. |
 | `env.javaToolOptions` | unset | Optional non-dev `JAVA_TOOL_OPTIONS` for proxy and API pods. |
 | `env.userDir` | `/workspace` | Value for `user.dir` in proxy and API pods. |
 | `serviceAccount.create` | `true` | Create a service account for `fleet-api`. |
 | `serviceAccount.name` | `""` | Existing service account name, or generated name when empty. |
 | `serviceAccount.annotations` | `{}` | Service account annotations. |
 | `rbac.create` | `true` | Create role and role binding for mock pod management. |
-| `hazelcast.client.clusterName` | `dev` | Hazelcast client cluster name used by `fleet-api`. |
-| `hazelcast.cluster.memberCount` | `2` | Hazelcast dependency cluster member count. |
-| `hazelcast.mancenter.enabled` | `false` | Enable Hazelcast Management Center in the dependency chart. |
+| `hazelcast.clusterName` | `mock-fleet` | Cluster name used by embedded Hazelcast members. |
+| `hazelcast.port` | `5701` | Embedded Hazelcast member and headless-service port. |
+| `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
+| `hazelcast.gracefulShutdownMaxWaitSeconds` | `300` | Maximum wait for graceful member shutdown. |
 
 ## Local Minikube Values
 

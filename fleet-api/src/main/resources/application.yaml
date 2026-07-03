@@ -22,6 +22,12 @@ mock-fleet:
   wiremock-user-config-map-name: ${MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME:}
   wiremock-config-key: ${MOCK_FLEET_WIREMOCK_CONFIG_KEY:wiremock-options.yaml}
   proxy-deployment-name: ${MOCK_FLEET_PROXY_DEPLOYMENT_NAME:}
+  hazelcast:
+    cluster-name: ${MOCK_FLEET_HAZELCAST_CLUSTER_NAME:mock-fleet}
+    service-dns: ${MOCK_FLEET_HAZELCAST_SERVICE_DNS:}
+    port: ${MOCK_FLEET_HAZELCAST_PORT:5701}
+    backup-count: ${MOCK_FLEET_HAZELCAST_BACKUP_COUNT:1}
+    graceful-shutdown-max-wait-seconds: ${MOCK_FLEET_HAZELCAST_GRACEFUL_SHUTDOWN_MAX_WAIT_SECONDS:300}
   storage:
     persistent: ${MOCK_FLEET_STORAGE_PERSISTENT:false}
     type: ${MOCK_FLEET_STORAGE_TYPE:s3}

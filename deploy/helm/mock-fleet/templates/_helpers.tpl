@@ -39,6 +39,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-api" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.apiHazelcastFullname" -}}
+{{- printf "%s-hazelcast" (include "mock-fleet.apiFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "mock-fleet.dashFullname" -}}
 {{- printf "%s-dash" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
@@ -82,20 +86,12 @@ app.kubernetes.io/component: dash
 {{- printf "%s-pods-manager-role-binding" (include "mock-fleet.fullname" .) -}}
 {{- end -}}
 
-{{- define "mock-fleet.hazelcastConfigMapName" -}}
-{{- printf "%s-hazelcast-client" (include "mock-fleet.fullname" .) -}}
-{{- end -}}
-
 {{- define "mock-fleet.wiremockConfigMapName" -}}
 {{- printf "%s-wiremock-config" (include "mock-fleet.fullname" .) -}}
 {{- end -}}
 
 {{- define "mock-fleet.wiremockUserConfigMapName" -}}
 {{- printf "%s-wiremock-user-config" (include "mock-fleet.fullname" .) -}}
-{{- end -}}
-
-{{- define "mock-fleet.hazelcastServiceName" -}}
-{{- printf "%s-hazelcast" .Release.Name -}}
 {{- end -}}
 
 {{- define "mock-fleet.validateStorage" -}}

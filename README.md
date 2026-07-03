@@ -42,7 +42,6 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 Install from this repository:
 
 ```bash
-helm dependency build deploy/helm/mock-fleet
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --namespace mock-fleet \
   --create-namespace
