@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PROXY_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-proxy
-  API_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-api
-  DASH_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet-dash
+  PROXY_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/proxy
+  API_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/api
+  DASH_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/dash
   CHART_DIR: deploy/helm/mock-fleet
   CHART_REGISTRY: oci://ghcr.io/letsrokk/charts
 

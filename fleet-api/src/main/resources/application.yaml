@@ -4,8 +4,8 @@ quarkus:
   container-image:
     builder: docker
     registry: ghcr.io
-    group: letsrokk
-    name: mock-fleet-api
+    group: letsrokk/mock-fleet
+    name: api
     additional-tags:
       - latest
     build: true
