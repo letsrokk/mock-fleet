@@ -142,6 +142,29 @@ h1 {
   font-weight: 700;
 }
 
+.sse-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  transition: background 160ms ease;
+}
+
+.sse-status.connected {
+  background: linear-gradient(135deg, #3f8b5b 0%, #2f6f47 100%);
+}
+
+.sse-status.waiting {
+  background: linear-gradient(135deg, #cd4f43 0%, #a12b39 100%);
+}
+
 .danger-button {
   display: inline-flex;
   align-items: center;

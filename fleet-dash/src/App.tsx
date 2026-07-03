@@ -57,6 +57,7 @@ type MappingFileNode = {
 };
 
 const MOCKS_API_PATH = "/__fleet/api/mocks";
+const MOCKS_STREAM_PATH = `${MOCKS_API_PATH}/stream`;
 const CONFIG_API_PATH = "/__fleet/api/config";
 const MAPPINGS_API_PATH = "/__fleet/api/mappings";
 const RESOURCE_GROUP_NAME = "Resources";
@@ -82,6 +83,7 @@ export default function App() {
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
   const [newMockId, setNewMockId] = useState("");
   const [loadingMocks, setLoadingMocks] = useState(true);
+  const [sseConnected, setSseConnected] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [loadingMappings, setLoadingMappings] = useState(false);
   const [loadingMappingsTree, setLoadingMappingsTree] = useState(false);
@@ -107,31 +109,6 @@ export default function App() {
     : activeTab === "config"
       ? loadingConfig
       : loadingMappings || loadingMappingsTree;
-
-  async function loadMocks(showSpinner: boolean) {
-    if (showSpinner) {
-      setLoadingMocks(true);
-    } else {
-      setRefreshing(true);
-    }
-
-    try {
-      const response = await fetch(MOCKS_API_PATH);
-      if (!response.ok) {
-        throw new Error(`Unable to load mocks (${response.status})`);
-      }
-      const data = (await response.json()) as MockRow[];
-      setError(null);
-      setRows(data);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load mocks.");
-    } finally {
-      if (mountedRef.current) {
-        setLoadingMocks(false);
-        setRefreshing(false);
-      }
-    }
-  }
 
   async function loadConfig(showSpinner: boolean) {
     if (showSpinner) {
@@ -604,14 +581,45 @@ export default function App() {
       return;
     }
 
-    void loadMocks(true);
+    setLoadingMocks(true);
+    setSseConnected(false);
+    const eventSource = new EventSource(MOCKS_STREAM_PATH);
 
-    const intervalId = window.setInterval(() => {
-      void loadMocks(false);
-    }, 5000);
+    eventSource.onopen = () => {
+      if (mountedRef.current) {
+        setSseConnected(true);
+        setError(null);
+      }
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as MockRow[];
+        if (mountedRef.current) {
+          setRows(data);
+          setLoadingMocks(false);
+          setError(null);
+        }
+      } catch {
+        if (mountedRef.current) {
+          setError("Unable to read active mocks stream.");
+          setLoadingMocks(false);
+        }
+      }
+    };
+
+    eventSource.onerror = () => {
+      if (mountedRef.current) {
+        setSseConnected(false);
+        setLoadingMocks(false);
+      }
+    };
 
     return () => {
-      window.clearInterval(intervalId);
+      eventSource.close();
+      if (mountedRef.current) {
+        setSseConnected(false);
+      }
     };
   }, [activeTab]);
 
@@ -672,18 +680,27 @@ export default function App() {
               Persisted Mappings
             </button>
           </div>
-          <button
-            className="refresh-button"
-            onClick={() => refreshActiveTab()}
-            disabled={activeTabLoading || refreshing}
-            aria-label={refreshing ? "Refreshing" : "Refresh"}
-          >
-            {activeTabLoading || refreshing ? (
-              <span className="refresh-spinner" aria-hidden="true"></span>
-            ) : (
-              <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
-            )}
-          </button>
+          {activeTab === "mocks" ? (
+            <span
+              className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
+              aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
+            >
+              SSE
+            </span>
+          ) : (
+            <button
+              className="refresh-button"
+              onClick={() => refreshActiveTab()}
+              disabled={activeTabLoading || refreshing}
+              aria-label={refreshing ? "Refreshing" : "Refresh"}
+            >
+              {activeTabLoading || refreshing ? (
+                <span className="refresh-spinner" aria-hidden="true"></span>
+              ) : (
+                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+              )}
+            </button>
+          )}
         </div>
       </section>
 
@@ -696,11 +713,9 @@ export default function App() {
   );
 
   function refreshActiveTab() {
-    if (activeTab === "mocks") {
-      void loadMocks(false);
-    } else if (activeTab === "config") {
+    if (activeTab === "config") {
       void loadConfig(false);
-    } else {
+    } else if (activeTab === "mappings") {
       void loadMappings(false);
     }
   }
@@ -710,7 +725,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-header">
           <span>{rows.length} active mocks</span>
-          <span className="panel-status">{refreshing ? "Updating..." : "Auto-refresh every 5s"}</span>
+          <span className="panel-status">{sseConnected ? "Live updates" : "Waiting for SSE connection"}</span>
         </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}

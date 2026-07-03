@@ -1,9 +1,14 @@
 package com.github.letsrokk;
 
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.core.EntryEvent;
 import com.hazelcast.map.IMap;
+import com.hazelcast.map.listener.EntryAddedListener;
+import com.hazelcast.map.listener.MapListener;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -13,6 +18,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import org.mockito.ArgumentCaptor;
 
 class PodStateTest {
 
@@ -62,6 +70,26 @@ class PodStateTest {
         assertSame(failure, thrown);
         verify(podState.getPods(), never()).put("demo", new MockPodRef("mock-fleet-demo-1", "10.0.0.1"));
         verify(podState.getPods()).unlock("demo");
+    }
+
+    @Test
+    void publishesDistributedPodMapChanges() throws Exception {
+        IMap<String, MockPodRef> podMap = podMap();
+        UUID registration = UUID.randomUUID();
+        when(podMap.addEntryListener(any(MapListener.class), eq(false))).thenReturn(registration);
+        PodState podState = podStateWithPodMap(podMap);
+        var nextChange = podState.podChanges().select().first().toUni().subscribeAsCompletionStage();
+        ArgumentCaptor<MapListener> listenerCaptor = ArgumentCaptor.forClass(MapListener.class);
+        verify(podMap).addEntryListener(listenerCaptor.capture(), eq(false));
+
+        @SuppressWarnings("unchecked")
+        EntryAddedListener<String, MockPodRef> listener =
+                (EntryAddedListener<String, MockPodRef>) listenerCaptor.getValue();
+        listener.entryAdded(mock(EntryEvent.class));
+
+        assertEquals(1L, nextChange.toCompletableFuture().get(1, TimeUnit.SECONDS));
+        podState.removePodListener();
+        verify(podMap).removeEntryListener(registration);
     }
 
     private PodState podStateWithPodMap(IMap<String, MockPodRef> podMap) {
