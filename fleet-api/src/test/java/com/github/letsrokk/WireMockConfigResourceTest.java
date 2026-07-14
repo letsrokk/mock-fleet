@@ -43,7 +43,8 @@ class WireMockConfigResourceTest {
         WireMockConfigService.ConfigUpdateRequest request = new WireMockConfigService.ConfigUpdateRequest(
                 "42",
                 List.of("--verbose"),
-                new WireMockConfigService.ResourceData(Map.of(), Map.of()));
+                new WireMockConfigService.ResourceData(Map.of(), Map.of()),
+                "restartActive");
         when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(configView());
 
         given()
@@ -63,7 +64,8 @@ class WireMockConfigResourceTest {
         WireMockConfigService.ConfigUpdateRequest request = new WireMockConfigService.ConfigUpdateRequest(
                 "42",
                 null,
-                null);
+                null,
+                "futureOnly");
         when(configService.deleteMockConfig(eq("demo"), eq(request))).thenReturn(configView());
 
         given()
@@ -83,7 +85,8 @@ class WireMockConfigResourceTest {
         WireMockConfigService.ConfigUpdateRequest request = new WireMockConfigService.ConfigUpdateRequest(
                 "42",
                 List.of("--verbose"),
-                new WireMockConfigService.ResourceData(Map.of(), Map.of()));
+                new WireMockConfigService.ResourceData(Map.of(), Map.of()),
+                "futureOnly");
         doThrow(new jakarta.ws.rs.WebApplicationException(
                 WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
                 jakarta.ws.rs.core.Response.Status.BAD_REQUEST))
@@ -105,7 +108,8 @@ class WireMockConfigResourceTest {
         WireMockConfigService.ConfigUpdateRequest request = new WireMockConfigService.ConfigUpdateRequest(
                 "42",
                 null,
-                null);
+                null,
+                "futureOnly");
         doThrow(new jakarta.ws.rs.WebApplicationException(
                 WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
                 jakarta.ws.rs.core.Response.Status.BAD_REQUEST))

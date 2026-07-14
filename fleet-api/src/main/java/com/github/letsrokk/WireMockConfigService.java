@@ -5,7 +5,6 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
-import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
@@ -18,7 +17,6 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -102,11 +100,12 @@ public class WireMockConfigService {
         if (request == null) {
             throw new WebApplicationException("Config update request body is required.", Response.Status.BAD_REQUEST);
         }
+        ApplyMode applyMode = ApplyMode.from(request.applyMode());
         WireMockPodConfig mockConfig = new WireMockPodConfig(validateOptions(request.options()), toResources(request.resources()));
         updateUserConfigMap(request.resourceVersion(), current ->
                 current.withMockConfig(mockId, mockConfig));
         refreshUserConfig();
-        reloadProxy();
+        applyMode.apply(mockId, podManager);
         return view();
     }
 
@@ -115,7 +114,7 @@ public class WireMockConfigService {
         updateUserConfigMap(request == null ? null : request.resourceVersion(), current ->
                 current.withoutMockConfig(mockId));
         refreshUserConfig();
-        reloadProxy();
+        ApplyMode.from(request == null ? null : request.applyMode()).apply(mockId, podManager);
         return view();
     }
 
@@ -142,7 +141,6 @@ public class WireMockConfigService {
                         wireMockOptions.setUserConfig(action == Action.DELETED
                                 ? WireMockConfigDocument.empty()
                                 : loadUserConfig(resource));
-                        reloadProxy();
                     }
 
                     @Override
@@ -229,35 +227,6 @@ public class WireMockConfigService {
             return;
         }
         kubernetesClient.configMaps().inNamespace(namespace).resource(next).update();
-    }
-
-    private void reloadProxy() {
-        Optional<String> deploymentName = config.proxyDeploymentName()
-                .map(String::trim)
-                .filter(value -> !value.isBlank());
-        if (deploymentName.isEmpty()) {
-            return;
-        }
-
-        String namespace = currentNamespace();
-        String annotationValue = Instant.now().toString();
-        try {
-            kubernetesClient.apps()
-                    .deployments()
-                    .inNamespace(namespace)
-                    .withName(deploymentName.get())
-                    .edit(deployment -> new DeploymentBuilder(deployment)
-                            .editSpec()
-                                .editTemplate()
-                                    .editOrNewMetadata()
-                                        .addToAnnotations("mock-fleet/wiremock-user-config-reloaded-at", annotationValue)
-                                    .endMetadata()
-                                .endTemplate()
-                            .endSpec()
-                            .build());
-        } catch (RuntimeException e) {
-            LOG.warnf(e, "Failed to trigger proxy reload after WireMock user ConfigMap change.");
-        }
     }
 
     private String currentNamespace() {
@@ -432,7 +401,44 @@ public class WireMockConfigService {
     public record ConfigData(List<String> options, ResourceData resources) {
     }
 
-    public record ConfigUpdateRequest(String resourceVersion, List<String> options, ResourceData resources) {
+    enum ApplyMode {
+        FUTURE_ONLY("futureOnly") {
+            @Override
+            void apply(String mockId, PodManager podManager) {
+            }
+        },
+        RESTART_ACTIVE("restartActive") {
+            @Override
+            void apply(String mockId, PodManager podManager) {
+                PodManager.DeleteMockResult result = podManager.deleteMock(mockId);
+                if (result == PodManager.DeleteMockResult.FAILED) {
+                    throw new WebApplicationException("Config was saved, but active mock pod restart failed.",
+                            Response.Status.INTERNAL_SERVER_ERROR);
+                }
+            }
+        };
+
+        private final String wireValue;
+
+        ApplyMode(String wireValue) {
+            this.wireValue = wireValue;
+        }
+
+        abstract void apply(String mockId, PodManager podManager);
+
+        static ApplyMode from(String value) {
+            if (value == null || value.isBlank() || FUTURE_ONLY.wireValue.equals(value)) {
+                return FUTURE_ONLY;
+            }
+            if (RESTART_ACTIVE.wireValue.equals(value)) {
+                return RESTART_ACTIVE;
+            }
+            throw new WebApplicationException("Unsupported config apply mode: " + value, Response.Status.BAD_REQUEST);
+        }
+    }
+
+    public record ConfigUpdateRequest(String resourceVersion, List<String> options, ResourceData resources,
+                                      String applyMode) {
     }
 
     public record ResourceData(Map<String, String> requests, Map<String, String> limits) {

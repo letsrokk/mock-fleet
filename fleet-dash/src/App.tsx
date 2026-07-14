@@ -39,8 +39,10 @@ type ConfirmDialogState = {
   title: string;
   body: string;
   confirmLabel: string;
+  secondaryLabel?: string;
   danger: boolean;
   onConfirm: () => void | Promise<void>;
+  onSecondary?: () => void | Promise<void>;
 };
 
 type MappingsView = {
@@ -59,6 +61,8 @@ type VersionsView = {
   api: string;
   proxy: string;
 };
+
+type ApplyMode = "futureOnly" | "restartActive";
 
 type MappingFileNode = {
   name: string;
@@ -282,7 +286,7 @@ export default function App() {
     }
   }
 
-  async function saveConfig() {
+  async function saveConfig(applyMode: ApplyMode) {
     if (!selectedMockId || !configView) {
       return;
     }
@@ -304,7 +308,8 @@ export default function App() {
         body: JSON.stringify({
           resourceVersion: configView.resourceVersion,
           options: nextOptions,
-          resources: resourcesFromDraft(draft, selectedMock?.baseline ?? emptyConfig())
+          resources: resourcesFromDraft(draft, selectedMock?.baseline ?? emptyConfig()),
+          applyMode
         })
       });
       if (!response.ok) {
@@ -324,7 +329,7 @@ export default function App() {
     }
   }
 
-  async function deleteOverride() {
+  async function deleteOverride(applyMode: ApplyMode) {
     if (!selectedMockId || !configView) {
       return;
     }
@@ -334,7 +339,7 @@ export default function App() {
       const response = await fetch(`${CONFIG_API_PATH}/${encodeURIComponent(selectedMockId)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resourceVersion: configView.resourceVersion })
+        body: JSON.stringify({ resourceVersion: configView.resourceVersion, applyMode })
       });
       if (!response.ok) {
         throw new Error(await errorMessage(response, "Unable to delete override."));
@@ -485,8 +490,36 @@ export default function App() {
     });
   }
 
+  function requestSaveConfig() {
+    if (!selectedMock?.active) {
+      void saveConfig("futureOnly");
+      return;
+    }
+    setConfirmDialog({
+      title: "Apply config to active mock?",
+      body: `Mock '${selectedMock.mockId}' has an active pod. Apply these changes only to future pods, or restart the active pod so the next request uses the new config?`,
+      confirmLabel: "Apply and restart active pod",
+      secondaryLabel: "Apply to future pods",
+      danger: false,
+      onConfirm: () => saveConfig("restartActive"),
+      onSecondary: () => saveConfig("futureOnly")
+    });
+  }
+
   function requestDeleteOverride() {
     if (!selectedMockId) {
+      return;
+    }
+    if (selectedMock?.active) {
+      setConfirmDialog({
+        title: "Delete config for active mock?",
+        body: `Mock '${selectedMock.mockId}' has an active pod. Delete the override only for future pods, or restart the active pod so the next request uses the updated config?`,
+        confirmLabel: "Delete and restart active pod",
+        secondaryLabel: "Delete for future pods",
+        danger: true,
+        onConfirm: () => deleteOverride("restartActive"),
+        onSecondary: () => deleteOverride("futureOnly")
+      });
       return;
     }
     setConfirmDialog({
@@ -494,7 +527,7 @@ export default function App() {
       body: `Delete the saved config override for '${selectedMockId}' from the user ConfigMap?`,
       confirmLabel: "Delete config",
       danger: true,
-      onConfirm: deleteOverride
+      onConfirm: () => deleteOverride("futureOnly")
     });
   }
 
@@ -585,6 +618,19 @@ export default function App() {
     setConfirming(true);
     try {
       await confirmDialog.onConfirm();
+      setConfirmDialog(null);
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function confirmSecondaryAction() {
+    if (!confirmDialog?.onSecondary) {
+      return;
+    }
+    setConfirming(true);
+    try {
+      await confirmDialog.onSecondary();
       setConfirmDialog(null);
     } finally {
       setConfirming(false);
@@ -858,7 +904,7 @@ export default function App() {
             <>
               <div className="panel-header">
                 <span className="mono">{selectedMock.mockId}</span>
-                <span className="panel-status">Changes apply to future pods</span>
+                <span className="panel-status">{selectedMock.active ? "Active pod running" : "Future pods"}</span>
               </div>
               <div className="editor-body">
                 <div className="form-section">
@@ -964,7 +1010,7 @@ export default function App() {
                 <button className="danger-text-button" onClick={requestDeleteOverride} disabled={saving}>
                   Delete override
                 </button>
-                <button className="primary-button" onClick={() => void saveConfig()} disabled={saving}>
+                <button className="primary-button" onClick={requestSaveConfig} disabled={saving}>
                   {saving ? "Saving..." : "Save"}
                 </button>
               </div>
@@ -1192,6 +1238,15 @@ export default function App() {
             >
               Cancel
             </button>
+            {confirmDialog.secondaryLabel && confirmDialog.onSecondary ? (
+              <button
+                className="secondary-button"
+                onClick={() => void confirmSecondaryAction()}
+                disabled={confirming}
+              >
+                {confirming ? "Working..." : confirmDialog.secondaryLabel}
+              </button>
+            ) : null}
             <button
               className={confirmDialog.danger ? "danger-text-button" : "primary-button"}
               onClick={() => void confirmAction()}
