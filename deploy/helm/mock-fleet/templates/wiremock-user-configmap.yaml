@@ -1,7 +1,7 @@
 {{- $name := include "mock-fleet.wiremockUserConfigMapName" . -}}
 {{- $namespace := include "mock-fleet.namespace" . -}}
 {{- $existing := lookup "v1" "ConfigMap" $namespace $name -}}
-{{- if and .Release.IsInstall (not $existing) }}
+{{- if not $existing }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

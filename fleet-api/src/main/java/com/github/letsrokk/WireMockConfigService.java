@@ -25,6 +25,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
@@ -35,6 +38,7 @@ public class WireMockConfigService {
     static final String MOCK_ID_VALIDATION_MESSAGE = "Mock id must contain 1-63 lowercase letters, numbers, or hyphens, and must start and end with a letter or number.";
     private static final String RESOURCE_POLICY_ANNOTATION = "helm.sh/resource-policy";
     private static final String RESOURCE_POLICY_KEEP = "keep";
+    private static final long MAX_WATCH_RESTART_DELAY_SECONDS = 30;
 
     @Inject
     MockFleetConfig config;
@@ -49,6 +53,13 @@ public class WireMockConfigService {
     PodManager podManager;
 
     private volatile Watch userConfigWatch;
+    private final ScheduledExecutorService userConfigWatchExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "wiremock-user-config-watch");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private volatile boolean shuttingDown;
+    private int userConfigWatchRestartAttempts;
 
     @PostConstruct
     void loadUserConfig() {
@@ -58,10 +69,12 @@ public class WireMockConfigService {
 
     @PreDestroy
     void closeWatch() {
+        shuttingDown = true;
         Watch local = userConfigWatch;
         if (local != null) {
             local.close();
         }
+        userConfigWatchExecutor.shutdownNow();
     }
 
     ConfigView view() {
@@ -123,33 +136,64 @@ public class WireMockConfigService {
         wireMockOptions.setUserConfig(loadUserConfig(configMap));
     }
 
-    private void startUserConfigWatch() {
+    synchronized void startUserConfigWatch() {
+        if (shuttingDown) {
+            return;
+        }
         Optional<String> name = userConfigMapName();
         if (name.isEmpty()) {
             return;
         }
 
-        userConfigWatch = kubernetesClient.configMaps()
-                .inNamespace(currentNamespace())
-                .withName(name.get())
-                .watch(new Watcher<>() {
-                    @Override
-                    public void eventReceived(Action action, ConfigMap resource) {
-                        if (action == Action.ERROR) {
-                            return;
-                        }
-                        wireMockOptions.setUserConfig(action == Action.DELETED
-                                ? WireMockConfigDocument.empty()
-                                : loadUserConfig(resource));
-                    }
+        try {
+            userConfigWatch = kubernetesClient.configMaps()
+                    .inNamespace(currentNamespace())
+                    .withName(name.get())
+                    .watch(userConfigWatcher());
+            userConfigWatchRestartAttempts = 0;
+        } catch (RuntimeException error) {
+            LOG.warnf(error, "Failed to start WireMock user ConfigMap watch.");
+            scheduleUserConfigWatchRestart();
+        }
+    }
 
-                    @Override
-                    public void onClose(WatcherException cause) {
-                        if (cause != null) {
-                            LOG.warnf(cause, "WireMock user ConfigMap watch closed with an error.");
-                        }
-                    }
-                });
+    Watcher<ConfigMap> userConfigWatcher() {
+        return new Watcher<>() {
+            @Override
+            public void eventReceived(Action action, ConfigMap resource) {
+                handleUserConfigWatchEvent(action, resource);
+            }
+
+            @Override
+            public void onClose(WatcherException cause) {
+                userConfigWatch = null;
+                if (cause != null) {
+                    LOG.warnf(cause, "WireMock user ConfigMap watch closed with an error.");
+                } else {
+                    LOG.debug("WireMock user ConfigMap watch closed.");
+                }
+                scheduleUserConfigWatchRestart();
+            }
+        };
+    }
+
+    void handleUserConfigWatchEvent(Watcher.Action action, ConfigMap resource) {
+        if (action == Watcher.Action.ERROR) {
+            return;
+        }
+        wireMockOptions.setUserConfig(action == Watcher.Action.DELETED
+                ? WireMockConfigDocument.empty()
+                : loadUserConfig(resource));
+    }
+
+    synchronized void scheduleUserConfigWatchRestart() {
+        if (shuttingDown) {
+            return;
+        }
+
+        int attempt = Math.min(userConfigWatchRestartAttempts++, 5);
+        long delaySeconds = Math.min(MAX_WATCH_RESTART_DELAY_SECONDS, 1L << attempt);
+        userConfigWatchExecutor.schedule(this::startUserConfigWatch, delaySeconds, TimeUnit.SECONDS);
     }
 
     private MockConfigView mockConfigView(String mockId, WireMockConfigDocument baseline,
