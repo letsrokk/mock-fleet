@@ -51,17 +51,6 @@ type MappingsView = {
   error?: string | null;
 };
 
-type VersionInfo = {
-  component: string;
-  version: string;
-};
-
-type VersionsView = {
-  dash: string;
-  api: string;
-  proxy: string;
-};
-
 type ApplyMode = "futureOnly" | "restartActive";
 
 type MappingFileNode = {
@@ -75,8 +64,6 @@ const MOCKS_API_PATH = "/__fleet/api/mocks";
 const MOCKS_STREAM_PATH = `${MOCKS_API_PATH}/stream`;
 const CONFIG_API_PATH = "/__fleet/api/config";
 const MAPPINGS_API_PATH = "/__fleet/api/mappings";
-const API_VERSION_PATH = "/__fleet/api/version";
-const PROXY_VERSION_PATH = "/__fleet/proxy/version";
 const RESOURCE_GROUP_NAME = "Resources";
 const RESOURCE_KEYS = ["cpu", "memory"];
 const VALID_MOCK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -90,11 +77,6 @@ export default function App() {
   const [rows, setRows] = useState<MockRow[]>([]);
   const [configView, setConfigView] = useState<ConfigView | null>(null);
   const [mappingsView, setMappingsView] = useState<MappingsView>({ enabled: false, mockIds: [] });
-  const [versions, setVersions] = useState<VersionsView>({
-    dash: __APP_VERSION__,
-    api: "unknown",
-    proxy: "unknown"
-  });
   const [mappingsLoaded, setMappingsLoaded] = useState(false);
   const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
   const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
@@ -232,34 +214,6 @@ export default function App() {
       if (mountedRef.current) {
         setLoadingMappingsTree(false);
       }
-    }
-  }
-
-  async function loadVersions() {
-    const [api, proxy] = await Promise.all([
-      loadVersion(API_VERSION_PATH),
-      loadVersion(PROXY_VERSION_PATH)
-    ]);
-
-    if (mountedRef.current) {
-      setVersions({
-        dash: __APP_VERSION__,
-        api,
-        proxy
-      });
-    }
-  }
-
-  async function loadVersion(path: string) {
-    try {
-      const response = await fetch(path);
-      if (!response.ok) {
-        return "unknown";
-      }
-      const data = (await response.json()) as VersionInfo;
-      return data.version || "unknown";
-    } catch {
-      return "unknown";
     }
   }
 
@@ -658,7 +612,6 @@ export default function App() {
     window.addEventListener("hashchange", syncTabFromHash);
     syncTabFromHash();
     void loadMappings(false);
-    void loadVersions();
 
     return () => {
       mountedRef.current = false;
@@ -791,10 +744,8 @@ export default function App() {
       {activeTab === "mocks" ? renderMocksPanel() : null}
       {activeTab === "config" ? renderConfigPanel() : null}
       {activeTab === "mappings" ? renderMappingsPanel() : null}
-      <footer className="version-footer" aria-label="Component versions">
-        <span>Dash <span className="mono">{versions.dash}</span></span>
-        <span>API <span className="mono">{versions.api}</span></span>
-        <span>Proxy <span className="mono">{versions.proxy}</span></span>
+      <footer className="version-footer" aria-label="Application version">
+        <span>Version <span className="mono">{__APP_VERSION__}</span></span>
       </footer>
     </main>
   );

@@ -8,7 +8,13 @@ on:
     inputs:
       maven_version:
         description: Maven project version to use for packaged API/proxy artifacts.
-        required: true
+        required: false
+        default: ""
+        type: string
+      dash_version:
+        description: Dashboard app version to bake into the static bundle.
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -102,6 +108,8 @@ jobs:
 
       - name: Build dashboard
         working-directory: fleet-dash
+        env:
+          VITE_APP_VERSION: ${{ inputs.dash_version }}
         run: npm run build
 
       - name: Upload dashboard package

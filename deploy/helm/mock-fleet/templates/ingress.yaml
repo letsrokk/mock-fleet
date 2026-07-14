@@ -44,6 +44,13 @@ spec:
                   name: http
             path: /__fleet/proxy/health
             pathType: Prefix
+          - backend:
+              service:
+                name: {{ include "mock-fleet.proxyFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/proxy/version
+            pathType: Prefix
           {{- if .Values.fleet.dash.enabled }}
           - backend:
               service:
