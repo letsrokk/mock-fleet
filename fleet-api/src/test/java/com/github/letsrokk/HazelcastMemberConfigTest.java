@@ -1,8 +1,10 @@
 package com.github.letsrokk;
 
 import com.hazelcast.config.Config;
+import jakarta.enterprise.context.ApplicationScoped;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +44,13 @@ class HazelcastMemberConfigTest {
         assertEquals("mock-fleet-api-hazelcast.mock-fleet.svc.cluster.local",
                 kubernetes.getProperty("service-dns"));
         assertEquals("5701", kubernetes.getProperty("service-port"));
+    }
+
+    @Test
+    void producesSingleApplicationScopedHazelcastInstance() throws Exception {
+        Method producer = HazelcastMemberConfig.class.getMethod("createHazelcastInstance");
+
+        assertTrue(producer.isAnnotationPresent(ApplicationScoped.class));
     }
 
     private MockFleetConfig config(Optional<String> serviceDns) {
