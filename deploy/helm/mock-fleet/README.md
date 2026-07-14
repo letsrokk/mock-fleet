@@ -255,6 +255,8 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
 | `hazelcast.gracefulShutdownMaxWaitSeconds` | `300` | Maximum wait for graceful member shutdown. |
 
+The UI-editable WireMock user ConfigMap is managed by `fleet-api` at runtime, not by Helm. On boot, `fleet-api` creates `<fullname>-wiremock-user-config` when it is missing and then persists UI configuration changes to that ConfigMap. For ArgoCD or other GitOps installs, do not add this ConfigMap to desired state; reconciling it from Git can overwrite UI-saved configuration. If `rbac.create=false`, the API service account must still be allowed to `get`, `list`, `watch`, `create`, `update`, and `patch` ConfigMaps in the release namespace.
+
 ## Local Minikube Values
 
 `values.minikube.yaml` enables ingress at `mock-fleet.localhost`, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values.

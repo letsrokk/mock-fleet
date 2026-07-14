@@ -6,6 +6,7 @@ import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
@@ -63,7 +64,8 @@ public class WireMockConfigService {
 
     @PostConstruct
     void loadUserConfig() {
-        refreshUserConfig();
+        ConfigMap configMap = ensureUserConfigMap();
+        wireMockOptions.setUserConfig(loadUserConfig(configMap));
         startUserConfigWatch();
     }
 
@@ -115,7 +117,7 @@ public class WireMockConfigService {
         }
         ApplyMode applyMode = ApplyMode.from(request.applyMode());
         WireMockPodConfig mockConfig = new WireMockPodConfig(validateOptions(request.options()), toResources(request.resources()));
-        updateUserConfigMap(request.resourceVersion(), current ->
+        updateUserConfigMap(mockId, "saved", request.resourceVersion(), current ->
                 current.withMockConfig(mockId, mockConfig));
         refreshUserConfig();
         applyMode.apply(mockId, podManager);
@@ -124,7 +126,7 @@ public class WireMockConfigService {
 
     ConfigView deleteMockConfig(String mockId, ConfigUpdateRequest request) {
         validateMockId(mockId);
-        updateUserConfigMap(request == null ? null : request.resourceVersion(), current ->
+        updateUserConfigMap(mockId, "deleted", request == null ? null : request.resourceVersion(), current ->
                 current.withoutMockConfig(mockId));
         refreshUserConfig();
         ApplyMode.from(request == null ? null : request.applyMode()).apply(mockId, podManager);
@@ -234,7 +236,43 @@ public class WireMockConfigService {
         return WireMockConfigDocument.load(configMap.getData().get(config.wiremockConfigKey()));
     }
 
-    private void updateUserConfigMap(String expectedResourceVersion,
+    private ConfigMap ensureUserConfigMap() {
+        Optional<String> name = userConfigMapName();
+        if (name.isEmpty()) {
+            wireMockOptions.setUserConfig(WireMockConfigDocument.empty());
+            return null;
+        }
+
+        String namespace = currentNamespace();
+        ConfigMap current = kubernetesClient.configMaps()
+                .inNamespace(namespace)
+                .withName(name.get())
+                .get();
+        if (current != null) {
+            LOG.infof("Loaded WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
+                    namespace, name.get(), resourceVersion(current));
+            return current;
+        }
+
+        try {
+            ConfigMap created = createOrUpdateUserConfigMap(namespace, name.get(), null, WireMockConfigDocument.empty(), true);
+            LOG.infof("Created missing WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
+                    namespace, name.get(), resourceVersion(created));
+            return created;
+        } catch (KubernetesClientException error) {
+            if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
+                throw error;
+            }
+            ConfigMap createdByAnotherPod = userConfigMap();
+            LOG.infof("Loaded WireMock user ConfigMap created by another API pod namespace=%s name=%s resourceVersion=%s.",
+                    namespace, name.get(), resourceVersion(createdByAnotherPod));
+            return createdByAnotherPod;
+        }
+    }
+
+    private void updateUserConfigMap(String mockId,
+                                     String action,
+                                     String expectedResourceVersion,
                                      java.util.function.Function<WireMockConfigDocument, WireMockConfigDocument> update) {
         String name = userConfigMapName().orElseThrow(() -> new WebApplicationException(
                 "User editable WireMock ConfigMap is not configured.",
@@ -247,14 +285,24 @@ public class WireMockConfigService {
 
         if (current != null && expectedResourceVersion != null
                 && !Objects.equals(expectedResourceVersion, resourceVersion(current))) {
+            LOG.warnf("WireMock user ConfigMap conflict namespace=%s name=%s mockId=%s expectedResourceVersion=%s actualResourceVersion=%s.",
+                    namespace, name, mockId, expectedResourceVersion, resourceVersion(current));
             throw new WebApplicationException("WireMock config was modified by another writer.", Response.Status.CONFLICT);
         }
 
+        LOG.infof("Persisting WireMock user ConfigMap namespace=%s name=%s mockId=%s action=%s.",
+                namespace, name, mockId, action);
         WireMockConfigDocument currentConfig = loadUserConfig(current);
         WireMockConfigDocument nextConfig = update.apply(currentConfig);
-        Map<String, String> data = new LinkedHashMap<>();
-        data.put(config.wiremockConfigKey(), nextConfig.toYaml());
+        ConfigMap persisted = createOrUpdateUserConfigMap(namespace, name, current, nextConfig, current == null);
+        LOG.infof("Persisted WireMock user ConfigMap namespace=%s name=%s mockId=%s action=%s resourceVersion=%s.",
+                namespace, name, mockId, action, resourceVersion(persisted));
+    }
 
+    private ConfigMap createOrUpdateUserConfigMap(String namespace, String name, ConfigMap current,
+                                                  WireMockConfigDocument document, boolean create) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put(config.wiremockConfigKey(), document.toYaml());
         ConfigMapBuilder builder = new ConfigMapBuilder(current == null ? new ConfigMap() : current)
                 .editOrNewMetadata()
                 .withName(name)
@@ -266,11 +314,10 @@ public class WireMockConfigService {
                 .withData(data);
         ConfigMap next = builder.build();
 
-        if (current == null) {
-            kubernetesClient.configMaps().inNamespace(namespace).resource(next).create();
-            return;
+        if (create) {
+            return kubernetesClient.configMaps().inNamespace(namespace).resource(next).create();
         }
-        kubernetesClient.configMaps().inNamespace(namespace).resource(next).update();
+        return kubernetesClient.configMaps().inNamespace(namespace).resource(next).update();
     }
 
     private String currentNamespace() {
