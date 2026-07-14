@@ -8,6 +8,7 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
     app.kubernetes.io/component: dash
 spec:
+  revisionHistoryLimit: 3
   replicas: {{ .Values.fleet.dash.replicas }}
   selector:
     matchLabels:
