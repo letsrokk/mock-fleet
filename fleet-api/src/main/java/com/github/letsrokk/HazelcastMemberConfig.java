@@ -22,6 +22,7 @@ public class HazelcastMemberConfig {
     }
 
     @Produces
+    @ApplicationScoped
     public HazelcastInstance createHazelcastInstance() {
         return createEmbeddedHazelcast(memberConfig());
     }
