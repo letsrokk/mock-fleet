@@ -32,9 +32,9 @@ fleet:
         failureThreshold: 3
       readiness:
         path: /__fleet/proxy/health/ready
-        initialDelaySeconds: 5
-        periodSeconds: 10
-        timeoutSeconds: 5
+        initialDelaySeconds: 2
+        periodSeconds: 3
+        timeoutSeconds: 2
         successThreshold: 1
         failureThreshold: 3
       startup:
@@ -63,7 +63,7 @@ fleet:
     podInactivityThreshold: 1M
     podCreationTimeout: 1M
     replicas: 2
-    terminationGracePeriodSeconds: 300
+    terminationGracePeriodSeconds: 30
     updateStrategy:
       type: RollingUpdate
       rollingUpdate:
@@ -89,9 +89,9 @@ fleet:
         failureThreshold: 3
       readiness:
         path: /__fleet/api/health/ready
-        initialDelaySeconds: 5
-        periodSeconds: 10
-        timeoutSeconds: 5
+        initialDelaySeconds: 2
+        periodSeconds: 3
+        timeoutSeconds: 2
         successThreshold: 1
         failureThreshold: 3
       startup:
@@ -214,4 +214,4 @@ hazelcast:
   clusterName: mock-fleet
   port: 5701
   backupCount: 1
-  gracefulShutdownMaxWaitSeconds: 300
+  gracefulShutdownMaxWaitSeconds: 30
