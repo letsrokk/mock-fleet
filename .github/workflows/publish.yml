@@ -70,6 +70,7 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       maven_version: ${{ needs.resolve-version.outputs.maven_version }}
+      dash_version: ${{ needs.resolve-version.outputs.app_version }}
 
   publish:
     name: Publish images and chart
@@ -216,6 +217,8 @@ jobs:
         with:
           context: fleet-dash
           file: fleet-dash/Dockerfile
+          build-args: |
+            VITE_APP_VERSION=${{ needs.resolve-version.outputs.app_version }}
           push: true
           tags: ${{ steps.dash_docker_metadata.outputs.tags }}
           labels: ${{ steps.dash_docker_metadata.outputs.labels }}
