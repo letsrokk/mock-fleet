@@ -786,9 +786,9 @@ export default function App() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.mockId}>
-                  <td className="mono">{row.mockId}</td>
-                  <td className="mono">{row.podName}</td>
-                  <td className="actions">
+                  <td className="mono" data-label="Mock ID">{row.mockId}</td>
+                  <td className="mono" data-label="Pod Name">{row.podName}</td>
+                  <td className="actions" data-label="Actions">
                     <button
                       className="danger-button"
                       onClick={() => requestKillMock(row.mockId)}
