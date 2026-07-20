@@ -85,6 +85,8 @@ export default function App() {
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
+  const [activeMocksFilter, setActiveMocksFilter] = useState("");
+  const [mappingsFilter, setMappingsFilter] = useState("");
   const [newMockId, setNewMockId] = useState("");
   const [loadingMocks, setLoadingMocks] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
@@ -759,10 +761,15 @@ export default function App() {
   }
 
   function renderMocksPanel() {
+    const filteredRows = rows.filter((row) =>
+      matchesMockFilter(row.mockId, activeMocksFilter) || matchesMockFilter(row.podName, activeMocksFilter)
+    );
+    const hasFilter = activeMocksFilter.trim().length > 0;
+
     return (
       <section className="panel">
         <div className="panel-header">
-          <span>{rows.length} active mocks</span>
+          <span>{hasFilter ? `${filteredRows.length} of ${rows.length} active mocks` : `${rows.length} active mocks`}</span>
           <span
             className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
             aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
@@ -770,11 +777,22 @@ export default function App() {
             SSE
           </span>
         </div>
+        <div className="filter-row">
+          <input
+            value={activeMocksFilter}
+            onChange={(event) => setActiveMocksFilter(event.target.value)}
+            placeholder="Filter active mocks"
+            aria-label="Filter active mocks"
+          />
+        </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
         {!loadingMocks && rows.length === 0 ? <p className="state">No active mocks.</p> : null}
+        {!loadingMocks && rows.length > 0 && filteredRows.length === 0 ? (
+          <p className="state">No active mocks match the filter.</p>
+        ) : null}
 
-        {!loadingMocks && rows.length > 0 ? (
+        {!loadingMocks && filteredRows.length > 0 ? (
           <table>
             <thead>
               <tr>
@@ -784,7 +802,7 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <tr key={row.mockId}>
                   <td className="mono">{row.mockId}</td>
                   <td className="mono">{row.podName}</td>
@@ -818,12 +836,18 @@ export default function App() {
 
     const groupedOptions = groupOptions(configView.options);
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
+    const filteredMockIds = configView.mockIds.filter((mockId) => matchesMockFilter(mockId, newMockId));
+    const hasConfigFilter = newMockId.trim().length > 0;
 
     return (
       <section className="config-layout">
         <aside className="panel mock-list">
           <div className="panel-header">
-            <span>{configView.mockIds.length} mock ids</span>
+            <span>
+              {hasConfigFilter
+                ? `${filteredMockIds.length} of ${configView.mockIds.length} mock ids`
+                : `${configView.mockIds.length} mock ids`}
+            </span>
             <span className="panel-status">{refreshing ? "Updating..." : configDirty ? "Unsaved changes" : "Manual refresh"}</span>
           </div>
           <div className="add-row">
@@ -831,13 +855,16 @@ export default function App() {
               value={newMockId}
               onChange={(event) => setNewMockId(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" ? addMockId() : undefined}
-              placeholder="mock-id"
-              aria-label="New mock id"
+              placeholder="Filter or add mock-id"
+              aria-label="Filter or add mock id"
             />
             <button className="primary-button" onClick={addMockId}>Add</button>
           </div>
+          {configView.mockIds.length > 0 && filteredMockIds.length === 0 ? (
+            <p className="state inline-state">No mock ids match the filter.</p>
+          ) : null}
           <div className="mock-buttons">
-            {configView.mockIds.map((mockId) => (
+            {filteredMockIds.map((mockId) => (
               <button
                 key={mockId}
                 className={selectedMockId === mockId ? "mock-button active" : "mock-button"}
@@ -987,18 +1014,36 @@ export default function App() {
       );
     }
 
+    const filteredMockIds = mappingsView.mockIds.filter((mockId) => matchesMockFilter(mockId, mappingsFilter));
+    const hasFilter = mappingsFilter.trim().length > 0;
+
     return (
       <section className="config-layout">
         <aside className="panel mock-list">
           <div className="panel-header">
-            <span>{mappingsView.mockIds.length} mapping folders</span>
+            <span>
+              {hasFilter
+                ? `${filteredMockIds.length} of ${mappingsView.mockIds.length} mapping folders`
+                : `${mappingsView.mockIds.length} mapping folders`}
+            </span>
             <span className="panel-status">{refreshing ? "Updating..." : mappingsStatusError ? "Listing issue" : "Manual refresh"}</span>
+          </div>
+          <div className="filter-row">
+            <input
+              value={mappingsFilter}
+              onChange={(event) => setMappingsFilter(event.target.value)}
+              placeholder="Filter mapping folders"
+              aria-label="Filter mapping folders"
+            />
           </div>
           {mappingsStatusError ? <p className="notice warning">{mappingsStatusError}</p> : null}
           {loadingMappings ? <p className="state">Loading mappings...</p> : null}
           {!loadingMappings && mappingsView.mockIds.length === 0 ? <p className="state">No mapping folders.</p> : null}
+          {!loadingMappings && mappingsView.mockIds.length > 0 && filteredMockIds.length === 0 ? (
+            <p className="state inline-state">No mapping folders match the filter.</p>
+          ) : null}
           <div className="mock-buttons">
-            {mappingsView.mockIds.map((mockId) => (
+            {filteredMockIds.map((mockId) => (
               <button
                 key={mockId}
                 className={selectedMappingsMockId === mockId ? "mock-button active" : "mock-button"}
@@ -1260,6 +1305,11 @@ function tabFromHash(): Tab {
     return "mappings";
   }
   return "mocks";
+}
+
+function matchesMockFilter(value: string, filter: string) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  return normalizedFilter.length === 0 || value.toLowerCase().includes(normalizedFilter);
 }
 
 function tabHash(tab: Tab) {

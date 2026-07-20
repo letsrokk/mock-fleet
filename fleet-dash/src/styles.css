@@ -436,6 +436,11 @@ tr:last-child td {
   border-bottom: 1px solid rgba(198, 207, 222, 0.08);
 }
 
+.filter-row {
+  padding: 14px;
+  border-bottom: 1px solid rgba(198, 207, 222, 0.08);
+}
+
 .mock-buttons {
   display: grid;
   gap: 4px;
