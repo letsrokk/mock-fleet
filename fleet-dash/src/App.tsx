@@ -65,6 +65,9 @@ const MOCKS_STREAM_PATH = `${MOCKS_API_PATH}/stream`;
 const CONFIG_API_PATH = "/__fleet/api/config";
 const MAPPINGS_API_PATH = "/__fleet/api/mappings";
 const RESOURCE_GROUP_NAME = "Resources";
+const ADVANCED_ARGS_GROUP_NAME = "Advanced args";
+const SUMMARY_GROUP_NAME = "Summaries";
+const OPTION_GROUP_COLLAPSE_STORAGE_KEY = "mock-fleet.config.collapsedOptionGroups";
 const RESOURCE_KEYS = ["cpu", "memory"];
 const VALID_MOCK_ID = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const MOCK_ID_VALIDATION_MESSAGE =
@@ -81,7 +84,9 @@ export default function App() {
   const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
   const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
   const [collapsedMappingPaths, setCollapsedMappingPaths] = useState<Set<string>>(() => new Set());
-  const [collapsedOptionGroups, setCollapsedOptionGroups] = useState<Set<string>>(() => new Set());
+  const [collapsedOptionGroups, setCollapsedOptionGroups] = useState<Set<string>>(
+    () => readStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY) ?? new Set()
+  );
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
@@ -103,6 +108,7 @@ export default function App() {
   const [confirming, setConfirming] = useState(false);
   const mountedRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
+  const optionCollapseStateReadyRef = useRef(hasStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY));
 
   const selectedMock = useMemo(
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
@@ -672,6 +678,21 @@ export default function App() {
   }, [activeTab, configView]);
 
   useEffect(() => {
+    if (configView === null || optionCollapseStateReadyRef.current) {
+      return;
+    }
+    setCollapsedOptionGroups(new Set(optionGroupNames(configView.options)));
+    optionCollapseStateReadyRef.current = true;
+  }, [configView]);
+
+  useEffect(() => {
+    if (configView === null || !optionCollapseStateReadyRef.current) {
+      return;
+    }
+    writeStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY, collapsedOptionGroups);
+  }, [collapsedOptionGroups, configView]);
+
+  useEffect(() => {
     if (activeTab === "mappings" && mappingsView.enabled) {
       void loadMappings(true);
     }
@@ -818,6 +839,8 @@ export default function App() {
 
     const groupedOptions = groupOptions(configView.options);
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
+    const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
+    const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
 
     return (
       <section className="config-layout">
@@ -932,23 +955,50 @@ export default function App() {
                   </div>
                 </div>
 
-                <label className="form-section">
-                  <h2>Advanced args</h2>
-                  <textarea
-                    value={draft.rawArgs}
-                    onChange={(event) => {
-                      setConfigDirty(true);
-                      setDraft((current) => ({ ...current, rawArgs: event.target.value }));
-                    }}
-                    rows={4}
-                    spellCheck={false}
-                  />
-                </label>
+                <section className="option-group">
+                  <button
+                    className="option-group-header"
+                    type="button"
+                    onClick={() => toggleOptionGroup(ADVANCED_ARGS_GROUP_NAME)}
+                    aria-expanded={!advancedArgsCollapsed}
+                  >
+                    <span className="option-group-icon" aria-hidden="true">{advancedArgsCollapsed ? ">" : "v"}</span>
+                    <span>{ADVANCED_ARGS_GROUP_NAME}</span>
+                    <span className="option-group-count">1</span>
+                  </button>
+                  {!advancedArgsCollapsed ? (
+                    <label className="form-section option-group-list">
+                      <textarea
+                        value={draft.rawArgs}
+                        onChange={(event) => {
+                          setConfigDirty(true);
+                          setDraft((current) => ({ ...current, rawArgs: event.target.value }));
+                        }}
+                        rows={4}
+                        spellCheck={false}
+                      />
+                    </label>
+                  ) : null}
+                </section>
 
-                <div className="summary-grid">
-                  <ConfigSummary title="Baseline" data={selectedMock.baseline} />
-                  <ConfigSummary title="Effective" data={selectedMock.effective} />
-                </div>
+                <section className="option-group">
+                  <button
+                    className="option-group-header"
+                    type="button"
+                    onClick={() => toggleOptionGroup(SUMMARY_GROUP_NAME)}
+                    aria-expanded={!summariesCollapsed}
+                  >
+                    <span className="option-group-icon" aria-hidden="true">{summariesCollapsed ? ">" : "v"}</span>
+                    <span>{SUMMARY_GROUP_NAME}</span>
+                    <span className="option-group-count">2</span>
+                  </button>
+                  {!summariesCollapsed ? (
+                    <div className="summary-grid option-group-list">
+                      <ConfigSummary title="Baseline" data={selectedMock.baseline} />
+                      <ConfigSummary title="Effective" data={selectedMock.effective} />
+                    </div>
+                  ) : null}
+                </section>
               </div>
               <div className="editor-actions">
                 <button
@@ -1249,7 +1299,44 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
 }
 
 function optionGroupNames(options: OptionDefinition[]) {
-  return [...groupOptions(options).map(([group]) => group), RESOURCE_GROUP_NAME];
+  return [
+    ...groupOptions(options).map(([group]) => group),
+    RESOURCE_GROUP_NAME,
+    ADVANCED_ARGS_GROUP_NAME,
+    SUMMARY_GROUP_NAME
+  ];
+}
+
+function readStoredSet(key: string) {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) {
+      return null;
+    }
+    const values = JSON.parse(stored);
+    if (!Array.isArray(values) || values.some((value) => typeof value !== "string")) {
+      return null;
+    }
+    return new Set<string>(values);
+  } catch {
+    return null;
+  }
+}
+
+function hasStoredSet(key: string) {
+  try {
+    return window.localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredSet(key: string, values: Set<string>) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(Array.from(values).sort()));
+  } catch {
+    // Ignore storage failures; collapse state is a convenience only.
+  }
 }
 
 function tabFromHash(): Tab {
