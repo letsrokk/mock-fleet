@@ -89,6 +89,8 @@ public class PodManager {
                 .create();
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
+        LOG.infof("Created pod '%s' for mock id '%s' in namespace '%s'.",
+                pod.getMetadata().getName(), mockId, namespace);
         return podRef(pod);
     }
 
@@ -188,10 +190,11 @@ public class PodManager {
                 boolean deleted = deletePod(pod);
 
                 if (deleted) {
-                    LOG.infof("Pod '%s' deleted successfully.", pod.podName());
+                    LOG.infof("Pod '%s' deleted for mock id '%s' after %dms of inactivity.",
+                            pod.podName(), mockId, diff);
                     podState.removePod(mockId);
                 } else {
-                    LOG.warnf("Failed to delete Pod '%s'.", pod.podName());
+                    LOG.warnf("Failed to delete inactive pod '%s' for mock id '%s'.", pod.podName(), mockId);
                 }
             }
         });
@@ -217,9 +220,9 @@ public class PodManager {
             if (isOrphaned) {
                 boolean deleted = deletePod(p);
                 if (deleted) {
-                    LOG.infof("Pod '%s' deleted successfully.", podName);
+                    LOG.infof("Orphaned pod '%s' deleted in namespace '%s'.", podName, namespace);
                 } else {
-                    LOG.warnf("Failed to delete Pod '%s'.", podName);
+                    LOG.warnf("Failed to delete orphaned pod '%s' in namespace '%s'.", podName, namespace);
                 }
             }
         });

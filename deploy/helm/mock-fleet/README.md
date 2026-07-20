@@ -79,6 +79,8 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.proxy.image.tag` | `""` | Proxy image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.proxy.image.pullPolicy` | `IfNotPresent` | Proxy image pull policy. |
 | `fleet.proxy.routing.mode` | `HOST` | Mock routing mode: `HOST` or `PATH`. |
+| `fleet.proxy.logging.json` | `false` | Enable JSON console logging for the proxy. |
+| `fleet.proxy.logging.level` | `INFO` | Proxy `com.github.letsrokk` log level; use `TRACE` to log proxied requests. |
 | `fleet.proxy.replicas` | `2` | Proxy replica count when dev mode is disabled. |
 | `fleet.proxy.service.type` | `ClusterIP` | Proxy service type. |
 | `fleet.proxy.service.ports.http` | `80` | Proxy service HTTP port. |
@@ -120,6 +122,8 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
 | `fleet.api.podCreationTimeout` | `1M` | Time to wait for a spawned WireMock pod to become ready. |
+| `fleet.api.logging.json` | `false` | Enable JSON console logging for the API. |
+| `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
 | `fleet.api.terminationGracePeriodSeconds` | `300` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
 | `fleet.api.updateStrategy.type` | `RollingUpdate` | API deployment update strategy. |
