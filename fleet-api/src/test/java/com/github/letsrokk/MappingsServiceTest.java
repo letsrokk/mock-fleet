@@ -29,6 +29,8 @@ class MappingsServiceTest {
 
         assertFalse(view.enabled());
         assertEquals(List.of(), view.mockIds());
+        assertEquals("HOST", view.routing().mode());
+        assertEquals("mock-fleet.localhost", view.routing().host());
     }
 
     @Test
@@ -59,6 +61,8 @@ class MappingsServiceTest {
 
         assertTrue(view.enabled());
         assertEquals(List.of("alpha", "beta"), view.mockIds());
+        assertEquals("HOST", view.routing().mode());
+        assertEquals("mock-fleet.localhost", view.routing().host());
     }
 
     @Test
@@ -145,7 +149,13 @@ class MappingsServiceTest {
     private MappingsService service(boolean persistent) {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storage = mock(MockFleetConfig.StorageConfig.class);
+        MockFleetConfig.ProxyConfig proxy = mock(MockFleetConfig.ProxyConfig.class);
+        MockFleetConfig.RoutingConfig routing = mock(MockFleetConfig.RoutingConfig.class);
         when(config.storage()).thenReturn(storage);
+        when(config.proxy()).thenReturn(proxy);
+        when(proxy.routing()).thenReturn(routing);
+        when(routing.mode()).thenReturn(MockFleetConfig.RoutingMode.HOST);
+        when(routing.host()).thenReturn("mock-fleet.localhost");
         when(storage.persistent()).thenReturn(persistent);
         when(storage.mappingsPath()).thenReturn(mappingsRoot.toString());
 

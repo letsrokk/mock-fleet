@@ -54,6 +54,7 @@ type ConfirmDialogState = {
 type MappingsView = {
   enabled: boolean;
   mockIds: string[];
+  routing: RoutingView;
   error?: string | null;
 };
 
@@ -85,7 +86,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash());
   const [rows, setRows] = useState<MockRow[]>([]);
   const [configView, setConfigView] = useState<ConfigView | null>(null);
-  const [mappingsView, setMappingsView] = useState<MappingsView>({ enabled: false, mockIds: [] });
+  const [mappingsView, setMappingsView] = useState<MappingsView>({
+    enabled: false,
+    mockIds: [],
+    routing: defaultRoutingView()
+  });
   const [mappingsLoaded, setMappingsLoaded] = useState(false);
   const [mappingsStatusError, setMappingsStatusError] = useState<string | null>(null);
   const [mappingsTree, setMappingsTree] = useState<MappingFileNode | null>(null);
@@ -178,7 +183,7 @@ export default function App() {
       if (!response.ok) {
         throw new Error(`Unable to load mappings (${response.status})`);
       }
-      const data = (await response.json()) as MappingsView;
+      const data = normalizeMappingsView((await response.json()) as MappingsView & { routing?: RoutingView });
       const nextSelected = selectedMappingsMockId && data.mockIds.includes(selectedMappingsMockId)
         ? selectedMappingsMockId
         : data.mockIds[0] ?? null;
@@ -1115,7 +1120,10 @@ export default function App() {
                 className={selectedMappingsMockId === mockId ? "mock-button active" : "mock-button"}
                 onClick={() => selectMappingsMock(mockId)}
               >
-                <span className="mono">{mockId}</span>
+                <span className="mock-button-text">
+                  <span className="mono">{mockId}</span>
+                  <span className="mock-base-url">{mockBaseUrl(mockId, mappingsView.routing)}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -1123,7 +1131,16 @@ export default function App() {
 
         <section className="panel editor-panel">
           <div className="panel-header">
-            <span className="mono">{selectedMappingsMockId ?? "No mock selected"}</span>
+            {selectedMappingsMockId ? (
+              <span className="mock-heading">
+                <span className="mono">{selectedMappingsMockId}</span>
+                <a href={mockBaseUrl(selectedMappingsMockId, mappingsView.routing)} target="_blank" rel="noreferrer">
+                  {mockBaseUrl(selectedMappingsMockId, mappingsView.routing)}
+                </a>
+              </span>
+            ) : (
+              <span className="mono">No mock selected</span>
+            )}
             {selectedMappingsMockId ? (
               <button
                 className="danger-text-button small-button"
@@ -1362,8 +1379,19 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
 function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
   return {
     ...configView,
-    routing: configView.routing ?? { mode: "HOST", host: window.location.hostname }
+    routing: configView.routing ?? defaultRoutingView()
   };
+}
+
+function normalizeMappingsView(mappingsView: MappingsView & { routing?: RoutingView }): MappingsView {
+  return {
+    ...mappingsView,
+    routing: mappingsView.routing ?? defaultRoutingView()
+  };
+}
+
+function defaultRoutingView(): RoutingView {
+  return { mode: "HOST", host: window.location.hostname };
 }
 
 function mockBaseUrl(mockId: string, routing: RoutingView) {

@@ -25,7 +25,11 @@ class MappingsResourceTest {
 
     @Test
     void getsMappingsView() {
-        when(mappingsService.view()).thenReturn(new MappingsService.MappingsView(true, List.of("demo")));
+        when(mappingsService.view()).thenReturn(new MappingsService.MappingsView(
+                true,
+                List.of("demo"),
+                null,
+                new MappingsService.RoutingView("HOST", "mock-fleet.localhost")));
 
         given()
         .when()
@@ -33,7 +37,9 @@ class MappingsResourceTest {
         .then()
                 .statusCode(200)
                 .body("enabled", is(true))
-                .body("mockIds[0]", is("demo"));
+                .body("mockIds[0]", is("demo"))
+                .body("routing.mode", is("HOST"))
+                .body("routing.host", is("mock-fleet.localhost"));
 
         verify(mappingsService).view();
     }
