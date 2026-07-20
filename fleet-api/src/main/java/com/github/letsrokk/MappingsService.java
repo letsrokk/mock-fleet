@@ -24,13 +24,14 @@ public class MappingsService {
     MockFleetConfig config;
 
     MappingsView view() {
+        RoutingView routing = routingView();
         if (!enabled()) {
-            return new MappingsView(false, List.of());
+            return new MappingsView(false, List.of(), null, routing);
         }
 
         Path root = mappingsRoot();
         if (!Files.isDirectory(root)) {
-            return new MappingsView(true, List.of());
+            return new MappingsView(true, List.of(), null, routing);
         }
 
         try (Stream<Path> children = Files.list(root)) {
@@ -40,9 +41,9 @@ public class MappingsService {
                     .filter(mockId -> VALID_MOCK_ID.matcher(mockId).matches())
                     .sorted()
                     .toList();
-            return new MappingsView(true, mockIds, null);
+            return new MappingsView(true, mockIds, null, routing);
         } catch (IOException e) {
-            return new MappingsView(true, List.of(), "Unable to list mappings root: " + ioErrorMessage(e));
+            return new MappingsView(true, List.of(), "Unable to list mappings root: " + ioErrorMessage(e), routing);
         }
     }
 
@@ -182,6 +183,11 @@ public class MappingsService {
         return Path.of(config.storage().mappingsPath()).toAbsolutePath().normalize();
     }
 
+    private RoutingView routingView() {
+        MockFleetConfig.RoutingConfig routing = config.proxy().routing();
+        return new RoutingView(routing.mode().name(), routing.host());
+    }
+
     private void validateMockId(String mockId) {
         if (mockId == null || !VALID_MOCK_ID.matcher(mockId).matches()) {
             throw error(MOCK_ID_VALIDATION_MESSAGE, Response.Status.BAD_REQUEST);
@@ -209,12 +215,19 @@ public class MappingsService {
         return e.getClass().getSimpleName() + ": " + message;
     }
 
-    public record MappingsView(boolean enabled, List<String> mockIds, String error) {
+    public record MappingsView(boolean enabled, List<String> mockIds, String error, RoutingView routing) {
         public MappingsView(boolean enabled, List<String> mockIds) {
-            this(enabled, mockIds, null);
+            this(enabled, mockIds, null, null);
+        }
+
+        public MappingsView(boolean enabled, List<String> mockIds, String error) {
+            this(enabled, mockIds, error, null);
         }
     }
 
     public record FileNode(String name, String path, boolean directory, List<FileNode> children) {
+    }
+
+    public record RoutingView(String mode, String host) {
     }
 }
