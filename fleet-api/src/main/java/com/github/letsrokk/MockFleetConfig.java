@@ -32,6 +32,8 @@ public interface MockFleetConfig {
 
     Optional<String> proxyDeploymentName();
 
+    ProxyConfig proxy();
+
     StorageConfig storage();
 
     HazelcastConfig hazelcast();
@@ -46,6 +48,20 @@ public interface MockFleetConfig {
 
     interface S3Config {
         String path();
+    }
+
+    interface ProxyConfig {
+        RoutingConfig routing();
+    }
+
+    interface RoutingConfig {
+        RoutingMode mode();
+        String host();
+    }
+
+    enum RoutingMode {
+        HOST,
+        PATH
     }
 
     interface HazelcastConfig {

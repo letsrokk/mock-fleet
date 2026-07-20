@@ -463,10 +463,10 @@ tr:last-child td {
 
 .mock-button {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  min-height: 38px;
+  min-height: 46px;
   padding: 8px 10px;
   border: 0;
   border-radius: 6px;
@@ -475,6 +475,31 @@ tr:last-child td {
   cursor: pointer;
   text-align: left;
   transition: background 160ms ease, color 160ms ease;
+}
+
+.mock-button-text,
+.mock-heading {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mock-heading a,
+.mock-base-url {
+  color: #90a0bb;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.mock-heading a {
+  text-decoration: none;
+}
+
+.mock-heading a:hover,
+.mock-heading a:focus-visible {
+  color: #f4b663;
+  text-decoration: underline;
 }
 
 .mock-button:hover,

@@ -143,6 +143,11 @@ class WireMockConfigResourceTest {
                 "Logging",
                 "Log more detail to the console.",
                 List.of());
-        return new WireMockConfigService.ConfigView("42", List.of("demo"), List.of(mock), List.of(option));
+        return new WireMockConfigService.ConfigView(
+                "42",
+                List.of("demo"),
+                List.of(mock),
+                List.of(option),
+                new WireMockConfigService.RoutingView("HOST", "mock-fleet.localhost"));
     }
 }
