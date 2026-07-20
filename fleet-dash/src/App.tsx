@@ -33,6 +33,12 @@ type ConfigView = {
   mockIds: string[];
   mocks: MockConfigView[];
   options: OptionDefinition[];
+  routing: RoutingView;
+};
+
+type RoutingView = {
+  mode: "HOST" | "PATH";
+  host: string;
 };
 
 type ConfirmDialogState = {
@@ -126,7 +132,7 @@ export default function App() {
       if (!response.ok) {
         throw new Error(`Unable to load config (${response.status})`);
       }
-      const data = (await response.json()) as ConfigView;
+      const data = normalizeConfigView((await response.json()) as ConfigView & { routing?: RoutingView });
       const preserveDraft = configDirty && selectedMockId !== null;
       const nextData = preserveDraft && selectedMockId && !data.mockIds.includes(selectedMockId)
         ? withLocalMock(data, selectedMockId)
@@ -843,7 +849,10 @@ export default function App() {
                 className={selectedMockId === mockId ? "mock-button active" : "mock-button"}
                 onClick={() => selectMock(mockId)}
               >
-                <span className="mono">{mockId}</span>
+                <span className="mock-button-text">
+                  <span className="mono">{mockId}</span>
+                  <span className="mock-base-url">{mockBaseUrl(mockId, configView.routing)}</span>
+                </span>
                 {configView.mocks.find((mock) => mock.mockId === mockId)?.active ? <span className="badge">active</span> : null}
               </button>
             ))}
@@ -854,7 +863,12 @@ export default function App() {
           {selectedMock ? (
             <>
               <div className="panel-header">
-                <span className="mono">{selectedMock.mockId}</span>
+                <span className="mock-heading">
+                  <span className="mono">{selectedMock.mockId}</span>
+                  <a href={mockBaseUrl(selectedMock.mockId, configView.routing)} target="_blank" rel="noreferrer">
+                    {mockBaseUrl(selectedMock.mockId, configView.routing)}
+                  </a>
+                </span>
                 <span className="panel-status">{selectedMock.active ? "Active pod running" : "Future pods"}</span>
               </div>
               <div className="editor-body">
@@ -1246,6 +1260,32 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
       { mockId, active: false, baseline: emptyConfig(), user: emptyConfig(), effective: emptyConfig() }
     ].sort((left, right) => left.mockId.localeCompare(right.mockId))
   };
+}
+
+function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
+  return {
+    ...configView,
+    routing: configView.routing ?? { mode: "HOST", host: window.location.hostname }
+  };
+}
+
+function mockBaseUrl(mockId: string, routing: RoutingView) {
+  const origin = window.location.origin;
+  if (routing.mode === "PATH") {
+    return `${origin}/${encodeURIComponent(mockId)}`;
+  }
+
+  const protocol = window.location.protocol;
+  const host = hostWithBrowserPort(routing.host);
+  return `${protocol}//${mockId}.${host}`;
+}
+
+function hostWithBrowserPort(configuredHost: string) {
+  const host = configuredHost.trim() || window.location.hostname;
+  if (host.includes(":") || !window.location.port) {
+    return host;
+  }
+  return `${host}:${window.location.port}`;
 }
 
 function optionGroupNames(options: OptionDefinition[]) {

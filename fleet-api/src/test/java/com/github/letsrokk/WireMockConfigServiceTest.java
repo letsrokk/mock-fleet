@@ -214,6 +214,12 @@ class WireMockConfigServiceTest {
         when(config.namespace()).thenReturn("mock-fleet");
         when(config.wiremockUserConfigMapName()).thenReturn(Optional.of("user-config"));
         when(config.wiremockConfigKey()).thenReturn("wiremock-options.yaml");
+        MockFleetConfig.ProxyConfig proxy = mock(MockFleetConfig.ProxyConfig.class);
+        MockFleetConfig.RoutingConfig routing = mock(MockFleetConfig.RoutingConfig.class);
+        when(config.proxy()).thenReturn(proxy);
+        when(proxy.routing()).thenReturn(routing);
+        when(routing.mode()).thenReturn(MockFleetConfig.RoutingMode.HOST);
+        when(routing.host()).thenReturn("mock-fleet.localhost");
         return config;
     }
 
