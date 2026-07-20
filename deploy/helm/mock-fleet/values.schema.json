@@ -104,6 +104,14 @@
         "image": { "$ref": "#/definitions/image" },
         "dev": { "$ref": "#/definitions/dev" },
         "routing": { "type": "object" },
+        "logging": {
+          "type": "object",
+          "properties": {
+            "json": { "type": "boolean" },
+            "level": { "type": "string", "enum": ["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF"] }
+          },
+          "required": ["json", "level"]
+        },
         "replicas": { "type": "integer", "minimum": 1 },
         "service": { "type": "object" },
         "probes": { "type": "object" },

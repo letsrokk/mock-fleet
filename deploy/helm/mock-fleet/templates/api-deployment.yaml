@@ -51,6 +51,10 @@ spec:
               value: {{ .Values.fleet.api.podInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.fleet.api.podCreationTimeout | quote }}
+            - name: QUARKUS_LOG_CONSOLE_JSON
+              value: {{ .Values.fleet.api.logging.json | quote }}
+            - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
+              value: {{ .Values.fleet.api.logging.level | quote }}
             - name: MOCK_FLEET_WIREMOCK_POD_NAME_PREFIX
               value: {{ .Values.wiremock.podNamePrefix | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
