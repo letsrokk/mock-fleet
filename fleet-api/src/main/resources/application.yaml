@@ -1,6 +1,11 @@
 quarkus:
   smallrye-health:
     root-path: /__fleet/api/health
+  smallrye-openapi:
+    path: /__fleet/api/openapi
+  swagger-ui:
+    always-include: true
+    path: /__fleet/api/swagger-ui
   container-image:
     builder: docker
     registry: ghcr.io

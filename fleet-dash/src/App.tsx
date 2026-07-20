@@ -746,6 +746,8 @@ export default function App() {
       {activeTab === "mappings" ? renderMappingsPanel() : null}
       <footer className="version-footer" aria-label="Application version">
         <span>Version <span className="mono">{__APP_VERSION__}</span></span>
+        <a href="/__fleet/api/openapi" target="_blank" rel="noreferrer">OpenAPI</a>
+        <a href="/__fleet/api/swagger-ui" target="_blank" rel="noreferrer">Swagger UI</a>
       </footer>
     </main>
   );
