@@ -107,7 +107,13 @@ public class WireMockConfigService {
                 resourceVersion(userConfigMap),
                 List.copyOf(mockIds.stream().sorted().toList()),
                 mocks,
-                optionDefinitions());
+                optionDefinitions(),
+                routingView());
+    }
+
+    private RoutingView routingView() {
+        MockFleetConfig.RoutingConfig routing = config.proxy().routing();
+        return new RoutingView(routing.mode().name(), routing.host());
     }
 
     ConfigView upsertMockConfig(String mockId, ConfigUpdateRequest request) {
@@ -482,7 +488,7 @@ public class WireMockConfigService {
     }
 
     public record ConfigView(String resourceVersion, List<String> mockIds, List<MockConfigView> mocks,
-                             List<OptionDefinition> options) {
+                             List<OptionDefinition> options, RoutingView routing) {
     }
 
     public record MockConfigView(String mockId, boolean active, ConfigData baseline, ConfigData user,
@@ -552,5 +558,8 @@ public class WireMockConfigService {
 
     public record OptionDefinition(String name, String label, String kind, String group, String description,
                                    List<String> values) {
+    }
+
+    public record RoutingView(String mode, String host) {
     }
 }

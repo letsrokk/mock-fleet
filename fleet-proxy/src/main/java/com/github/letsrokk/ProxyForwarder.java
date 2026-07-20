@@ -39,7 +39,7 @@ public class ProxyForwarder {
         fleetApiClient.resolveUpstreamBaseUrl(resolvedRequest.mockId())
                 .map(URI::create)
                 .onSuccess(upstream -> {
-                    LOG.debugf("Proxying %s %s for host '%s' and mock id '%s' to upstream %s as %s.",
+                    LOG.tracef("Proxy request method=%s uri=%s host=%s mockId=%s upstream=%s upstreamUri=%s.",
                             routingContext.request().method(),
                             routingContext.request().uri(),
                             host,
@@ -103,6 +103,10 @@ public class ProxyForwarder {
     }
 
     private io.vertx.core.Future<Void> writeResponse(RoutingContext routingContext, HttpResponse<Buffer> response) {
+        LOG.tracef("Proxy response method=%s uri=%s status=%d.",
+                routingContext.request().method(),
+                routingContext.request().uri(),
+                response.statusCode());
         routingContext.response().setStatusCode(response.statusCode());
         response.headers().forEach(header -> routingContext.response().putHeader(header.getKey(), header.getValue()));
         Buffer responseBody = response.body();

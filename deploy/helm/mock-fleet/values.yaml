@@ -14,6 +14,9 @@ fleet:
       pullPolicy: IfNotPresent
     routing:
       mode: HOST
+    logging:
+      json: false
+      level: INFO
     replicas: 2
     service:
       type: ClusterIP
@@ -62,6 +65,9 @@ fleet:
       pullPolicy: IfNotPresent
     podInactivityThreshold: 1M
     podCreationTimeout: 1M
+    logging:
+      json: false
+      level: INFO
     replicas: 2
     terminationGracePeriodSeconds: 30
     updateStrategy:

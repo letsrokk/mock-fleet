@@ -30,6 +30,10 @@ spec:
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_API_BASE_URL
               value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
+            - name: QUARKUS_LOG_CONSOLE_JSON
+              value: {{ .Values.fleet.proxy.logging.json | quote }}
+            - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
+              value: {{ .Values.fleet.proxy.logging.level | quote }}
             {{- if .Values.fleet.proxy.dev.enabled }}
             - name: QUARKUS_LAUNCH_DEVMODE
               value: {{ .Values.fleet.proxy.dev.quarkusLaunchDevmode | quote }}

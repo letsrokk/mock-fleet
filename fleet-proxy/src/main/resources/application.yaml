@@ -1,4 +1,11 @@
 quarkus:
+  log:
+    console:
+      json: ${QUARKUS_LOG_CONSOLE_JSON:false}
+    category:
+      "com.github.letsrokk":
+        min-level: TRACE
+        level: ${QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL:INFO}
   smallrye-health:
     root-path: /__fleet/proxy/health
   container-image:

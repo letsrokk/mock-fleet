@@ -33,6 +33,12 @@ type ConfigView = {
   mockIds: string[];
   mocks: MockConfigView[];
   options: OptionDefinition[];
+  routing: RoutingView;
+};
+
+type RoutingView = {
+  mode: "HOST" | "PATH";
+  host: string;
 };
 
 type ConfirmDialogState = {
@@ -90,6 +96,8 @@ export default function App() {
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
+  const [activeMocksFilter, setActiveMocksFilter] = useState("");
+  const [mappingsFilter, setMappingsFilter] = useState("");
   const [newMockId, setNewMockId] = useState("");
   const [loadingMocks, setLoadingMocks] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
@@ -132,7 +140,7 @@ export default function App() {
       if (!response.ok) {
         throw new Error(`Unable to load config (${response.status})`);
       }
-      const data = (await response.json()) as ConfigView;
+      const data = normalizeConfigView((await response.json()) as ConfigView & { routing?: RoutingView });
       const preserveDraft = configDirty && selectedMockId !== null;
       const nextData = preserveDraft && selectedMockId && !data.mockIds.includes(selectedMockId)
         ? withLocalMock(data, selectedMockId)
@@ -767,6 +775,8 @@ export default function App() {
       {activeTab === "mappings" ? renderMappingsPanel() : null}
       <footer className="version-footer" aria-label="Application version">
         <span>Version <span className="mono">{__APP_VERSION__}</span></span>
+        <a href="/__fleet/api/openapi" target="_blank" rel="noreferrer">OpenAPI</a>
+        <a href="/__fleet/api/swagger-ui" target="_blank" rel="noreferrer">Swagger UI</a>
       </footer>
     </main>
   );
@@ -780,10 +790,15 @@ export default function App() {
   }
 
   function renderMocksPanel() {
+    const filteredRows = rows.filter((row) =>
+      matchesMockFilter(row.mockId, activeMocksFilter) || matchesMockFilter(row.podName, activeMocksFilter)
+    );
+    const hasFilter = activeMocksFilter.trim().length > 0;
+
     return (
       <section className="panel">
         <div className="panel-header">
-          <span>{rows.length} active mocks</span>
+          <span>{hasFilter ? `${filteredRows.length} of ${rows.length} active mocks` : `${rows.length} active mocks`}</span>
           <span
             className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
             aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
@@ -791,11 +806,22 @@ export default function App() {
             SSE
           </span>
         </div>
+        <div className="filter-row">
+          <input
+            value={activeMocksFilter}
+            onChange={(event) => setActiveMocksFilter(event.target.value)}
+            placeholder="Filter active mocks"
+            aria-label="Filter active mocks"
+          />
+        </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
         {!loadingMocks && rows.length === 0 ? <p className="state">No active mocks.</p> : null}
+        {!loadingMocks && rows.length > 0 && filteredRows.length === 0 ? (
+          <p className="state">No active mocks match the filter.</p>
+        ) : null}
 
-        {!loadingMocks && rows.length > 0 ? (
+        {!loadingMocks && filteredRows.length > 0 ? (
           <table>
             <thead>
               <tr>
@@ -805,11 +831,11 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <tr key={row.mockId}>
-                  <td className="mono">{row.mockId}</td>
-                  <td className="mono">{row.podName}</td>
-                  <td className="actions">
+                  <td className="mono" data-label="Mock ID">{row.mockId}</td>
+                  <td className="mono" data-label="Pod Name">{row.podName}</td>
+                  <td className="actions" data-label="Actions">
                     <button
                       className="danger-button"
                       onClick={() => requestKillMock(row.mockId)}
@@ -841,12 +867,18 @@ export default function App() {
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
+    const filteredMockIds = configView.mockIds.filter((mockId) => matchesMockFilter(mockId, newMockId));
+    const hasConfigFilter = newMockId.trim().length > 0;
 
     return (
       <section className="config-layout">
         <aside className="panel mock-list">
           <div className="panel-header">
-            <span>{configView.mockIds.length} mock ids</span>
+            <span>
+              {hasConfigFilter
+                ? `${filteredMockIds.length} of ${configView.mockIds.length} mock ids`
+                : `${configView.mockIds.length} mock ids`}
+            </span>
             <span className="panel-status">{refreshing ? "Updating..." : configDirty ? "Unsaved changes" : "Manual refresh"}</span>
           </div>
           <div className="add-row">
@@ -854,19 +886,25 @@ export default function App() {
               value={newMockId}
               onChange={(event) => setNewMockId(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" ? addMockId() : undefined}
-              placeholder="mock-id"
-              aria-label="New mock id"
+              placeholder="Filter or add mock-id"
+              aria-label="Filter or add mock id"
             />
             <button className="primary-button" onClick={addMockId}>Add</button>
           </div>
+          {configView.mockIds.length > 0 && filteredMockIds.length === 0 ? (
+            <p className="state inline-state">No mock ids match the filter.</p>
+          ) : null}
           <div className="mock-buttons">
-            {configView.mockIds.map((mockId) => (
+            {filteredMockIds.map((mockId) => (
               <button
                 key={mockId}
                 className={selectedMockId === mockId ? "mock-button active" : "mock-button"}
                 onClick={() => selectMock(mockId)}
               >
-                <span className="mono">{mockId}</span>
+                <span className="mock-button-text">
+                  <span className="mono">{mockId}</span>
+                  <span className="mock-base-url">{mockBaseUrl(mockId, configView.routing)}</span>
+                </span>
                 {configView.mocks.find((mock) => mock.mockId === mockId)?.active ? <span className="badge">active</span> : null}
               </button>
             ))}
@@ -877,7 +915,12 @@ export default function App() {
           {selectedMock ? (
             <>
               <div className="panel-header">
-                <span className="mono">{selectedMock.mockId}</span>
+                <span className="mock-heading">
+                  <span className="mono">{selectedMock.mockId}</span>
+                  <a href={mockBaseUrl(selectedMock.mockId, configView.routing)} target="_blank" rel="noreferrer">
+                    {mockBaseUrl(selectedMock.mockId, configView.routing)}
+                  </a>
+                </span>
                 <span className="panel-status">{selectedMock.active ? "Active pod running" : "Future pods"}</span>
               </div>
               <div className="editor-body">
@@ -1037,18 +1080,36 @@ export default function App() {
       );
     }
 
+    const filteredMockIds = mappingsView.mockIds.filter((mockId) => matchesMockFilter(mockId, mappingsFilter));
+    const hasFilter = mappingsFilter.trim().length > 0;
+
     return (
       <section className="config-layout">
         <aside className="panel mock-list">
           <div className="panel-header">
-            <span>{mappingsView.mockIds.length} mapping folders</span>
+            <span>
+              {hasFilter
+                ? `${filteredMockIds.length} of ${mappingsView.mockIds.length} mapping folders`
+                : `${mappingsView.mockIds.length} mapping folders`}
+            </span>
             <span className="panel-status">{refreshing ? "Updating..." : mappingsStatusError ? "Listing issue" : "Manual refresh"}</span>
+          </div>
+          <div className="filter-row">
+            <input
+              value={mappingsFilter}
+              onChange={(event) => setMappingsFilter(event.target.value)}
+              placeholder="Filter mapping folders"
+              aria-label="Filter mapping folders"
+            />
           </div>
           {mappingsStatusError ? <p className="notice warning">{mappingsStatusError}</p> : null}
           {loadingMappings ? <p className="state">Loading mappings...</p> : null}
           {!loadingMappings && mappingsView.mockIds.length === 0 ? <p className="state">No mapping folders.</p> : null}
+          {!loadingMappings && mappingsView.mockIds.length > 0 && filteredMockIds.length === 0 ? (
+            <p className="state inline-state">No mapping folders match the filter.</p>
+          ) : null}
           <div className="mock-buttons">
-            {mappingsView.mockIds.map((mockId) => (
+            {filteredMockIds.map((mockId) => (
               <button
                 key={mockId}
                 className={selectedMappingsMockId === mockId ? "mock-button active" : "mock-button"}
@@ -1298,6 +1359,32 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
   };
 }
 
+function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
+  return {
+    ...configView,
+    routing: configView.routing ?? { mode: "HOST", host: window.location.hostname }
+  };
+}
+
+function mockBaseUrl(mockId: string, routing: RoutingView) {
+  const origin = window.location.origin;
+  if (routing.mode === "PATH") {
+    return `${origin}/${encodeURIComponent(mockId)}`;
+  }
+
+  const protocol = window.location.protocol;
+  const host = hostWithBrowserPort(routing.host);
+  return `${protocol}//${mockId}.${host}`;
+}
+
+function hostWithBrowserPort(configuredHost: string) {
+  const host = configuredHost.trim() || window.location.hostname;
+  if (host.includes(":") || !window.location.port) {
+    return host;
+  }
+  return `${host}:${window.location.port}`;
+}
+
 function optionGroupNames(options: OptionDefinition[]) {
   return [
     ...groupOptions(options).map(([group]) => group),
@@ -1347,6 +1434,11 @@ function tabFromHash(): Tab {
     return "mappings";
   }
   return "mocks";
+}
+
+function matchesMockFilter(value: string, filter: string) {
+  const normalizedFilter = filter.trim().toLowerCase();
+  return normalizedFilter.length === 0 || value.toLowerCase().includes(normalizedFilter);
 }
 
 function tabHash(tab: Tab) {

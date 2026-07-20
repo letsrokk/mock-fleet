@@ -51,6 +51,10 @@ spec:
               value: {{ .Values.fleet.api.podInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.fleet.api.podCreationTimeout | quote }}
+            - name: QUARKUS_LOG_CONSOLE_JSON
+              value: {{ .Values.fleet.api.logging.json | quote }}
+            - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
+              value: {{ .Values.fleet.api.logging.level | quote }}
             - name: MOCK_FLEET_WIREMOCK_POD_NAME_PREFIX
               value: {{ .Values.wiremock.podNamePrefix | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONTAINER_NAME
@@ -72,6 +76,10 @@ spec:
               value: wiremock-options.yaml
             - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
               value: {{ include "mock-fleet.proxyFullname" . | quote }}
+            - name: MOCK_FLEET_PROXY_ROUTING_MODE
+              value: {{ .Values.fleet.proxy.routing.mode | quote }}
+            - name: MOCK_FLEET_PROXY_ROUTING_HOST
+              value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_HAZELCAST_CLUSTER_NAME
               value: {{ .Values.hazelcast.clusterName | quote }}
             - name: MOCK_FLEET_HAZELCAST_SERVICE_DNS
