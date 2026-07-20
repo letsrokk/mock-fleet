@@ -309,6 +309,17 @@ h1 {
   font-size: 0.82rem;
 }
 
+.version-footer a {
+  color: #c6cfde;
+  text-decoration: none;
+}
+
+.version-footer a:hover,
+.version-footer a:focus-visible {
+  color: #f4b663;
+  text-decoration: underline;
+}
+
 .panel-header {
   display: flex;
   flex-wrap: wrap;
