@@ -14,10 +14,13 @@ import {
   type DraftConfig,
   type OptionDefinition
 } from "./configOptions";
+import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 
 type MockRow = {
   mockId: string;
-  podName: string;
+  podName: string | null;
+  status: MockStatus;
+  message: string | null;
 };
 
 type MockConfigView = {
@@ -784,14 +787,17 @@ export default function App() {
 
   function renderMocksPanel() {
     const filteredRows = rows.filter((row) =>
-      matchesMockFilter(row.mockId, activeMocksFilter) || matchesMockFilter(row.podName, activeMocksFilter)
+      matchesMockFilter(row.mockId, activeMocksFilter) ||
+      matchesMockFilter(row.podName ?? "", activeMocksFilter) ||
+      matchesMockFilter(row.status, activeMocksFilter) ||
+      matchesMockFilter(row.message ?? "", activeMocksFilter)
     );
     const hasFilter = activeMocksFilter.trim().length > 0;
 
     return (
       <section className="panel">
         <div className="panel-header">
-          <span>{hasFilter ? `${filteredRows.length} of ${rows.length} active mocks` : `${rows.length} active mocks`}</span>
+          <span>{hasFilter ? `${filteredRows.length} of ${rows.length} mocks` : `${rows.length} mocks`}</span>
           <span
             className={`sse-status ${sseConnected ? "connected" : "waiting"}`}
             aria-label={sseConnected ? "SSE connected" : "SSE waiting for connection"}
@@ -803,20 +809,20 @@ export default function App() {
           <input
             value={activeMocksFilter}
             onChange={(event) => setActiveMocksFilter(event.target.value)}
-            placeholder="Filter active mocks"
-            aria-label="Filter active mocks"
+            placeholder="Filter mocks"
+            aria-label="Filter mocks"
           />
         </div>
 
-        {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
+        {loadingMocks ? <p className="state">Loading mocks...</p> : null}
         {!loadingMocks && rows.length === 0 ? (
           <div className="empty-state">
-            <strong>No active mocks</strong>
+            <strong>No mocks</strong>
             <span>Send a request through the proxy to start a mock pod.</span>
           </div>
         ) : null}
         {!loadingMocks && rows.length > 0 && filteredRows.length === 0 ? (
-          <p className="state">No active mocks match the filter.</p>
+          <p className="state">No mocks match the filter.</p>
         ) : null}
 
         {!loadingMocks && filteredRows.length > 0 ? (
@@ -825,20 +831,33 @@ export default function App() {
               <tr>
                 <th>Mock ID</th>
                 <th>Pod Name</th>
+                <th>Status</th>
                 <th aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
-              {filteredRows.map((row) => (
-                <tr key={row.mockId}>
+              {filteredRows.map((row) => {
+                const status = mockStatusPresentation(row.status, row.message);
+                const canDelete = row.status === "RUNNING";
+                return <tr key={row.mockId}>
                   <td className="mono" data-label="Mock ID">{row.mockId}</td>
-                  <td className="mono" data-label="Pod Name">{row.podName}</td>
+                  <td className="mono" data-label="Pod Name">{row.podName ?? "Waiting for Kubernetes"}</td>
+                  <td data-label="Status">
+                    <span className="mock-status-content">
+                      <span className={`mock-status ${status.className}`}>{status.label}</span>
+                      {status.detail ? <span className="mock-status-detail" title={status.detail}>{status.detail}</span> : null}
+                    </span>
+                  </td>
                   <td className="actions" data-label="Actions">
                     <button
-                      className="danger-button"
+                      className={!canDelete ? "danger-button unavailable" : "danger-button"}
                       onClick={() => requestKillMock(row.mockId)}
-                      disabled={busyMockId === row.mockId}
-                      aria-label={busyMockId === row.mockId ? "Deleting" : `Delete ${row.mockId}`}
+                      disabled={!canDelete || busyMockId === row.mockId}
+                      aria-label={busyMockId === row.mockId
+                        ? "Deleting"
+                        : canDelete
+                          ? `Delete ${row.mockId}`
+                          : `${status.label} mock cannot be deleted`}
                     >
                       {busyMockId === row.mockId ? (
                         <span className="delete-spinner" aria-hidden="true"></span>
@@ -847,8 +866,8 @@ export default function App() {
                       )}
                     </button>
                   </td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         ) : null}

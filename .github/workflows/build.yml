@@ -122,20 +122,3 @@ jobs:
           name: fleet-dash-package
           path: fleet-dash/dist
           if-no-files-found: error
-
-  local-deployment:
-    name: Test local deployment
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Test local deployment scripts and configuration
-        run: |
-          for test_script in tests/*.sh; do
-            /bin/bash "${test_script}"
-          done

@@ -430,6 +430,50 @@ h1 {
 
 .sse-status.waiting::before { background: var(--danger); }
 
+.mock-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.mock-status.running {
+  border-color: #315f4b;
+  color: #c9f4dc;
+  background: var(--accent-surface);
+}
+
+.mock-status.starting {
+  border-color: #695b2d;
+  color: var(--warning);
+  background: var(--warning-surface);
+}
+
+.mock-status.failed {
+  border-color: #70404a;
+  color: #ffc2c7;
+  background: var(--danger-surface);
+}
+
+.mock-status-detail {
+  display: block;
+  max-width: 38rem;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #ffc2c7;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mock-status-content { min-width: 0; }
+
+.danger-button.unavailable:disabled { cursor: not-allowed; }
+
 .filter-row,
 .add-row {
   padding: 12px;

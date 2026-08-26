@@ -88,6 +88,32 @@ class PodManagerTest {
     }
 
     @Test
+    void listMocksIncludesStartingFailedAndRunningRows() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        IMap<String, MockPodRef> pods = mock(IMap.class);
+        @SuppressWarnings("unchecked")
+        IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+
+        when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
+        when(pods.entrySet()).thenReturn(Map.of(
+                "running", new MockPodRef("mock-fleet-running-1", "10.0.0.1")).entrySet());
+        when(lifecycles.entrySet()).thenReturn(Map.of(
+                "starting", MockPodLifecycle.starting("mock-fleet-starting-1"),
+                "failed", MockPodLifecycle.failed("mock-fleet-failed-1", "image pull failed")).entrySet());
+
+        assertEquals(List.of(
+                new PodManager.MockPodStatus("failed", "mock-fleet-failed-1", MockLifecycleStatus.FAILED,
+                        "image pull failed"),
+                new PodManager.MockPodStatus("running", "mock-fleet-running-1", MockLifecycleStatus.RUNNING, null),
+                new PodManager.MockPodStatus("starting", "mock-fleet-starting-1", MockLifecycleStatus.STARTING, null)
+        ), podManager.listMocks());
+    }
+
+    @Test
     void deleteMockReturnsNotFoundWhenMockIsMissing() {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager();
@@ -262,6 +288,7 @@ class PodManagerTest {
     void spawnPodCreatesPodWaitsForRunningStateAndReturnsPodRef() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodFactory podFactory = mock(PodFactory.class);
+        PodState podState = mock(PodState.class);
         WireMockOptions wireMockOptions = mock(WireMockOptions.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         @SuppressWarnings("unchecked")
@@ -269,6 +296,7 @@ class PodManagerTest {
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.podState = podState;
         podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -294,6 +322,7 @@ class PodManagerTest {
         assertEquals(new MockPodRef("custom-demo-1", "10.0.0.1"), spawnedPod);
         verify(podFactory).createPodSpec("custom-demo-", "demo", List.of("--verbose"), resources);
         verify(podHandle).create();
+        verify(podState).markStartupPodName("demo", "custom-demo-1");
         verify(podHandle).get();
         verify(kubernetesClient, never()).services();
     }
@@ -309,6 +338,7 @@ class PodManagerTest {
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.podState = mock(PodState.class);
         podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -346,6 +376,7 @@ class PodManagerTest {
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
+        podManager.podState = mock(PodState.class);
         podManager.wireMockOptions = wireMockOptions;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
