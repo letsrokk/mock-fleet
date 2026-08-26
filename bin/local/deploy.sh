@@ -96,17 +96,17 @@ mark_changed_modules() {
     while IFS= read -r path; do
         case "${path}" in
             fleet-proxy/*)
-                if ! has_module proxy "${changed_modules[@]}"; then
+                if ! has_module proxy ${changed_modules[@]+"${changed_modules[@]}"}; then
                     changed_modules+=(proxy)
                 fi
                 ;;
             fleet-api/*)
-                if ! has_module api "${changed_modules[@]}"; then
+                if ! has_module api ${changed_modules[@]+"${changed_modules[@]}"}; then
                     changed_modules+=(api)
                 fi
                 ;;
             fleet-dash/*)
-                if ! has_module dash "${changed_modules[@]}"; then
+                if ! has_module dash ${changed_modules[@]+"${changed_modules[@]}"}; then
                     changed_modules+=(dash)
                 fi
                 ;;
@@ -118,7 +118,9 @@ mark_changed_modules() {
         } | sort -u
     )
 
-    printf '%s\n' "${changed_modules[@]}"
+    if [[ ${#changed_modules[@]} -gt 0 ]]; then
+        printf '%s\n' "${changed_modules[@]}"
+    fi
 }
 
 build_maven_module() {
@@ -251,14 +253,18 @@ if ! release_exists; then
     CHANGED_MODULES=(proxy api dash)
     echo "Helm release ${RELEASE_NAME} is not installed in namespace ${NAMESPACE}; building all module images."
 else
-    mapfile -t CHANGED_MODULES < <(mark_changed_modules)
+    while IFS= read -r module; do
+        if [[ -n "${module}" ]]; then
+            CHANGED_MODULES+=("${module}")
+        fi
+    done < <(mark_changed_modules)
 fi
 
-if [[ -n "${REMOTE_DEV_MODULE}" ]] && ! has_module "${REMOTE_DEV_MODULE}" "${CHANGED_MODULES[@]}"; then
+if [[ -n "${REMOTE_DEV_MODULE}" ]] && ! has_module "${REMOTE_DEV_MODULE}" ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     CHANGED_MODULES+=("${REMOTE_DEV_MODULE}")
 fi
 
-echo "Modules selected for image rebuild: $(join_modules "${CHANGED_MODULES[@]}")."
+echo "Modules selected for image rebuild: $(join_modules ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"})."
 
 MAVEN_ARGS=(
     clean package
@@ -330,15 +336,15 @@ fi
 echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
-if has_module proxy "${CHANGED_MODULES[@]}"; then
+if has_module proxy ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     rollout_component proxy "$(deployment_name_for_component proxy)"
 fi
 
-if has_module api "${CHANGED_MODULES[@]}"; then
+if has_module api ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     rollout_component api "$(deployment_name_for_component api)"
 fi
 
-if has_module dash "${CHANGED_MODULES[@]}"; then
+if has_module dash ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     rollout_component dash "$(deployment_name_for_component dash)"
 fi
 

@@ -9,5 +9,5 @@ quarkus:
     jar:
       type: mutable-jar
   live-reload:
-    url: http://mock-fleet.localhost
+    url: https://mock-fleet.minikube.localhost
     password: mock-fleet-dev

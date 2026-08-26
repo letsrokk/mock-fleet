@@ -728,52 +728,70 @@ export default function App() {
 
   return (
     <main className="shell">
-      {message ? <div className="toast success">{message}</div> : null}
+      {message ? <div className="toast success" role="status">{message}</div> : null}
       {confirmDialog ? renderConfirmDialog() : null}
 
-      <section className="hero">
-        <p className="eyebrow">Mock Fleet</p>
-        <div className="hero-row">
-          <div>
+      <header className="app-header">
+        <div className="brand-row">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">MF</span>
+            <span>Mock Fleet</span>
+          </div>
+          <span className="brand-context">WireMock control plane</span>
+        </div>
+        <div className="page-bar">
+          <div className="page-copy">
             <h1>{tabTitle(activeTab)}</h1>
             <p className="subtitle">{tabSubtitle(activeTab, mappingsView.enabled)}</p>
           </div>
-        </div>
-        <div className="tab-controls">
-          <div className="tabs" role="tablist" aria-label="Mock Fleet views">
-            <button className={activeTab === "mocks" ? "tab active" : "tab"} onClick={() => selectTab("mocks")}>
-              Active Mocks
-            </button>
-            <button className={activeTab === "config" ? "tab active" : "tab"} onClick={() => selectTab("config")}>
-              Configuration
-            </button>
-            <button
-              className={activeTab === "mappings" ? "tab active" : "tab"}
-              onClick={() => selectTab("mappings")}
-              disabled={mappingsLoaded && !mappingsView.enabled}
-              title={mappingsTabTitle(mappingsLoaded, mappingsView.enabled, mappingsStatusError)}
-            >
-              Persisted Mappings
-            </button>
+          <div className="tab-controls">
+            <div className="tabs" role="group" aria-label="Mock Fleet views">
+              <button
+                className={activeTab === "mocks" ? "tab active" : "tab"}
+                onClick={() => selectTab("mocks")}
+                aria-label="Active Mocks"
+                aria-pressed={activeTab === "mocks"}
+              >
+                Mocks
+              </button>
+              <button
+                className={activeTab === "config" ? "tab active" : "tab"}
+                onClick={() => selectTab("config")}
+                aria-label="Configuration"
+                aria-pressed={activeTab === "config"}
+              >
+                Config
+              </button>
+              <button
+                className={activeTab === "mappings" ? "tab active" : "tab"}
+                onClick={() => selectTab("mappings")}
+                disabled={mappingsLoaded && !mappingsView.enabled}
+                title={mappingsTabTitle(mappingsLoaded, mappingsView.enabled, mappingsStatusError)}
+                aria-label="Persisted Mappings"
+                aria-pressed={activeTab === "mappings"}
+              >
+                Mappings
+              </button>
+            </div>
+            {activeTab !== "mocks" ? (
+              <button
+                className="refresh-button"
+                onClick={() => refreshActiveTab()}
+                disabled={activeTabLoading || refreshing}
+                aria-label={refreshing ? "Refreshing" : "Refresh"}
+              >
+                {activeTabLoading || refreshing ? (
+                  <span className="refresh-spinner" aria-hidden="true"></span>
+                ) : (
+                  <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+                )}
+              </button>
+            ) : null}
           </div>
-          {activeTab !== "mocks" ? (
-            <button
-              className="refresh-button"
-              onClick={() => refreshActiveTab()}
-              disabled={activeTabLoading || refreshing}
-              aria-label={refreshing ? "Refreshing" : "Refresh"}
-            >
-              {activeTabLoading || refreshing ? (
-                <span className="refresh-spinner" aria-hidden="true"></span>
-              ) : (
-                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
-              )}
-            </button>
-          ) : null}
         </div>
-      </section>
+      </header>
 
-      {error ? <p className="notice error">{error}</p> : null}
+      {error ? <p className="notice error" role="alert">{error}</p> : null}
 
       {activeTab === "mocks" ? renderMocksPanel() : null}
       {activeTab === "config" ? renderConfigPanel() : null}
@@ -821,7 +839,12 @@ export default function App() {
         </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
-        {!loadingMocks && rows.length === 0 ? <p className="state">No active mocks.</p> : null}
+        {!loadingMocks && rows.length === 0 ? (
+          <div className="empty-state">
+            <strong>No active mocks</strong>
+            <span>Send a request through the proxy to start a mock pod.</span>
+          </div>
+        ) : null}
         {!loadingMocks && rows.length > 0 && filteredRows.length === 0 ? (
           <p className="state">No active mocks match the filter.</p>
         ) : null}

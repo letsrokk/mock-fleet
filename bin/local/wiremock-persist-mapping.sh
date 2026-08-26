@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WIREMOCK_HOST=${WIREMOCK_HOST:-wiremock.mock-fleet.localhost}
-WIREMOCK_SCHEME=${WIREMOCK_SCHEME:-http}
+WIREMOCK_HOST=${WIREMOCK_HOST:-mock-fleet.minikube.localhost}
+WIREMOCK_SCHEME=${WIREMOCK_SCHEME:-https}
 
 usage() {
     cat <<EOF
@@ -54,7 +54,7 @@ if [[ "${WIREMOCK_SCHEME}" != "http" && "${WIREMOCK_SCHEME}" != "https" ]]; then
     exit 1
 fi
 
-WIREMOCK_SAVE_URL="${WIREMOCK_SCHEME}://${WIREMOCK_HOST}/__admin/mappings/save"
+WIREMOCK_SAVE_URL="${WIREMOCK_SCHEME}://${WIREMOCK_HOST}/wiremock/__admin/mappings/save"
 
 echo "Persisting WireMock mappings through ${WIREMOCK_SAVE_URL}"
 

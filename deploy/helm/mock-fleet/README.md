@@ -263,7 +263,7 @@ The UI-editable WireMock user ConfigMap is managed by `fleet-api` at runtime, no
 
 ## Local Minikube Values
 
-`values.minikube.yaml` enables ingress at `mock-fleet.localhost`, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values.
+`values.minikube.yaml` enables a Traefik ingress at `mock-fleet.minikube.localhost`, attaches it to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \

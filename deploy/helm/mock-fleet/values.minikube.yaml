@@ -1,12 +1,15 @@
 ingress:
   enabled: true
-  host: mock-fleet.localhost
-  className: nginx
+  host: mock-fleet.minikube.localhost
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
 
 fleet:
   proxy:
     routing:
-      mode: "HOST"
+      mode: "PATH"
     replicas: 1
   api:
     replicas: 2
