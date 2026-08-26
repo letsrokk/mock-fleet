@@ -42,8 +42,8 @@ public class FleetResource {
     }
 
     private List<MockRow> activeMocksSnapshot() {
-        return podManager.listActiveMocks().stream()
-                .map(activeMockPod -> new MockRow(activeMockPod.mockId(), activeMockPod.podName()))
+        return podManager.listMocks().stream()
+                .map(mock -> new MockRow(mock.mockId(), mock.podName(), mock.status(), mock.message()))
                 .toList();
     }
 
@@ -60,6 +60,6 @@ public class FleetResource {
         };
     }
 
-    public record MockRow(String mockId, String podName) {
+    public record MockRow(String mockId, String podName, MockLifecycleStatus status, String message) {
     }
 }

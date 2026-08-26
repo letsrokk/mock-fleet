@@ -43,7 +43,8 @@ class PodStateTest {
 
     @Test
     void getPodWithMappingFunctionCreatesAndStoresPodWhenMissing() {
-        PodState podState = podStateWithPodMap(podMap());
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
         MockPodRef createdPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
 
         when(podState.getPods().get("demo")).thenReturn(null);
@@ -51,13 +52,16 @@ class PodStateTest {
         MockPodRef pod = podState.getPod("demo", mockId -> createdPod);
 
         assertEquals(createdPod, pod);
+        verify(lifecycleMap).put("demo", MockPodLifecycle.starting(null));
         verify(podState.getPods()).put("demo", createdPod);
+        verify(lifecycleMap).remove("demo");
         verify(podState.getPods()).unlock("demo");
     }
 
     @Test
     void getPodWithMappingFunctionUnlocksWhenCreationFails() {
-        PodState podState = podStateWithPodMap(podMap());
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
         RuntimeException failure = new RuntimeException("creation failed");
 
         when(podState.getPods().get("demo")).thenReturn(null);
@@ -68,8 +72,29 @@ class PodStateTest {
                 }));
 
         assertSame(failure, thrown);
+        verify(lifecycleMap).put("demo", MockPodLifecycle.starting(null));
+        verify(lifecycleMap).put(
+                "demo",
+                MockPodLifecycle.failed(null, "creation failed"),
+                30,
+                TimeUnit.SECONDS);
         verify(podState.getPods(), never()).put("demo", new MockPodRef("mock-fleet-demo-1", "10.0.0.1"));
         verify(podState.getPods()).unlock("demo");
+    }
+
+    @Test
+    void failedLifecyclePreservesCreatedPodNameAndUsesConciseReason() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.starting("mock-fleet-demo-1"));
+
+        podState.markStartupFailed("demo", new RuntimeException("image pull failed\nstack detail"));
+
+        verify(lifecycleMap).put(
+                "demo",
+                MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"),
+                30,
+                TimeUnit.SECONDS);
     }
 
     @Test
@@ -93,11 +118,17 @@ class PodStateTest {
     }
 
     private PodState podStateWithPodMap(IMap<String, MockPodRef> podMap) {
+        return podStateWithMaps(podMap, lifecycleMap());
+    }
+
+    private PodState podStateWithMaps(IMap<String, MockPodRef> podMap,
+                                       IMap<String, MockPodLifecycle> lifecycleMap) {
         HazelcastInstance hazelcastInstance = mock(HazelcastInstance.class);
         @SuppressWarnings("unchecked")
         IMap<String, Long> lastAccessTimeMap = mock(IMap.class);
         when(hazelcastInstance.<String, MockPodRef>getMap("mock-pod-name-map")).thenReturn(podMap);
         when(hazelcastInstance.<String, Long>getMap("last-access-time-map")).thenReturn(lastAccessTimeMap);
+        when(hazelcastInstance.<String, MockPodLifecycle>getMap("mock-pod-lifecycle-map")).thenReturn(lifecycleMap);
         return new PodState(hazelcastInstance);
     }
 
@@ -105,5 +136,11 @@ class PodStateTest {
         @SuppressWarnings("unchecked")
         IMap<String, MockPodRef> podMap = mock(IMap.class);
         return podMap;
+    }
+
+    private IMap<String, MockPodLifecycle> lifecycleMap() {
+        @SuppressWarnings("unchecked")
+        IMap<String, MockPodLifecycle> lifecycleMap = mock(IMap.class);
+        return lifecycleMap;
     }
 }

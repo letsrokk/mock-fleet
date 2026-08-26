@@ -14,7 +14,9 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @ApplicationScoped
@@ -56,6 +58,20 @@ public class PodManager {
                 .toList();
     }
 
+    public List<MockPodStatus> listMocks() {
+        Map<String, MockPodStatus> mocks = new HashMap<>();
+        podState.getPodLifecycles().entrySet().forEach(entry -> {
+            MockPodLifecycle lifecycle = entry.getValue();
+            mocks.put(entry.getKey(), new MockPodStatus(
+                    entry.getKey(), lifecycle.podName(), lifecycle.status(), lifecycle.message()));
+        });
+        podState.getPods().entrySet().forEach(entry -> mocks.put(entry.getKey(),
+                new MockPodStatus(entry.getKey(), entry.getValue().podName(), MockLifecycleStatus.RUNNING, null)));
+        return mocks.values().stream()
+                .sorted(Comparator.comparing(MockPodStatus::mockId))
+                .toList();
+    }
+
     public DeleteMockResult deleteMock(String mockId) {
         MockPodRef pod = podState.getPod(mockId);
         if (pod == null) {
@@ -87,6 +103,7 @@ public class PodManager {
         pod = kubernetesClient.resource(pod)
                 .inNamespace(namespace)
                 .create();
+        podState.markStartupPodName(mockId, pod.getMetadata().getName());
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
         LOG.infof("Created pod '%s' for mock id '%s' in namespace '%s'.",
@@ -244,6 +261,9 @@ public class PodManager {
     }
 
     public record ActiveMockPod(String mockId, String podName) {
+    }
+
+    public record MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message) {
     }
 
     public enum DeleteMockResult {

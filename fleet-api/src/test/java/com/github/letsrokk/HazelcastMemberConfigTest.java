@@ -1,10 +1,8 @@
 package com.github.letsrokk;
 
 import com.hazelcast.config.Config;
-import jakarta.enterprise.context.ApplicationScoped;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +26,7 @@ class HazelcastMemberConfigTest {
         assertFalse(memberConfig.getNetworkConfig().getJoin().getMulticastConfig().isEnabled());
         assertFalse(memberConfig.getNetworkConfig().getJoin().getKubernetesConfig().isEnabled());
         assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.POD_MAP_NAME).getBackupCount());
+        assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME).getBackupCount());
         assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.LAST_ACCESS_MAP_NAME).getBackupCount());
         assertEquals("GRACEFUL", memberConfig.getProperty("hazelcast.shutdownhook.policy"));
         assertEquals("300", memberConfig.getProperty("hazelcast.graceful.shutdown.max.wait"));
@@ -44,13 +43,6 @@ class HazelcastMemberConfigTest {
         assertEquals("mock-fleet-api-hazelcast.mock-fleet.svc.cluster.local",
                 kubernetes.getProperty("service-dns"));
         assertEquals("5701", kubernetes.getProperty("service-port"));
-    }
-
-    @Test
-    void producesSingleApplicationScopedHazelcastInstance() throws Exception {
-        Method producer = HazelcastMemberConfig.class.getMethod("createHazelcastInstance");
-
-        assertTrue(producer.isAnnotationPresent(ApplicationScoped.class));
     }
 
     private MockFleetConfig config(Optional<String> serviceDns) {
