@@ -52,10 +52,28 @@ For all chart values and deployment options, see the [Helm chart README](deploy/
 For local Minikube development:
 
 ```bash
-bin/local/deploy.sh
+make local-deploy
 ```
 
 For an example Minikube cluster setup for local deployment and development, see [letsrokk/minikube](https://github.com/letsrokk/minikube).
+
+The local profile uses Traefik, HTTPS, and PATH routing. Run `minikube tunnel` while using the deployment, and trust the Minikube local CA in curl, your browser, and any development JVM. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
+
+The local lifecycle targets assume that Minikube is already running. Optional Make variables select deployment behavior without adding separate targets:
+
+```bash
+make local-deploy LOGS=true
+make local-deploy DEV=true                 # API remote development
+make local-deploy DEV=proxy
+make local-deploy DEV=proxy PORT_FORWARD=true
+make local-deploy NAMESPACE=test-fleet
+
+make local-destroy
+make local-destroy RELEASE=mock-fleet NAMESPACE=test-fleet
+make local-destroy DELETE_NAMESPACE=true
+```
+
+`DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. Run `make help` for the complete target and variable summary.
 
 ## License And Copyright
 

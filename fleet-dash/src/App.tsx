@@ -127,12 +127,6 @@ export default function App() {
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
     [configView, selectedMockId]
   );
-  const activeTabLoading = activeTab === "mocks"
-    ? loadingMocks
-    : activeTab === "config"
-      ? loadingConfig
-      : loadingMappings || loadingMappingsTree;
-
   async function loadConfig(showSpinner: boolean) {
     if (showSpinner) {
       setLoadingConfig(true);
@@ -421,7 +415,7 @@ export default function App() {
   }
 
   function selectTab(tab: Tab) {
-    if (tab === "mappings" && !mappingsView.enabled) {
+    if (tab === "mappings" && mappingsLoaded && !mappingsView.enabled && !mappingsStatusError) {
       return;
     }
     const nextHash = tabHash(tab);
@@ -728,52 +722,54 @@ export default function App() {
 
   return (
     <main className="shell">
-      {message ? <div className="toast success">{message}</div> : null}
+      {message ? <div className="toast success" role="status">{message}</div> : null}
       {confirmDialog ? renderConfirmDialog() : null}
 
-      <section className="hero">
-        <p className="eyebrow">Mock Fleet</p>
-        <div className="hero-row">
-          <div>
+      <header className="app-header">
+        <div className="brand-row">
+          <div className="brand">
+            <img className="brand-mark" src="./favicon.svg" alt="" aria-hidden="true" />
+            <span>Mock Fleet</span>
+          </div>
+          <span className="brand-context">WireMock control plane</span>
+        </div>
+        <div className="page-bar">
+          <div className="page-copy">
             <h1>{tabTitle(activeTab)}</h1>
             <p className="subtitle">{tabSubtitle(activeTab, mappingsView.enabled)}</p>
           </div>
-        </div>
-        <div className="tab-controls">
-          <div className="tabs" role="tablist" aria-label="Mock Fleet views">
-            <button className={activeTab === "mocks" ? "tab active" : "tab"} onClick={() => selectTab("mocks")}>
-              Active Mocks
+          <div className="tabs" role="group" aria-label="Mock Fleet views">
+            <button
+              className={activeTab === "mocks" ? "tab active" : "tab"}
+              onClick={() => selectTab("mocks")}
+              aria-label="Active Mocks"
+              aria-pressed={activeTab === "mocks"}
+            >
+              Mocks
             </button>
-            <button className={activeTab === "config" ? "tab active" : "tab"} onClick={() => selectTab("config")}>
-              Configuration
+            <button
+              className={activeTab === "config" ? "tab active" : "tab"}
+              onClick={() => selectTab("config")}
+              aria-label="Configuration"
+              aria-pressed={activeTab === "config"}
+            >
+              Config
             </button>
             <button
               className={activeTab === "mappings" ? "tab active" : "tab"}
               onClick={() => selectTab("mappings")}
-              disabled={mappingsLoaded && !mappingsView.enabled}
+              disabled={mappingsLoaded && !mappingsView.enabled && !mappingsStatusError}
               title={mappingsTabTitle(mappingsLoaded, mappingsView.enabled, mappingsStatusError)}
+              aria-label="Persisted Mappings"
+              aria-pressed={activeTab === "mappings"}
             >
-              Persisted Mappings
+              Mappings
             </button>
           </div>
-          {activeTab !== "mocks" ? (
-            <button
-              className="refresh-button"
-              onClick={() => refreshActiveTab()}
-              disabled={activeTabLoading || refreshing}
-              aria-label={refreshing ? "Refreshing" : "Refresh"}
-            >
-              {activeTabLoading || refreshing ? (
-                <span className="refresh-spinner" aria-hidden="true"></span>
-              ) : (
-                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
-              )}
-            </button>
-          ) : null}
         </div>
-      </section>
+      </header>
 
-      {error ? <p className="notice error">{error}</p> : null}
+      {error ? <p className="notice error" role="alert">{error}</p> : null}
 
       {activeTab === "mocks" ? renderMocksPanel() : null}
       {activeTab === "config" ? renderConfigPanel() : null}
@@ -785,14 +781,6 @@ export default function App() {
       </footer>
     </main>
   );
-
-  function refreshActiveTab() {
-    if (activeTab === "config") {
-      void loadConfig(false);
-    } else if (activeTab === "mappings") {
-      void loadMappings(false);
-    }
-  }
 
   function renderMocksPanel() {
     const filteredRows = rows.filter((row) =>
@@ -821,7 +809,12 @@ export default function App() {
         </div>
 
         {loadingMocks ? <p className="state">Loading active mocks...</p> : null}
-        {!loadingMocks && rows.length === 0 ? <p className="state">No active mocks.</p> : null}
+        {!loadingMocks && rows.length === 0 ? (
+          <div className="empty-state">
+            <strong>No active mocks</strong>
+            <span>Send a request through the proxy to start a mock pod.</span>
+          </div>
+        ) : null}
         {!loadingMocks && rows.length > 0 && filteredRows.length === 0 ? (
           <p className="state">No active mocks match the filter.</p>
         ) : null}
@@ -864,8 +857,33 @@ export default function App() {
   }
 
   function renderConfigPanel() {
-    if (loadingConfig || configView === null) {
-      return <section className="panel"><p className="state">Loading mocks config...</p></section>;
+    if (configView === null) {
+      const unavailableStatus = loadingConfig
+        ? "Loading configuration..."
+        : "Configuration unavailable.";
+
+      return (
+        <section className="panel">
+          <div className="panel-header">
+            <span>{unavailableStatus}</span>
+            <button
+              className="panel-refresh-button"
+              onClick={() => void loadConfig(false)}
+              disabled={loadingConfig || refreshing}
+              aria-label={refreshing ? "Refreshing configuration" : "Refresh configuration"}
+            >
+              {loadingConfig || refreshing ? (
+                <span className="refresh-spinner" aria-hidden="true"></span>
+              ) : (
+                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+              )}
+            </button>
+          </div>
+          <p className="state">
+            {loadingConfig ? "Loading mocks config..." : "Refresh to retry loading configuration."}
+          </p>
+        </section>
+      );
     }
 
     const groupedOptions = groupOptions(configView.options);
@@ -884,7 +902,21 @@ export default function App() {
                 ? `${filteredMockIds.length} of ${configView.mockIds.length} mock ids`
                 : `${configView.mockIds.length} mock ids`}
             </span>
-            <span className="panel-status">{refreshing ? "Updating..." : configDirty ? "Unsaved changes" : "Manual refresh"}</span>
+            <span className="panel-header-actions">
+              {configDirty ? <span className="panel-status">Unsaved changes</span> : null}
+              <button
+                className="panel-refresh-button"
+                onClick={() => void loadConfig(false)}
+                disabled={loadingConfig || refreshing}
+                aria-label={refreshing ? "Refreshing configuration" : "Refresh configuration"}
+              >
+                {loadingConfig || refreshing ? (
+                  <span className="refresh-spinner" aria-hidden="true"></span>
+                ) : (
+                  <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+                )}
+              </button>
+            </span>
           </div>
           <div className="add-row">
             <input
@@ -1076,8 +1108,29 @@ export default function App() {
     if (!mappingsView.enabled) {
       return (
         <section className="panel">
+          <div className="panel-header">
+            <span>
+              {loadingMappings
+                ? "Checking mappings storage..."
+                : mappingsStatusError ? "Mappings unavailable." : "Mappings storage disabled"}
+            </span>
+            <button
+              className="panel-refresh-button"
+              onClick={() => void loadMappings(false)}
+              disabled={loadingMappings || refreshing}
+              aria-label={refreshing ? "Refreshing mappings" : "Refresh mappings"}
+            >
+              {loadingMappings || refreshing ? (
+                <span className="refresh-spinner" aria-hidden="true"></span>
+              ) : (
+                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+              )}
+            </button>
+          </div>
           <p className="state">
-            {mappingsLoaded
+            {mappingsStatusError
+              ? "Refresh to retry loading mappings."
+              : mappingsLoaded
               ? "Persistent mappings storage is disabled."
               : "Checking mappings storage..."}
           </p>
@@ -1097,7 +1150,21 @@ export default function App() {
                 ? `${filteredMockIds.length} of ${mappingsView.mockIds.length} mapping folders`
                 : `${mappingsView.mockIds.length} mapping folders`}
             </span>
-            <span className="panel-status">{refreshing ? "Updating..." : mappingsStatusError ? "Listing issue" : "Manual refresh"}</span>
+            <span className="panel-header-actions">
+              {mappingsStatusError ? <span className="panel-status">Listing issue</span> : null}
+              <button
+                className="panel-refresh-button"
+                onClick={() => void loadMappings(false)}
+                disabled={loadingMappings || loadingMappingsTree || refreshing}
+                aria-label={refreshing ? "Refreshing mappings" : "Refresh mappings"}
+              >
+                {loadingMappings || loadingMappingsTree || refreshing ? (
+                  <span className="refresh-spinner" aria-hidden="true"></span>
+                ) : (
+                  <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+                )}
+              </button>
+            </span>
           </div>
           <div className="filter-row">
             <input

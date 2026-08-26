@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WIREMOCK_HOST=${WIREMOCK_HOST:-wiremock.mock-fleet.localhost}
-WIREMOCK_SCHEME=${WIREMOCK_SCHEME:-http}
+WIREMOCK_HOST=${WIREMOCK_HOST:-mock-fleet.minikube.localhost}
+WIREMOCK_SCHEME=${WIREMOCK_SCHEME:-https}
 PROXY_BASE_URL=${PROXY_BASE_URL:-https://wiremock.org}
 
 usage() {
@@ -65,7 +65,7 @@ if [[ "${WIREMOCK_SCHEME}" != "http" && "${WIREMOCK_SCHEME}" != "https" ]]; then
     exit 1
 fi
 
-WIREMOCK_ADMIN_URL="${WIREMOCK_SCHEME}://${WIREMOCK_HOST}/__admin/mappings"
+WIREMOCK_ADMIN_URL="${WIREMOCK_SCHEME}://${WIREMOCK_HOST}/wiremock/__admin/mappings"
 
 echo "Creating WireMock proxy mapping at ${WIREMOCK_ADMIN_URL} -> ${PROXY_BASE_URL}"
 
