@@ -6,9 +6,11 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -35,15 +37,28 @@ public class MappingsService {
         }
 
         try (Stream<Path> children = Files.list(root)) {
-            List<String> mockIds = children
+            List<Path> mockDirectories = children
                     .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-                    .map(path -> path.getFileName().toString())
-                    .filter(mockId -> VALID_MOCK_ID.matcher(mockId).matches())
-                    .sorted()
                     .toList();
+            List<String> mockIds = new ArrayList<>();
+            for (Path directory : mockDirectories) {
+                String mockId = directory.getFileName().toString();
+                if (VALID_MOCK_ID.matcher(mockId).matches() && containsMappingFile(directory)) {
+                    mockIds.add(mockId);
+                }
+            }
+            mockIds.sort(String::compareTo);
             return new MappingsView(true, mockIds, null, routing);
         } catch (IOException e) {
             return new MappingsView(true, List.of(), "Unable to list mappings root: " + ioErrorMessage(e), routing);
+        }
+    }
+
+    private boolean containsMappingFile(Path directory) throws IOException {
+        try (Stream<Path> paths = Files.walk(directory)) {
+            return paths.anyMatch(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS));
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
         }
     }
 

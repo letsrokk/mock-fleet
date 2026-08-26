@@ -50,10 +50,14 @@ class MappingsServiceTest {
     }
 
     @Test
-    void listsOnlyValidMockDirectories() throws IOException {
-        Files.createDirectories(mappingsRoot.resolve("beta"));
+    void listsOnlyValidNonEmptyMockDirectories() throws IOException {
+        Files.createDirectories(mappingsRoot.resolve("beta/nested"));
         Files.createDirectories(mappingsRoot.resolve("alpha"));
         Files.createDirectories(mappingsRoot.resolve("not_valid"));
+        Files.createDirectories(mappingsRoot.resolve("empty/nested"));
+        Files.writeString(mappingsRoot.resolve("beta/nested/mapping.json"), "{}");
+        Files.writeString(mappingsRoot.resolve("alpha/mapping.json"), "{}");
+        Files.writeString(mappingsRoot.resolve("not_valid/mapping.json"), "{}");
         Files.writeString(mappingsRoot.resolve("file.json"), "{}");
         MappingsService service = service(true);
 
