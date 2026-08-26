@@ -116,17 +116,9 @@ textarea:focus-visible {
 }
 
 .brand-mark {
-  display: inline-grid;
-  place-items: center;
+  display: block;
   width: 30px;
   height: 30px;
-  border-radius: 7px;
-  color: #08150f;
-  background: var(--accent);
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: -0.04em;
 }
 
 .brand-context {
@@ -163,18 +155,13 @@ h1 {
   text-wrap: pretty;
 }
 
-.tab-controls,
 .tabs {
   display: flex;
   align-items: center;
 }
 
-.tab-controls {
-  flex: 0 0 auto;
-  gap: 8px;
-}
-
 .tabs {
+  flex: 0 0 auto;
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--border);
@@ -210,14 +197,12 @@ h1 {
   opacity: 0.48;
 }
 
-.refresh-button,
+.panel-refresh-button,
 .danger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
   padding: 0;
   border-radius: var(--radius-control);
   cursor: pointer;
@@ -225,17 +210,21 @@ h1 {
   transition: background var(--transition), border-color var(--transition), opacity var(--transition), transform var(--transition);
 }
 
-.refresh-button {
+.panel-refresh-button {
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border-strong);
   background: var(--surface);
 }
 
-.refresh-button:hover:not(:disabled) {
+.panel-refresh-button:hover:not(:disabled) {
   border-color: #4d627e;
   background: var(--surface-raised);
 }
 
 .danger-button {
+  width: 40px;
+  height: 40px;
   border: 1px solid #5a2b36;
   background: var(--danger-surface);
 }
@@ -245,10 +234,10 @@ h1 {
   background: #4b222d;
 }
 
-.refresh-button:active:not(:disabled),
+.panel-refresh-button:active:not(:disabled),
 .danger-button:active:not(:disabled) { transform: translateY(1px); }
 
-.refresh-button:disabled,
+.panel-refresh-button:disabled,
 .danger-button:disabled {
   cursor: wait;
   opacity: 0.62;
@@ -394,6 +383,13 @@ h1 {
 .panel-status {
   color: var(--text-muted);
   font-size: 0.78rem;
+}
+
+.panel-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .sse-status {
@@ -906,7 +902,7 @@ tr:last-child td { border-bottom: 0; }
 }
 
 .tab:focus-visible,
-.refresh-button:focus-visible,
+.panel-refresh-button:focus-visible,
 .danger-button:focus-visible,
 .primary-button:focus-visible,
 .secondary-button:focus-visible,
@@ -968,8 +964,6 @@ tr:last-child td { border-bottom: 0; }
     gap: 18px;
   }
 
-  .tab-controls { justify-content: space-between; }
-
   .config-layout { grid-template-columns: 1fr; }
 
   .mock-list { position: static; }
@@ -995,9 +989,6 @@ tr:last-child td { border-bottom: 0; }
     padding: 0 7px;
     font-size: 0.78rem;
   }
-
-  .tab-controls { align-items: stretch; }
-  .refresh-button { height: 42px; }
 
   .dialog-actions,
   .editor-actions,
