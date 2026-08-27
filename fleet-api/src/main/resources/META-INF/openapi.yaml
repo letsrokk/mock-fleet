@@ -153,11 +153,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/FileNode"
         "400":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "404":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "503":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
   /__fleet/api/mappings/{mockId}:
     parameters:
       - $ref: "#/components/parameters/MockId"
@@ -167,9 +167,9 @@ paths:
         "204":
           description: Folder absent or deleted.
         "400":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "503":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
   /__fleet/api/mappings/{mockId}/files:
     parameters:
       - $ref: "#/components/parameters/MockId"
@@ -189,20 +189,20 @@ paths:
                 type: string
                 format: binary
         "400":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "404":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "503":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
     delete:
       operationId: deleteMappingFile
       responses:
         "204":
           description: File absent or deleted.
         "400":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
         "503":
-          $ref: "#/components/responses/TextError"
+          $ref: "#/components/responses/ApiError"
   /__fleet/api/version:
     get:
       operationId: getApiVersion
@@ -233,12 +233,6 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ApiError"
-    TextError:
-      description: Mapping file operation failure.
-      content:
-        text/plain:
-          schema:
-            type: string
   schemas:
     MockLifecycle:
       type: string

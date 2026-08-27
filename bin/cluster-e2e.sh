@@ -249,6 +249,29 @@ mcp_expect_error() {
   jq -c '.structuredContent.error' <<<"${result}"
 }
 
+assert_mock_starting_contract() {
+  local result=$1
+  local mock_id=$2
+  assert_jq "${result}" ".isError == true
+    and .structuredContent.error.code == \"MOCK_STARTING\"
+    and .structuredContent.error.retryable == true
+    and .structuredContent.error.stateMayHaveChanged == false
+    and .structuredContent.error.details.mockId == \"${mock_id}\"
+    and .structuredContent.error.details.status == \"STARTING\"
+    and .structuredContent.error.details.retryAfterMs == 1000" \
+    "WireMock tool did not return the complete MOCK_STARTING contract"
+}
+
+assert_persistent_restart_state() {
+  local result=$1
+  local surviving_stub_id=$2
+  local deleted_stub_id=$3
+  assert_jq "${result}" ".stubs
+    | (any((.id // .uuid) == \"${surviving_stub_id}\"))
+      and (all((.id // .uuid) != \"${deleted_stub_id}\"))" \
+    "Persistent restart did not preserve the updated stub and deletion"
+}
+
 poll_mcp_success() {
   local tool=$1
   local arguments=$2
@@ -325,8 +348,27 @@ verify_api_replicas() {
   done
 }
 
+api_replicas_have_cpu_request() {
+  local mock_id=$1
+  local expected_cpu=$2
+  local pod config
+  local ready_pods=()
+  while IFS= read -r pod; do
+    [[ -n "${pod}" ]] && ready_pods+=("${pod}")
+  done < <(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o json | jq -r \
+      '.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.conditions[]?; .type == "Ready" and .status == "True")) | .metadata.name')
+  [[ ${#ready_pods[@]} -eq 2 ]] || return 1
+  for pod in "${ready_pods[@]}"; do
+    config=$(kubectl get --raw "/api/v1/namespaces/${namespace}/pods/${pod}:8080/proxy/__fleet/api/config") || return 1
+    jq -e --arg id "${mock_id}" --arg cpu "${expected_cpu}" \
+      '.mocks[] | select(.mockId == $id) | .effective.resources.requests.cpu == $cpu' \
+      >/dev/null <<<"${config}" || return 1
+  done
+}
+
 run_contracts() {
-  local config rv mutation current_rv invalid_rv lifecycle result stub_id unmatched_stub_id candidate_id body_args
+  local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args
   local main_mock="m-${run_id:0:18}"
   local cold_mock="cold-${run_id:0:16}"
   local cleanup_mock="stop-${run_id:0:16}"
@@ -376,9 +418,33 @@ run_contracts() {
   kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
   verify_api_replicas "${main_mock}" --disable-banner
 
-  log "Checking cold-start retry and STARTING cleanup."
-  lifecycle=$(mcp_success start_mock "$(jq -cn --arg id "${cold_mock}" '{mockId:$id}')")
-  assert_jq "${lifecycle}" '.status == "STARTING" or .status == "RUNNING"' "start_mock returned an invalid lifecycle"
+  log "Checking deterministic cold-start retry and STARTING cleanup."
+  api_request DELETE "/__fleet/api/mocks/${cold_mock}"
+  [[ "${api_status}" == 200 ]] || fail "Cold mock cleanup returned ${api_status}: ${api_body}"
+  assert_jq "${api_body}" '.status == "STOPPED"' "Cold mock did not begin from STOPPED"
+  api_request GET /__fleet/api/mocks
+  assert_jq "${api_body}" "[.[] | select(.mockId == \"${cold_mock}\" and .status != \"STOPPED\")] | length == 0" \
+    "Cold mock still had an active lifecycle before the WireMock tool call"
+
+  api_request GET /__fleet/api/config
+  rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+  mutation=$(jq -cn --arg rv "${rv}" \
+    '{resourceVersion:$rv,options:[],resources:{requests:{cpu:"1000000"},limits:{cpu:"1000000"}},applyMode:"futureOnly"}')
+  api_request PUT "/__fleet/api/config/${cold_mock}" "${mutation}"
+  [[ "${api_status}" == 200 ]] || fail "Cold-start delay config returned ${api_status}: ${api_body}"
+  assert_jq "${api_body}" '.apply.lifecycle == "STOPPED"' "Cold-start delay config activated the stopped mock"
+  poll_until "cold-start delay config on both API replicas" \
+    api_replicas_have_cpu_request "${cold_mock}" 1000000
+
+  result=$(mcp_tool_raw list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10,offset:0}')")
+  assert_mock_starting_contract "${result}" "${cold_mock}"
+
+  api_request GET /__fleet/api/config
+  rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+  mutation=$(jq -cn --arg rv "${rv}" '{resourceVersion:$rv,options:[],resources:null,applyMode:"restartActive"}')
+  api_request PUT "/__fleet/api/config/${cold_mock}" "${mutation}"
+  [[ "${api_status}" == 200 ]] || fail "Cold-start delay release returned ${api_status}: ${api_body}"
+  assert_jq "${api_body}" '.apply.lifecycle == "STARTING"' "Cold mock was not restarted with schedulable resources"
   result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10,offset:0}')")
   assert_jq "${result}" ".mockId == \"${cold_mock}\" and (.stubs | type == \"array\")" "Cold mock never became usable"
 
@@ -400,7 +466,18 @@ run_contracts() {
   result=$(mcp_success update_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" --argjson mapping "${config}" '{mockId:$id,stubId:$stub,mapping:$mapping}')")
   assert_jq "${result}" '.stub.persistent == true and .stub.response.body == "persisted-v2"' \
     "Persistent update did not preserve persistence and replacement"
+
+  config=$(cat "${fixture_dir}/persistent-stub-deleted.json")
+  result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
+  deleted_stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
+  [[ -n "${deleted_stub_id}" && "${deleted_stub_id}" != null ]] \
+    || fail "Persistent deletion setup did not return a stub ID: ${result}"
+  mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${deleted_stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
+  mcp_success delete_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${deleted_stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
+
   mcp_success stop_mock "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
+  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:200,offset:0}')")
+  assert_persistent_restart_state "${result}" "${stub_id}" "${deleted_stub_id}"
   poll_mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/persistent"}')" >"${work_dir}/persistent-response"
   result=$(cat "${work_dir}/persistent-response")
   assert_jq "${result}" '.response.status == 200 and .response.body.encoding == "utf8" and .response.body.data == "persisted-v2"' \
@@ -484,13 +561,26 @@ run_contracts() {
 
 self_test() {
   bash -n "$0"
-  [[ -s "${fixture_dir}/persistent-stub.json" && -s "${fixture_dir}/persistent-stub-updated.json" ]] \
+  [[ -s "${fixture_dir}/persistent-stub.json" && -s "${fixture_dir}/persistent-stub-updated.json" \
+    && -s "${fixture_dir}/persistent-stub-deleted.json" ]] \
     || fail "Cluster fixtures are missing."
   [[ "${namespace}" == mock-fleet-e2e-* && "${bucket}" == mock-fleet-e2e-* && "${namespace}" != "${bucket}" ]] \
     || fail "Run resources are not isolated."
   local dry_output
   dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
   grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."
+  local starting_result='{"isError":true,"structuredContent":{"error":{"code":"MOCK_STARTING","message":"Mock self-test is still starting","retryable":true,"stateMayHaveChanged":false,"details":{"mockId":"self-test","status":"STARTING","retryAfterMs":1000}}}}'
+  assert_mock_starting_contract "${starting_result}" self-test
+  if ( assert_mock_starting_contract '{"isError":false}' self-test >/dev/null 2>&1 ); then
+    fail "Cold-start assertion accepted a successful WireMock result."
+  fi
+  log "MOCK_STARTING error contract passed."
+  local persistent_result='{"stubs":[{"id":"survivor"},{"id":"other"}]}'
+  assert_persistent_restart_state "${persistent_result}" survivor deleted
+  if ( assert_persistent_restart_state "${persistent_result}" survivor other >/dev/null 2>&1 ); then
+    fail "Persistent restart assertion accepted a deleted stub."
+  fi
+  log "Persistent restart state contract passed."
   log "Self-test passed."
 }
 

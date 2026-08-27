@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -37,16 +38,16 @@ class MappingsServiceTest {
     void disabledStorageRejectsTreeAndFileOperations() {
         MappingsService service = service(false);
 
-        WebApplicationException treeException = assertThrows(WebApplicationException.class,
+        ApiException treeException = assertThrows(ApiException.class,
                 () -> service.tree("demo"));
-        WebApplicationException fileException = assertThrows(WebApplicationException.class,
+        ApiException fileException = assertThrows(ApiException.class,
                 () -> service.file("demo", "mapping.json"));
-        WebApplicationException folderException = assertThrows(WebApplicationException.class,
+        ApiException folderException = assertThrows(ApiException.class,
                 () -> service.deleteFolder("demo"));
 
-        assertEquals(503, treeException.getResponse().getStatus());
-        assertEquals(503, fileException.getResponse().getStatus());
-        assertEquals(503, folderException.getResponse().getStatus());
+        assertApiError(treeException, 503, "MAPPINGS_STORAGE_DISABLED", false, Map.of());
+        assertApiError(fileException, 503, "MAPPINGS_STORAGE_DISABLED", false, Map.of());
+        assertApiError(folderException, 503, "MAPPINGS_STORAGE_DISABLED", false, Map.of());
     }
 
     @Test
@@ -140,6 +141,22 @@ class MappingsServiceTest {
     }
 
     @Test
+    void unsafePathsAndMockIdsReturnStructuredErrors() throws IOException {
+        Files.createDirectories(mappingsRoot.resolve("demo"));
+        MappingsService service = service(true);
+
+        ApiException unsafePath = assertThrows(ApiException.class,
+                () -> service.file("demo", "../other.json"));
+        ApiException invalidMockId = assertThrows(ApiException.class,
+                () -> service.tree("demo_1"));
+
+        assertApiError(unsafePath, 400, "INVALID_MAPPING_PATH", false,
+                Map.of("mockId", "demo", "path", "../other.json"));
+        assertApiError(invalidMockId, 400, "INVALID_MOCK_ID", false,
+                Map.of("mockId", "demo_1"));
+    }
+
+    @Test
     void rejectsDirectoriesAsFiles() throws IOException {
         Files.createDirectories(mappingsRoot.resolve("demo/nested"));
         MappingsService service = service(true);
@@ -148,6 +165,28 @@ class MappingsServiceTest {
                 () -> service.file("demo", "nested"));
 
         assertEquals(404, exception.getResponse().getStatus());
+    }
+
+    @Test
+    void missingFilesReturnStructuredErrors() {
+        MappingsService service = service(true);
+
+        ApiException exception = assertThrows(ApiException.class,
+                () -> service.file("demo", "missing.json"));
+
+        assertApiError(exception, 404, "MAPPING_FILE_NOT_FOUND", false,
+                Map.of("mockId", "demo", "path", "missing.json"));
+    }
+
+    private void assertApiError(ApiException exception, int status, String code, boolean retryable,
+                                Map<String, Object> details) {
+        assertEquals(status, exception.getResponse().getStatus());
+        assertEquals("application/json", exception.getResponse().getMediaType().toString());
+        ApiError error = (ApiError) exception.getResponse().getEntity();
+        assertEquals(code, error.code());
+        assertEquals(retryable, error.retryable());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(details, error.details());
     }
 
     private MappingsService service(boolean persistent) {

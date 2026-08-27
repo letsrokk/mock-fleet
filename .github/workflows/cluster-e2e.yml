@@ -3,11 +3,6 @@ name: Cluster E2E
 on:
   workflow_dispatch:
     inputs:
-      runner_labels:
-        description: JSON array selecting a prepared Minikube/SeaweedFS runner.
-        required: true
-        default: '["self-hosted","linux","mock-fleet-e2e"]'
-        type: string
       keep_failed_resources:
         description: Keep the isolated namespace and bucket after a failed run.
         required: false
@@ -24,7 +19,7 @@ concurrency:
 jobs:
   cluster-e2e:
     name: Minikube and SeaweedFS contracts
-    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    runs-on: [self-hosted, linux, mock-fleet-e2e]
     timeout-minutes: 45
     env:
       MOCK_FLEET_E2E_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
