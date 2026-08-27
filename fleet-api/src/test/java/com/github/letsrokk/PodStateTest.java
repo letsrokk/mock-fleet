@@ -92,18 +92,68 @@ class PodStateTest {
     }
 
     @Test
-    void failedAttemptCanBeClaimedForRetry() {
+    void failedAttemptWithNamedPodIsClaimedForCleanupBeforeRetry() {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap, lifecycleMap);
-        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.failed(
-                "attempt-1", "mock-fleet-demo-1", "image pull failed"));
+        MockPodLifecycle failed = MockPodLifecycle.failed(
+                "attempt-1", "mock-fleet-demo-1", "image pull failed");
+        when(lifecycleMap.get("demo")).thenReturn(failed);
 
         PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 1_000L);
 
         assertEquals(true, claim.claimed());
         assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
+        assertEquals("mock-fleet-demo-1", claim.lifecycle().podName());
+        assertEquals("mock-fleet-demo-1", claim.previousPodName());
         verify(lifecycleMap).put("demo", claim.lifecycle());
+        when(lifecycleMap.get("demo")).thenReturn(claim.lifecycle());
+        assertEquals(false, podState.completeStart("demo", "attempt-1",
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1")));
+    }
+
+    @Test
+    void stoppedDeletionRetryWithNamedPodIsClaimedForCleanupBeforeStart() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.stopped("mock-fleet-demo-1"));
+
+        PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 1_000L);
+
+        assertEquals(true, claim.claimed());
+        assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
+        assertEquals("mock-fleet-demo-1", claim.lifecycle().podName());
+        assertEquals("mock-fleet-demo-1", claim.previousPodName());
+        verify(lifecycleMap).put("demo", claim.lifecycle());
+    }
+
+    @Test
+    void absentStartDoesNotInventAPredecessorPodName() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+
+        PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 1_000L);
+
+        assertEquals(true, claim.claimed());
+        assertEquals(null, claim.lifecycle().podName());
+        assertEquals(null, claim.previousPodName());
+    }
+
+    @Test
+    void namelessFailedStartDoesNotInventAPredecessorPodName() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.failed(
+                "attempt-1", null, "image pull failed"));
+
+        PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 1_000L);
+
+        assertEquals(true, claim.claimed());
+        assertEquals(null, claim.lifecycle().podName());
+        assertEquals(null, claim.previousPodName());
     }
 
     @Test

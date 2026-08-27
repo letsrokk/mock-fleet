@@ -56,9 +56,9 @@ public class PodState {
             if (isFreshStartingAttempt(current, nowEpochMillis, startupLeaseMillis)) {
                 return new StartClaim(false, current, null, null);
             }
-            String previousPodName = current != null && current.status() == MockLifecycleStatus.STARTING
-                    ? current.podName()
-                    : null;
+            String previousPodName = current == null || current.podName() == null || current.podName().isBlank()
+                    ? null
+                    : current.podName();
             String attemptId = UUID.randomUUID().toString();
             MockPodLifecycle starting = MockPodLifecycle.starting(attemptId, previousPodName, nowEpochMillis);
             podLifecycleMap.put(mockId, starting);

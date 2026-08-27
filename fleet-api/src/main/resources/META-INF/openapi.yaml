@@ -290,7 +290,6 @@ components:
           additionalProperties: true
     ResourceData:
       type: object
-      required: [requests, limits]
       properties:
         requests:
           type: object

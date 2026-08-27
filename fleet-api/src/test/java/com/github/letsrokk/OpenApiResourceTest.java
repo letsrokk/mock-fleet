@@ -116,6 +116,25 @@ class OpenApiResourceTest {
         assertTrue(schema.path("properties").has("applyMode"));
     }
 
+    @Test
+    void documentsDefaultedResourceMapsAsOptional() throws Exception {
+        String document = given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+        JsonNode schema = new ObjectMapper().readTree(document)
+                .path("components")
+                .path("schemas")
+                .path("ResourceData");
+
+        assertTrue(schema.path("required").isMissingNode() || schema.path("required").isEmpty());
+        assertTrue(schema.path("properties").has("requests"));
+        assertTrue(schema.path("properties").has("limits"));
+    }
+
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {
         for (String status : statuses) {
             JsonNode response = root.path("paths").path(path).path(operation).path("responses").path(status);
