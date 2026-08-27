@@ -9,11 +9,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -23,64 +20,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.ArgumentCaptor;
 
 class PodStateTest {
-
-    @Test
-    void getPodWithMappingFunctionReturnsExistingPodWithoutCreating() {
-        PodState podState = podStateWithPodMap(podMap());
-        MockPodRef existingPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
-        @SuppressWarnings("unchecked")
-        Function<String, MockPodRef> mappingFunction = mock(Function.class);
-
-        when(podState.getPods().get("demo")).thenReturn(existingPod);
-
-        MockPodRef pod = podState.getPod("demo", mappingFunction);
-
-        assertEquals(existingPod, pod);
-        verify(mappingFunction, never()).apply("demo");
-        verify(podState.getPods(), never()).put("demo", existingPod);
-        verify(podState.getPods()).unlock("demo");
-    }
-
-    @Test
-    void getPodWithMappingFunctionCreatesAndStoresPodWhenMissing() {
-        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
-        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
-        MockPodRef createdPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
-
-        when(podState.getPods().get("demo")).thenReturn(null);
-
-        MockPodRef pod = podState.getPod("demo", mockId -> createdPod);
-
-        assertEquals(createdPod, pod);
-        verify(lifecycleMap).put("demo", MockPodLifecycle.starting(null));
-        verify(podState.getPods()).put("demo", createdPod);
-        verify(lifecycleMap).remove("demo");
-        verify(podState.getPods()).unlock("demo");
-    }
-
-    @Test
-    void getPodWithMappingFunctionUnlocksWhenCreationFails() {
-        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
-        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
-        RuntimeException failure = new RuntimeException("creation failed");
-
-        when(podState.getPods().get("demo")).thenReturn(null);
-
-        RuntimeException thrown = assertThrows(RuntimeException.class,
-                () -> podState.getPod("demo", mockId -> {
-                    throw failure;
-                }));
-
-        assertSame(failure, thrown);
-        verify(lifecycleMap).put("demo", MockPodLifecycle.starting(null));
-        verify(lifecycleMap).put(
-                "demo",
-                MockPodLifecycle.failed(null, "creation failed"),
-                30,
-                TimeUnit.SECONDS);
-        verify(podState.getPods(), never()).put("demo", new MockPodRef("mock-fleet-demo-1", "10.0.0.1"));
-        verify(podState.getPods()).unlock("demo");
-    }
 
     @Test
     void failedLifecyclePreservesCreatedPodNameAndUsesConciseReason() {
@@ -95,6 +34,65 @@ class PodStateTest {
                 MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"),
                 30,
                 TimeUnit.SECONDS);
+    }
+
+    @Test
+    void claimStartDoesNotCreateADuplicateAttemptWhileStartupIsInProgress() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1");
+        when(lifecycleMap.get("demo")).thenReturn(starting);
+
+        PodState.StartClaim claim = podState.claimStart("demo");
+
+        assertEquals(false, claim.claimed());
+        assertEquals(starting, claim.lifecycle());
+        verify(lifecycleMap, never()).put(eq("demo"), any());
+    }
+
+    @Test
+    void failedAttemptCanBeClaimedForRetry() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.failed(
+                "attempt-1", "mock-fleet-demo-1", "image pull failed"));
+
+        PodState.StartClaim claim = podState.claimStart("demo");
+
+        assertEquals(true, claim.claimed());
+        assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
+        verify(lifecycleMap).put("demo", claim.lifecycle());
+    }
+
+    @Test
+    void stoppedAttemptRejectsLatePodCompletion() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.stopped());
+        MockPodRef latePod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+
+        boolean accepted = podState.completeStart("demo", "attempt-1", latePod);
+
+        assertEquals(false, accepted);
+        verify(podMap, never()).put("demo", latePod);
+    }
+
+    @Test
+    void stopKeepsPodNameUntilKubernetesDeletionIsConfirmed() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(podMap.remove("demo")).thenReturn(pod);
+
+        PodState.StopClaim result = podState.stop("demo");
+
+        assertEquals("mock-fleet-demo-1", result.podName());
+        verify(lifecycleMap).put("demo", new MockPodLifecycle(
+                null, "mock-fleet-demo-1", MockLifecycleStatus.STOPPED, null));
     }
 
     @Test

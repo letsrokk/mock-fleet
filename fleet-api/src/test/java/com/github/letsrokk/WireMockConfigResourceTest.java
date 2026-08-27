@@ -34,6 +34,8 @@ class WireMockConfigResourceTest {
                 .body("mockIds[0]", is("demo"))
                 .body("savedMockIds[0]", is("demo"))
                 .body("mocks[0].mockId", is("demo"))
+                .body("mocks[0].lifecycle", is("RUNNING"))
+                .body("mocks[0].active", nullValue())
                 .body("mocks[0].user.resources", nullValue())
                 .body("mocks[0].effective.options[0]", is("--verbose"))
                 .body("options[0].name", is("--verbose"));
@@ -48,7 +50,8 @@ class WireMockConfigResourceTest {
                 List.of("--verbose"),
                 new WireMockConfigService.ResourceData(Map.of(), Map.of()),
                 "restartActive");
-        when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(configView());
+        when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(mutation(
+                "restartActive", MockLifecycleStatus.STARTING));
 
         given()
                 .contentType("application/json")
@@ -57,7 +60,10 @@ class WireMockConfigResourceTest {
                 .put("/__fleet/api/config/demo")
         .then()
                 .statusCode(200)
-                .body("mockIds[0]", is("demo"));
+                .body("config.mockIds[0]", is("demo"))
+                .body("apply.mockId", is("demo"))
+                .body("apply.mode", is("restartActive"))
+                .body("apply.lifecycle", is("STARTING"));
 
         verify(configService).upsertMockConfig(eq("demo"), eq(request));
     }
@@ -69,7 +75,8 @@ class WireMockConfigResourceTest {
                 List.of(),
                 null,
                 "futureOnly");
-        when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(configView());
+        when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(mutation(
+                "futureOnly", MockLifecycleStatus.STOPPED));
 
         given()
                 .contentType("application/json")
@@ -91,7 +98,8 @@ class WireMockConfigResourceTest {
                 null,
                 null,
                 "futureOnly");
-        when(configService.deleteMockConfig(eq("demo"), eq(request))).thenReturn(configView());
+        when(configService.deleteMockConfig(eq("demo"), eq(request))).thenReturn(mutation(
+                "futureOnly", MockLifecycleStatus.STOPPED));
 
         given()
                 .contentType("application/json")
@@ -100,7 +108,8 @@ class WireMockConfigResourceTest {
                 .delete("/__fleet/api/config/demo")
         .then()
                 .statusCode(200)
-                .body("mockIds[0]", is("demo"));
+                .body("config.mockIds[0]", is("demo"))
+                .body("apply.lifecycle", is("STOPPED"));
 
         verify(configService).deleteMockConfig(eq("demo"), eq(request));
     }
@@ -112,9 +121,8 @@ class WireMockConfigResourceTest {
                 List.of("--verbose"),
                 new WireMockConfigService.ResourceData(Map.of(), Map.of()),
                 "futureOnly");
-        doThrow(new jakarta.ws.rs.WebApplicationException(
-                WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
-                jakarta.ws.rs.core.Response.Status.BAD_REQUEST))
+        doThrow(ApiException.badRequest("INVALID_MOCK_ID", WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
+                Map.of("mockId", "demo_1")))
                 .when(configService).upsertMockConfig(eq("demo_1"), eq(request));
 
         given()
@@ -123,7 +131,10 @@ class WireMockConfigResourceTest {
         .when()
                 .put("/__fleet/api/config/demo_1")
         .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("code", is("INVALID_MOCK_ID"))
+                .body("retryable", is(false))
+                .body("stateMayHaveChanged", is(false));
 
         verify(configService).upsertMockConfig(eq("demo_1"), eq(request));
     }
@@ -135,9 +146,8 @@ class WireMockConfigResourceTest {
                 null,
                 null,
                 "futureOnly");
-        doThrow(new jakarta.ws.rs.WebApplicationException(
-                WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
-                jakarta.ws.rs.core.Response.Status.BAD_REQUEST))
+        doThrow(ApiException.badRequest("INVALID_MOCK_ID", WireMockConfigService.MOCK_ID_VALIDATION_MESSAGE,
+                Map.of("mockId", "demo_1")))
                 .when(configService).deleteMockConfig(eq("demo_1"), eq(request));
 
         given()
@@ -146,7 +156,8 @@ class WireMockConfigResourceTest {
         .when()
                 .delete("/__fleet/api/config/demo_1")
         .then()
-                .statusCode(400);
+                .statusCode(400)
+                .body("code", is("INVALID_MOCK_ID"));
 
         verify(configService).deleteMockConfig(eq("demo_1"), eq(request));
     }
@@ -158,11 +169,11 @@ class WireMockConfigResourceTest {
         WireMockConfigService.ConfigData effective = new WireMockConfigService.ConfigData(List.of("--verbose"), resources);
         WireMockConfigService.MockConfigView mock = new WireMockConfigService.MockConfigView(
                 "demo",
-                true,
+                MockLifecycleStatus.RUNNING,
                 empty,
                 user,
                 effective);
-        WireMockConfigService.OptionDefinition option = new WireMockConfigService.OptionDefinition(
+        WireMockOptionCatalog.OptionDefinition option = new WireMockOptionCatalog.OptionDefinition(
                 "--verbose",
                 "Verbose logging",
                 "flag",
@@ -176,5 +187,10 @@ class WireMockConfigResourceTest {
                 List.of(mock),
                 List.of(option),
                 new WireMockConfigService.RoutingView("HOST", "mock-fleet.localhost"));
+    }
+
+    private WireMockConfigService.ConfigMutationResult mutation(String mode, MockLifecycleStatus lifecycle) {
+        return new WireMockConfigService.ConfigMutationResult(configView(),
+                new WireMockConfigService.ApplyResult("demo", mode, lifecycle));
     }
 }

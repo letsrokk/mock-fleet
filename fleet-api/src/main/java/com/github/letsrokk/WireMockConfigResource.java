@@ -25,15 +25,15 @@ public class WireMockConfigResource {
 
     @PUT
     @Path("/{mockId}")
-    public WireMockConfigService.ConfigView upsertMockConfig(@PathParam("mockId") String mockId,
-                                                             WireMockConfigService.ConfigUpdateRequest request) {
+    public WireMockConfigService.ConfigMutationResult upsertMockConfig(@PathParam("mockId") String mockId,
+                                                                       WireMockConfigService.ConfigUpdateRequest request) {
         return configService.upsertMockConfig(mockId, request);
     }
 
     @DELETE
     @Path("/{mockId}")
-    public WireMockConfigService.ConfigView deleteMockConfig(@PathParam("mockId") String mockId,
-                                                             WireMockConfigService.ConfigUpdateRequest request) {
+    public WireMockConfigService.ConfigMutationResult deleteMockConfig(@PathParam("mockId") String mockId,
+                                                                       WireMockConfigService.ConfigUpdateRequest request) {
         return configService.deleteMockConfig(mockId, request);
     }
 }
