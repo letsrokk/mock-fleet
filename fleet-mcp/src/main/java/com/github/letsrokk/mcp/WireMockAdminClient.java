@@ -599,8 +599,37 @@ public final class WireMockAdminClient {
             throw persistentUpdateConflict(transaction, current);
         }
         if (current != null) {
-            deleteStub(mockId, stubId);
-            if (getStubOrNull(mockId, stubId) != null) {
+            RuntimeException deleteFailure = null;
+            try {
+                deleteStub(mockId, stubId);
+            } catch (RuntimeException failure) {
+                deleteFailure = failure;
+            }
+            JsonNode afterDelete;
+            try {
+                afterDelete = getStubOrNull(mockId, stubId);
+            } catch (RuntimeException verificationFailure) {
+                if (deleteFailure != null) {
+                    deleteFailure.addSuppressed(verificationFailure);
+                    throw deleteFailure;
+                }
+                throw verificationFailure;
+            }
+            if (mappingMatches(afterDelete, transaction.after())) {
+                deleteRecoveryMapping(mockId, stubId);
+                return afterDelete;
+            }
+            if (afterDelete != null && !mappingMatches(afterDelete, transaction.before())) {
+                McpOperationException conflict = persistentUpdateConflict(transaction, afterDelete);
+                if (deleteFailure != null) {
+                    conflict.addSuppressed(deleteFailure);
+                }
+                throw conflict;
+            }
+            if (afterDelete != null) {
+                if (deleteFailure != null) {
+                    throw deleteFailure;
+                }
                 throw persistentUpdateIncomplete(transaction, current,
                         "Persistent mapping deletion could not be verified");
             }

@@ -323,6 +323,79 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void persistentUpdateReturnsConflictWhenSuccessfulDeleteReadBackFindsUnrecognizedMapping() throws Exception {
+        String before = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
+                """;
+        String after = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """;
+        String unknown = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"PATCH","url":"/orders"},"response":{"status":204}}
+                """;
+        String marker = recoveryMarker("update", before, after);
+        transport.respond(404, "");
+        transport.respond(200, before);
+        transport.respond(201, marker);
+        transport.respond(200, marker);
+        transport.respond(200, before);
+        transport.respond(204, "");
+        transport.respond(200, unknown);
+        ObjectNode input = (ObjectNode) mapper.readTree("""
+                {"request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.updateStub("orders", "server-id", input));
+
+        assertEquals("PERSISTENT_UPDATE_CONFLICT", error.code());
+        assertFalse(error.retryable());
+        assertEquals("PATCH", ((JsonNode) error.details().get("current"))
+                .path("request").path("method").asText());
+        assertEquals(7, transport.requestCount());
+    }
+
+    @Test
+    void persistentUpdateReturnsConflictWhenAmbiguousDeleteReadBackFindsUnrecognizedMapping() throws Exception {
+        String before = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
+                """;
+        String after = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """;
+        String unknown = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"PATCH","url":"/orders"},"response":{"status":204}}
+                """;
+        String marker = recoveryMarker("update", before, after);
+        transport.respond(404, "");
+        transport.respond(200, before);
+        transport.respond(201, marker);
+        transport.respond(200, marker);
+        transport.respond(200, before);
+        transport.respond(500, "delete response lost");
+        transport.respond(200, unknown);
+        transport.respond(200, unknown);
+        ObjectNode input = (ObjectNode) mapper.readTree("""
+                {"request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.updateStub("orders", "server-id", input));
+
+        assertEquals("PERSISTENT_UPDATE_CONFLICT", error.code());
+        assertFalse(error.retryable());
+        assertEquals("PATCH", ((JsonNode) error.details().get("current"))
+                .path("request").path("method").asText());
+        assertEquals(8, transport.requestCount());
+    }
+
+    @Test
     void temporaryUpdateReturnsVerifiedMappingAfterAmbiguousFailure() throws Exception {
         String before = """
                 {"id":"server-id","uuid":"server-id","persistent":false,
