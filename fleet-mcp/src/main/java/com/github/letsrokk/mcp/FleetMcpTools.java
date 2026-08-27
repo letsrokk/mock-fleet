@@ -167,9 +167,8 @@ public final class FleetMcpTools {
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse stopMock(@ToolArg(description = "Mock ID") String mockId) {
         return fleet("stop_mock", () -> {
-            JsonNode lifecycle = fleetApi.stopMock(mockId);
-            return McpToolExecutor.ToolResult.of("Stopped mock " + mockId + ".",
-                    Map.of("mockId", mockId, "status", lifecycle.path("status").asText("STOPPED")));
+            ObjectNode lifecycle = requireStopLifecycleResponse(mockId);
+            return McpToolExecutor.ToolResult.of("Stopped mock " + mockId + ".", lifecycle);
         });
     }
 
@@ -453,21 +452,33 @@ public final class FleetMcpTools {
     }
 
     private ObjectNode requireLifecycleResponse(String mockId) {
+        return requireLifecycleResponse(mockId, "start", Set.of("RUNNING", "STARTING"),
+                () -> fleetApi.startMock(mockId));
+    }
+
+    private ObjectNode requireStopLifecycleResponse(String mockId) {
+        return requireLifecycleResponse(mockId, "stop", Set.of("STOPPED"), () -> fleetApi.stopMock(mockId));
+    }
+
+    private ObjectNode requireLifecycleResponse(String mockId, String operation, Set<String> allowedStatuses,
+            Supplier<JsonNode> request) {
         MockIdValidator.requireValid(mockId);
-        JsonNode response = fleetApi.startMock(mockId);
+        JsonNode response = request.get();
         if (!response.isObject() || !response.path("mockId").isTextual() || !response.path("status").isTextual()) {
-            throw invalidUpstreamResponse("Fleet start response is missing lifecycle fields", mockId);
+            throw invalidUpstreamResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
         }
         if (!mockId.equals(response.path("mockId").asText())) {
-            throw invalidUpstreamResponse("Fleet start response mockId does not match the requested mock", mockId);
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response mockId does not match the requested mock", mockId);
         }
         String status = response.path("status").asText();
-        if (!"RUNNING".equals(status) && !"STARTING".equals(status)) {
-            throw invalidUpstreamResponse("Fleet start response contains unsupported status " + status, mockId);
+        if (!allowedStatuses.contains(status)) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response contains unsupported status " + status, mockId);
         }
-        requireNullableText(response, "podName", mockId);
-        requireNullableText(response, "message", mockId);
-        requireNullableNonNegativeInteger(response, "retryAfterMs", mockId);
+        requireNullableText(response, "podName", mockId, operation);
+        requireNullableText(response, "message", mockId, operation);
+        requireNullableNonNegativeInteger(response, "retryAfterMs", mockId, operation);
         ObjectNode result = mapper.createObjectNode();
         result.put("mockId", mockId);
         result.put("status", status);
@@ -497,19 +508,22 @@ public final class FleetMcpTools {
         throw new McpOperationException("MOCK_STARTING", "Mock " + mockId + " is still starting", true, false, details);
     }
 
-    private void requireNullableText(JsonNode response, String field, String mockId) {
+    private void requireNullableText(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value != null && !value.isNull() && !value.isTextual()) {
-            throw invalidUpstreamResponse("Fleet start response field " + field + " must be a string or null", mockId);
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " must be a string or null", mockId);
         }
     }
 
-    private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId) {
+    private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value != null && !value.isNull()
                 && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
             throw invalidUpstreamResponse(
-                    "Fleet start response field " + field + " must be a non-negative integer or null", mockId);
+                    "Fleet " + operation + " response field " + field
+                            + " must be a non-negative integer or null",
+                    mockId);
         }
     }
 

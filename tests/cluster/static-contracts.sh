@@ -41,5 +41,11 @@ grep -Fq 'MOCK_STARTING error contract passed.' <<<"${self_test_output}" \
   || fail 'Harness self-test did not exercise the cold-start error contract.'
 grep -Fq 'Persistent restart state contract passed.' <<<"${self_test_output}" \
   || fail 'Harness self-test did not exercise persistent deletion state.'
+grep -Fq 'Existing bucket refusal contract passed.' <<<"${self_test_output}" \
+  || fail 'Harness self-test did not exercise accessible existing bucket refusal.'
+grep -Fq 'Ambiguous bucket refusal contract passed.' <<<"${self_test_output}" \
+  || fail 'Harness self-test did not exercise ambiguous bucket probe refusal.'
+grep -Fq 'Ownership marker cleanup gate passed.' <<<"${self_test_output}" \
+  || fail 'Harness self-test did not exercise exact ownership marker cleanup gating.'
 
 printf '[cluster-static] Static cluster contracts passed.\n'

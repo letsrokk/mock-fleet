@@ -14,6 +14,7 @@ run_id=${run_id:0:24}
 namespace="mock-fleet-e2e-${run_id}"
 release="fleet-${run_id}"
 bucket="mock-fleet-e2e-data-${run_id}"
+bucket_owner_key=".mock-fleet-e2e-owner"
 mcp_port=${MOCK_FLEET_E2E_MCP_PORT:-18080}
 api_port=${MOCK_FLEET_E2E_API_PORT:-18081}
 timeout_seconds=${MOCK_FLEET_E2E_TIMEOUT_SECONDS:-180}
@@ -54,9 +55,10 @@ Live-run prerequisites:
   reachable SeaweedFS S3 endpoint MOCK_FLEET_E2E_S3_ENDPOINT
   MOCK_FLEET_E2E_S3_ACCESS_KEY and MOCK_FLEET_E2E_S3_SECRET_KEY
 
-The suite creates and owns namespace ${namespace} and bucket ${bucket}. It refuses
-to reuse either. Image repository/tag and local ports are configurable through the
-MOCK_FLEET_E2E_* variables documented in this script.
+The suite creates and owns namespace ${namespace} and bucket ${bucket}. It proves
+that both are absent before creation, records the run ID in an S3 ownership marker,
+and refuses to reuse or delete an unverified bucket. Image repository/tag and local
+ports are configurable through the MOCK_FLEET_E2E_* variables documented in this script.
 EOF
 }
 
@@ -109,8 +111,12 @@ cleanup() {
       --ignore-not-found --wait=true --timeout="${timeout_seconds}s" >/dev/null 2>&1 || true
     helm uninstall "${release}" --namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
     if [[ "${bucket_created}" == true && "${namespace_created}" == true ]]; then
-      run_s3_cli cleanup s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 || true
-      run_s3_cli delete s3api delete-bucket --bucket "${bucket}" >/dev/null 2>&1 || true
+      if bucket_ownership_marker_matches; then
+        run_s3_cli cleanup s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 || true
+        run_s3_cli delete s3api delete-bucket --bucket "${bucket}" >/dev/null 2>&1 || true
+      else
+        log "WARNING: Refusing to empty or delete ${bucket}; its ownership marker does not match run ${run_id}."
+      fi
     fi
     kubectl delete pv "${release}-pv" --ignore-not-found --wait=false >/dev/null 2>&1 || true
     if [[ "${namespace_created}" == true ]]; then
@@ -138,6 +144,48 @@ run_s3_cli() {
   fi
   kubectl logs "${pod}" --namespace "${namespace}" || true
   kubectl delete pod "${pod}" --namespace "${namespace}" --wait=false >/dev/null 2>&1 || true
+}
+
+bucket_probe_state() {
+  local probe_status=$1
+  local listing=$2
+  local listed_bucket
+  if [[ ${probe_status} -ne 0 ]]; then
+    printf 'ambiguous\n'
+    return
+  fi
+  for listed_bucket in ${listing}; do
+    if [[ "${listed_bucket}" == "${bucket}" ]]; then
+      printf 'existing\n'
+      return
+    fi
+  done
+  printf 'absent\n'
+}
+
+require_absent_bucket_state() {
+  case "$1" in
+    absent) return ;;
+    existing)
+      fail "Bucket ${bucket} already exists and is accessible. Choose a unique MOCK_FLEET_E2E_RUN_ID."
+      ;;
+    *)
+      fail "Cannot prove that bucket ${bucket} is absent. Refusing creation after an ambiguous or forbidden S3 probe."
+      ;;
+  esac
+}
+
+bucket_ownership_marker_matches() {
+  local marker_owner
+  if ! marker_owner=$(run_s3_cli ownership s3api head-object --bucket "${bucket}" \
+      --key "${bucket_owner_key}" --query Metadata.runid --output text 2>/dev/null); then
+    return 1
+  fi
+  ownership_marker_matches_run "${marker_owner}"
+}
+
+ownership_marker_matches_run() {
+  [[ "$1" == "${run_id}" ]]
 }
 
 helm_deploy() {
@@ -581,6 +629,23 @@ self_test() {
     fail "Persistent restart assertion accepted a deleted stub."
   fi
   log "Persistent restart state contract passed."
+  if ( require_absent_bucket_state "$(bucket_probe_state 0 "${bucket}")" >/dev/null 2>&1 ); then
+    fail "Bucket probe accepted an accessible existing bucket."
+  fi
+  log "Existing bucket refusal contract passed."
+  if ( require_absent_bucket_state "$(bucket_probe_state 1 "")" >/dev/null 2>&1 ); then
+    fail "Bucket probe accepted an ambiguous or forbidden result."
+  fi
+  log "Ambiguous bucket refusal contract passed."
+  ownership_marker_matches_run "${run_id}" \
+    || fail "Ownership marker rejected the current run ID."
+  if ownership_marker_matches_run "different-run"; then
+    fail "Ownership marker accepted a different run ID."
+  fi
+  if ownership_marker_matches_run ""; then
+    fail "Ownership marker accepted a missing run ID."
+  fi
+  log "Ownership marker cleanup gate passed."
   log "Self-test passed."
 }
 
@@ -638,9 +703,22 @@ kubectl create namespace "${namespace}" >/dev/null
 namespace_created=true
 
 log "Creating isolated SeaweedFS bucket ${bucket}."
+bucket_listing=""
+bucket_probe_status=0
+if bucket_listing=$(run_s3_cli inspect s3api list-buckets --query 'Buckets[].Name' --output text); then
+  bucket_probe_status=0
+else
+  bucket_probe_status=$?
+fi
+require_absent_bucket_state "$(bucket_probe_state "${bucket_probe_status}" "${bucket_listing}")"
 run_s3_cli create s3api create-bucket --bucket "${bucket}" >/dev/null \
   || fail "Unable to create ${bucket} through ${s3_endpoint}. Check SeaweedFS credentials and endpoint DNS."
 bucket_created=true
+run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
+  --body /dev/null --metadata "runid=${run_id}" >/dev/null \
+  || fail "Unable to write the ownership marker for ${bucket}. Cleanup will refuse to delete it."
+bucket_ownership_marker_matches \
+  || fail "Unable to verify the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 
 kubectl create deployment recording-target --namespace "${namespace}" \
   --image=hashicorp/http-echo:0.2.3 -- --listen=:5678 --text=recorded >/dev/null

@@ -181,6 +181,61 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void stopMockReturnsOnlyTheValidatedFleetStopLifecycleWithoutPreflightTraffic() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, """
+                    {"mockId":"orders","status":"STOPPED","podName":null,
+                     "message":"already stopped","retryAfterMs":0}
+                    """);
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.stopMock("orders");
+
+            assertFalse(response.isError());
+            ObjectNode result = (ObjectNode) response.structuredContent();
+            assertEquals("orders", result.path("mockId").asText());
+            assertEquals("STOPPED", result.path("status").asText());
+            assertTrue(result.path("podName").isNull());
+            assertEquals("already stopped", result.path("message").asText());
+            assertEquals(0, result.path("retryAfterMs").asInt(-1));
+            assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[]",
+            "{\"status\":\"STOPPED\"}",
+            "{\"mockId\":\"payments\",\"status\":\"STOPPED\"}",
+            "{\"mockId\":\"orders\",\"status\":\"RUNNING\"}",
+            "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"podName\":42}",
+            "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"message\":true}",
+            "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"retryAfterMs\":\"0\"}",
+            "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"retryAfterMs\":-1}",
+            "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"retryAfterMs\":1.5}"
+    })
+    void stopMockRejectsMalformedOrMismatchedFleetResponses(String upstreamResponse) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, upstreamResponse);
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.stopMock("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertEquals("orders", error.details().get("mockId"));
+            assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @Test
     void adminPreflightRejectsMismatchedLifecycleMockIdWithoutProxyTraffic() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
@@ -390,9 +445,11 @@ class FleetMcpToolsTrafficTest {
         private final Vertx vertx = Vertx.vertx();
         private final HttpServer server;
         private final FleetApiClient client;
+        private final List<String> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         private FleetApiHarness() {
             server = vertx.createHttpServer().requestHandler(request -> request.bodyHandler(ignored -> {
+                requests.add(request.method().name() + " " + request.path());
                 FleetResponse response = responses.isEmpty() ? new FleetResponse(200, running()) : responses.removeFirst();
                 request.response().setStatusCode(response.status()).putHeader("Content-Type", "application/json")
                         .end(response.body());
@@ -407,6 +464,10 @@ class FleetMcpToolsTrafficTest {
 
         FleetApiClient client() {
             return client;
+        }
+
+        List<String> requests() {
+            return List.copyOf(requests);
         }
 
         @Override

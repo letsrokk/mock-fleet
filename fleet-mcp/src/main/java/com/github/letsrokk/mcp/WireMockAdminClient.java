@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.vertx.core.http.HttpMethod;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -615,11 +616,14 @@ public final class WireMockAdminClient {
             try {
                 afterDelete = getStubOrNull(mockId, stubId);
             } catch (RuntimeException verificationFailure) {
+                McpOperationException incomplete = persistentUpdateIncomplete(transaction, null,
+                        "Persistent mapping deletion could not be verified", "delete-verification",
+                        verificationFailure);
                 if (deleteFailure != null) {
-                    deleteFailure.addSuppressed(verificationFailure);
-                    throw deleteFailure;
+                    incomplete.addSuppressed(deleteFailure);
                 }
-                throw verificationFailure;
+                incomplete.addSuppressed(verificationFailure);
+                throw incomplete;
             }
             if (mappingMatches(afterDelete, transaction.after())) {
                 deleteRecoveryMapping(mockId, stubId);
@@ -727,10 +731,33 @@ public final class WireMockAdminClient {
                 reconciliationDetails(transaction, current));
     }
 
+    private McpOperationException persistentUpdateIncomplete(PersistentTransaction transaction, JsonNode current,
+            String message, String stage, RuntimeException verificationFailure) {
+        Map<String, Object> details = new LinkedHashMap<>(reconciliationDetails(transaction, current));
+        details.put("stage", stage);
+        details.put("verificationError", failureDetails(verificationFailure));
+        return new McpOperationException("PERSISTENT_UPDATE_INCOMPLETE", message, true, true, details);
+    }
+
+    private Map<String, Object> failureDetails(RuntimeException failure) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("type", failure.getClass().getSimpleName());
+        if (failure.getMessage() != null) {
+            details.put("message", failure.getMessage());
+        }
+        if (failure instanceof McpOperationException operationFailure) {
+            details.put("code", operationFailure.code());
+            details.put("retryable", operationFailure.retryable());
+            details.put("stateMayHaveChanged", operationFailure.stateMayHaveChanged());
+        }
+        return details;
+    }
+
     private Map<String, Object> reconciliationDetails(PersistentTransaction transaction, JsonNode current) {
         return Map.of(
                 "operation", transaction.operation(),
                 "stubId", transaction.stubId(),
+                "markerId", recoveryMappingId(transaction.stubId()),
                 "recoveryMarkerId", recoveryMappingId(transaction.stubId()),
                 "markerPreserved", true,
                 "reconciliation", "manual-reconciliation-required",

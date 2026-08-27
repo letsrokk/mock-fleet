@@ -145,6 +145,19 @@ class McpRegistrationTest {
         assertEquals("object", sendRequest.path("properties").path("response").path("type").asText());
         assertEquals(List.of("utf8", "base64"), textValues(sendRequest.path("properties").path("response")
                 .path("properties").path("body").path("properties").path("encoding").path("enum")));
+
+        for (String toolName : List.of(
+                "list_mock_configs", "get_mock_config", "update_mock_config", "delete_mock_config")) {
+            JsonNode resourceVersion = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("resourceVersion");
+            assertEquals(List.of("string", "null"), textValues(resourceVersion.path("type")), toolName);
+        }
+
+        JsonNode stopMock = tool(tools, "stop_mock").path("outputSchema").path("oneOf").get(0);
+        assertEquals(List.of("STOPPED"), textValues(stopMock.path("properties").path("status").path("enum")));
+        assertEquals(0, stopMock.path("properties").path("retryAfterMs").path("minimum").asInt(-1));
+        assertEquals(Set.of("mockId", "status", "podName", "message", "retryAfterMs"),
+                Set.copyOf(textValues(stopMock.path("required"))));
     }
 
     @Test

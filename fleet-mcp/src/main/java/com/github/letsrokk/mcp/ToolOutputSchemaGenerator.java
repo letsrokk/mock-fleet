@@ -20,21 +20,21 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
             case "ListMocks" -> strict(properties(
                     "mocks", array(openObject()), "page", page()), "mocks", "page");
             case "ListMockConfigs" -> strict(properties(
-                    "resourceVersion", string(), "mockIds", array(string()), "page", page()),
+                    "resourceVersion", nullableString(), "mockIds", array(string()), "page", page()),
                     "resourceVersion", "mockIds", "page");
             case "GetMockConfig" -> strict(properties(
-                    "resourceVersion", string(), "mock", openObject(), "routing", openObject()),
+                    "resourceVersion", nullableString(), "mock", openObject(), "routing", openObject()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
                     "optionDefinitions", array(openObject())), "optionDefinitions");
             case "UpdateMockConfig" -> strict(properties(
-                    "resourceVersion", string(), "mock", openObject(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mock", openObject(), "apply", openObject()),
                     "resourceVersion", "mock", "apply");
             case "DeleteMockConfig" -> strict(properties(
-                    "resourceVersion", string(), "mockId", string(), "deleted", bool(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", openObject()),
                     "resourceVersion", "mockId", "deleted", "apply");
             case "StartMock" -> lifecycle();
-            case "StopMock" -> strict(properties("mockId", string(), "status", string()), "mockId", "status");
+            case "StopMock" -> stopLifecycle();
             case "StubPage" -> strict(properties(
                     "mockId", string(), "stubs", array(openObject()), "page", page()),
                     "mockId", "stubs", "page");
@@ -93,6 +93,17 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "podName", nullableString(),
                 "message", nullableString(),
                 "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))),
+                "mockId", "status", "podName", "message", "retryAfterMs");
+    }
+
+    private JsonObject stopLifecycle() {
+        return strict(properties(
+                "mockId", string(),
+                "status", string().put("enum", new JsonArray().add("STOPPED")),
+                "podName", nullableString(),
+                "message", nullableString(),
+                "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))
+                        .put("minimum", 0)),
                 "mockId", "status", "podName", "message", "retryAfterMs");
     }
 

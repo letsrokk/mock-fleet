@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class WireMockAdminClientTest {
 
@@ -394,6 +396,51 @@ class WireMockAdminClientTest {
         assertEquals("PATCH", ((JsonNode) error.details().get("current"))
                 .path("request").path("method").asText());
         assertEquals(8, transport.requestCount());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = { 204, 500 })
+    void persistentUpdateReportsIncompleteWhenDeleteReadBackCannotDetermineCurrentState(int deleteStatus)
+            throws Exception {
+        String before = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
+                """;
+        String after = """
+                {"id":"server-id","uuid":"server-id","persistent":true,
+                 "request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """;
+        String marker = recoveryMarker("update", before, after);
+        transport.respond(404, "");
+        transport.respond(200, before);
+        transport.respond(201, marker);
+        transport.respond(200, marker);
+        transport.respond(200, before);
+        transport.respond(deleteStatus, deleteStatus == 204 ? "" : "delete response lost");
+        if (deleteStatus != 204) {
+            transport.respond(500, "delete helper read-back failed");
+        }
+        transport.respond(500, "delete read-back failed");
+        ObjectNode input = (ObjectNode) mapper.readTree("""
+                {"request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.updateStub("orders", "server-id", input));
+
+        assertEquals("PERSISTENT_UPDATE_INCOMPLETE", error.code());
+        assertTrue(error.retryable());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("update", error.details().get("operation"));
+        assertEquals("server-id", error.details().get("stubId"));
+        assertTrue(((String) error.details().get("markerId")).length() > 10);
+        assertEquals(true, error.details().get("markerPreserved"));
+        assertEquals("delete-verification", error.details().get("stage"));
+        assertEquals(mapper.readTree(before), error.details().get("before"));
+        assertEquals(mapper.readTree(after), error.details().get("after"));
+        assertEquals("WIREMOCK_ADMIN_ERROR",
+                ((Map<?, ?>) error.details().get("verificationError")).get("code"));
+        assertEquals(deleteStatus == 204 ? 7 : 8, transport.requestCount());
     }
 
     @Test

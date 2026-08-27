@@ -50,7 +50,7 @@ Each published `outputSchema` is `oneOf` its strict success object and this erro
 }
 ```
 
-Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and returns `{ "mockId": "orders", "status": "STOPPED" }` for running, starting, failed, already stopped, or absent pods.
+Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`, for running, starting, failed, already stopped, or absent pods. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
 
 ## Configuration
 
@@ -66,7 +66,7 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 }
 ```
 
-Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. Each `apply` is `{mockId,mode,lifecycle}`. A restart is asynchronous, so `lifecycle` can be STARTING. Configuration rows use `lifecycle`, not `active`, and inherited `user.resources` is null.
+Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. A restart is asynchronous, so `lifecycle` can be STARTING. Configuration rows use `lifecycle`, not `active`, and inherited `user.resources` is null.
 
 ## Encoded bodies
 

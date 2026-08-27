@@ -97,6 +97,19 @@ class FleetMcpToolsConfigTest {
     }
 
     @Test
+    void preservesNullResourceVersionInConfigWrapper() {
+        responseBody = """
+                {"resourceVersion":null,"mockIds":[],"savedMockIds":[],"mocks":[],"options":[],
+                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                """;
+
+        var response = tools.listMockConfigs(null, null);
+
+        assertFalse(response.isError());
+        assertTrue(((ObjectNode) response.structuredContent()).path("resourceVersion").isNull());
+    }
+
+    @Test
     void getsOneCompactConfig() {
         var response = tools.getMockConfig("alpha");
 
