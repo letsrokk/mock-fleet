@@ -67,6 +67,26 @@ class PodStateTest {
     }
 
     @Test
+    void restartClaimAtomicallyInvalidatesThePreviousStartingAttempt() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodLifecycle previous = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1");
+        when(lifecycleMap.get("demo")).thenReturn(previous);
+
+        PodState.RestartClaim replacement = podState.claimRestart("demo");
+
+        assertEquals(true, replacement.claimed());
+        assertEquals(MockLifecycleStatus.STARTING, replacement.lifecycle().status());
+        assertEquals("mock-fleet-demo-1", replacement.previousPodName());
+        org.junit.jupiter.api.Assertions.assertNotEquals("attempt-1", replacement.lifecycle().attemptId());
+        verify(lifecycleMap).put("demo", replacement.lifecycle());
+        when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
+        assertEquals(false, podState.completeStart("demo", "attempt-1",
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1")));
+    }
+
+    @Test
     void stoppedAttemptRejectsLatePodCompletion() {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();

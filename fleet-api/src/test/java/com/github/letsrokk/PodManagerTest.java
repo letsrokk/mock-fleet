@@ -19,8 +19,11 @@ import io.fabric8.kubernetes.client.dsl.PodResource;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -140,13 +143,85 @@ class PodManagerTest {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager();
         podManager.podState = podState;
-        when(podState.lifecycle("demo")).thenReturn(MockPodLifecycle.failed(
-                "attempt-1", "mock-fleet-demo-1", "image pull failed"));
+        MockPodLifecycle failed = MockPodLifecycle.failed(
+                "attempt-1", "mock-fleet-demo-1", "image pull failed");
+        when(podState.claimRestart("demo")).thenReturn(new PodState.RestartClaim(false, failed, null));
 
         PodManager.MockPodStatus result = podManager.restartActive("demo");
 
         assertEquals(MockLifecycleStatus.FAILED, result.status());
         verify(podState, never()).stop("demo");
+    }
+
+    @Test
+    void restartActiveQueuesPodDeletionInsteadOfBlockingTheCaller() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        Queue<Runnable> queued = new ArrayDeque<>();
+        AtomicBoolean deletionCalled = new AtomicBoolean();
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+        podManager.config = config;
+        podManager.startExecutor = queued::add;
+        MockPodRef oldPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-2", null);
+        when(podState.claimRestart("demo")).thenReturn(new PodState.RestartClaim(
+                true, starting, oldPod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(oldPod.podName())).thenReturn(podResource);
+        when(podResource.delete()).thenAnswer(invocation -> {
+            deletionCalled.set(true);
+            return List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class));
+        });
+
+        PodManager.MockPodStatus result = podManager.restartActive("demo");
+
+        assertEquals(MockLifecycleStatus.STARTING, result.status());
+        assertFalse(deletionCalled.get(), "Kubernetes deletion ran on the request thread");
+        assertEquals(1, queued.size());
+    }
+
+    @Test
+    void startMockReturnsTerminalFailureWhenBackgroundAttemptAlreadyFailed() {
+        PodState podState = mock(PodState.class);
+        PodCreationException failure = new PodCreationException("ImagePullBackOff: denied");
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                throw failure;
+            }
+        };
+        podManager.podState = podState;
+        podManager.startExecutor = task -> {
+            Thread thread = new Thread(task);
+            thread.setUncaughtExceptionHandler((ignored, error) -> { });
+            thread.start();
+            try {
+                thread.join();
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(error);
+            }
+        };
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null);
+        MockPodLifecycle failed = MockPodLifecycle.failed("attempt-1", null, failure.getMessage());
+        when(podState.claimStart("demo")).thenReturn(new PodState.StartClaim(true, starting, null));
+        when(podState.lifecycle("demo")).thenReturn(failed);
+
+        PodManager.MockPodStatus result = podManager.startMock("demo");
+
+        assertEquals(MockLifecycleStatus.FAILED, result.status());
+        assertEquals("ImagePullBackOff: denied", result.message());
+        verify(podState).failStart("demo", "attempt-1", failure);
     }
 
     @Test

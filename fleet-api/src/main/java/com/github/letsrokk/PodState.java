@@ -65,6 +65,33 @@ public class PodState {
         }
     }
 
+    public RestartClaim claimRestart(String mockId) {
+        podLifecycleMap.lock(mockId);
+        try {
+            MockPodRef pod = podMap.get(mockId);
+            MockPodLifecycle current = podLifecycleMap.get(mockId);
+            MockLifecycleStatus currentStatus = pod != null
+                    ? MockLifecycleStatus.RUNNING
+                    : current == null ? MockLifecycleStatus.STOPPED : current.status();
+            if (currentStatus != MockLifecycleStatus.STARTING && currentStatus != MockLifecycleStatus.RUNNING) {
+                MockPodLifecycle lifecycle = current == null ? MockPodLifecycle.stopped() : current;
+                return new RestartClaim(false, lifecycle, null);
+            }
+
+            String previousPodName = pod != null ? pod.podName() : current.podName();
+            if (pod != null) {
+                podMap.remove(mockId);
+                lastAccessTimeMap.remove(pod.podName());
+            }
+            String attemptId = UUID.randomUUID().toString();
+            MockPodLifecycle replacement = MockPodLifecycle.starting(attemptId, null);
+            podLifecycleMap.put(mockId, replacement);
+            return new RestartClaim(true, replacement, previousPodName);
+        } finally {
+            podLifecycleMap.unlock(mockId);
+        }
+    }
+
     public boolean markStartupPodName(String mockId, String attemptId, String podName) {
         podLifecycleMap.lock(mockId);
         try {
@@ -284,6 +311,9 @@ public class PodState {
     }
 
     public record StartClaim(boolean claimed, MockPodLifecycle lifecycle, MockPodRef pod) {
+    }
+
+    public record RestartClaim(boolean claimed, MockPodLifecycle lifecycle, String previousPodName) {
     }
 
     public record StopClaim(MockPodRef pod, String podName) {

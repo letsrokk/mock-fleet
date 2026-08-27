@@ -88,6 +88,24 @@ class FleetResourceTest {
     }
 
     @Test
+    void returnsStructuredRetryableErrorForTerminalStartupFailure() {
+        when(podManager.startMock("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", "mock-fleet-demo-1", MockLifecycleStatus.FAILED, "ImagePullBackOff: denied"));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(503)
+                .body("code", is("MOCK_START_FAILED"))
+                .body("message", is("ImagePullBackOff: denied"))
+                .body("retryable", is(true))
+                .body("stateMayHaveChanged", is(false))
+                .body("details.mockId", is("demo"))
+                .body("details.podName", is("mock-fleet-demo-1"));
+    }
+
+    @Test
     void rejectsInvalidMockIdWithStructuredError() {
         given()
         .when()

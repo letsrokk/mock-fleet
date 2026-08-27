@@ -65,27 +65,35 @@ public class PodManager {
         PodState.StartClaim claim = podState.claimStart(mockId);
         if (claim.claimed()) {
             startExecutor.execute(() -> startClaimedMock(mockId, claim.lifecycle().attemptId()));
-            MockPodStatus current = status(mockId);
-            if (current.status() == MockLifecycleStatus.RUNNING || current.status() == MockLifecycleStatus.STARTING) {
-                return current;
-            }
-            return new MockPodStatus(mockId, claim.lifecycle().podName(), MockLifecycleStatus.STARTING, null);
         }
         return status(mockId);
     }
 
     public MockPodStatus restartActive(String mockId) {
-        MockPodStatus before = status(mockId);
-        if (before.status() != MockLifecycleStatus.STARTING && before.status() != MockLifecycleStatus.RUNNING) {
-            return before;
+        PodState.RestartClaim claim = podState.claimRestart(mockId);
+        if (!claim.claimed()) {
+            MockPodLifecycle lifecycle = claim.lifecycle();
+            return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
         }
-        DeleteMockResult stopped = deleteMock(mockId);
-        if (stopped == DeleteMockResult.FAILED) {
-            throw new ApiException(jakarta.ws.rs.core.Response.Status.INTERNAL_SERVER_ERROR,
-                    new ApiError("MOCK_RESTART_FAILED", "Config was saved, but active mock pod restart failed.",
-                            true, true, Map.of("mockId", mockId)));
+        startExecutor.execute(() -> replaceClaimedMock(mockId, claim));
+        MockPodLifecycle lifecycle = claim.lifecycle();
+        return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
+    }
+
+    private void replaceClaimedMock(String mockId, PodState.RestartClaim claim) {
+        String previousPodName = claim.previousPodName();
+        if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
+            PodCreationException failure = new PodCreationException(
+                    "Failed to delete previous pod '" + previousPodName + "' before replacement startup.");
+            podState.failStart(mockId, claim.lifecycle().attemptId(), failure);
+            LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
+            return;
         }
-        return startMock(mockId);
+        try {
+            startClaimedMock(mockId, claim.lifecycle().attemptId());
+        } catch (RuntimeException failure) {
+            LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
+        }
     }
 
     public MockPodStatus status(String mockId) {

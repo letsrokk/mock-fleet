@@ -12,7 +12,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.RestStreamElementType;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Path("/__fleet/api/mocks")
 @Produces(MediaType.APPLICATION_JSON)
@@ -67,10 +69,28 @@ public class FleetResource {
     public Response startMock(@PathParam("mockId") String mockId) {
         WireMockConfigService.validateMockId(mockId);
         PodManager.MockPodStatus status = podManager.startMock(mockId);
-        int httpStatus = status.status() == MockLifecycleStatus.RUNNING
-                ? Response.Status.OK.getStatusCode()
-                : Response.Status.ACCEPTED.getStatusCode();
-        return Response.status(httpStatus).entity(lifecycleResponse(status)).build();
+        return switch (status.status()) {
+            case RUNNING -> Response.ok(lifecycleResponse(status)).build();
+            case STARTING -> Response.accepted(lifecycleResponse(status)).build();
+            case FAILED -> startError(Response.Status.SERVICE_UNAVAILABLE, "MOCK_START_FAILED",
+                    status.message() == null || status.message().isBlank() ? "Mock startup failed." : status.message(),
+                    status, false);
+            case STOPPED -> startError(Response.Status.CONFLICT, "MOCK_START_STOPPED",
+                    "Mock startup was stopped.", status, true);
+        };
+    }
+
+    private Response startError(Response.Status httpStatus, String code, String message,
+                                PodManager.MockPodStatus status, boolean stateMayHaveChanged) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("mockId", status.mockId());
+        details.put("status", status.status().name());
+        if (status.podName() != null) {
+            details.put("podName", status.podName());
+        }
+        return Response.status(httpStatus)
+                .entity(new ApiError(code, message, true, stateMayHaveChanged, details))
+                .build();
     }
 
     private MockLifecycleResponse lifecycleResponse(PodManager.MockPodStatus status) {
