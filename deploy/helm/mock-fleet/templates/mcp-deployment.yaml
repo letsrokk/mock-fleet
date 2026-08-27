@@ -1,0 +1,110 @@
+{{- include "mock-fleet.validateMcp" . -}}
+{{- if .Values.fleet.mcp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.mcpFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  replicas: {{ .Values.fleet.mcp.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.mcpSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mock-fleet.mcpSelectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+      containers:
+        - name: mcp
+          image: {{ printf "%s:%s" .Values.fleet.mcp.image.repository (.Values.fleet.mcp.image.tag | default .Chart.AppVersion) }}
+          imagePullPolicy: {{ .Values.fleet.mcp.image.pullPolicy }}
+          env:
+            - name: FLEET_MCP_API_BASE_URL
+              value: {{ include "mock-fleet.mcpApiBaseUrl" . | quote }}
+            - name: FLEET_MCP_PROXY_BASE_URL
+              value: {{ include "mock-fleet.mcpProxyBaseUrl" . | quote }}
+            - name: FLEET_MCP_ROUTING_MODE
+              value: {{ include "mock-fleet.mcpRoutingMode" . | quote }}
+            - name: FLEET_MCP_FLEET_HOST
+              value: {{ include "mock-fleet.mcpFleetHost" . | quote }}
+            - name: FLEET_MCP_WIREMOCK_IMAGE
+              value: {{ .Values.wiremock.containerImage | quote }}
+            - name: FLEET_MCP_STORAGE_ENABLED
+              value: {{ .Values.storage.persistent | quote }}
+            - name: FLEET_MCP_ALLOWED_ORIGINS
+              value: {{ include "mock-fleet.mcpAllowedOrigins" . | quote }}
+            {{- with .Values.fleet.mcp.outbound.exceptions }}
+            - name: FLEET_MCP_OUTBOUND_EXCEPTIONS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.fleet.mcp.outbound.allowedListeners }}
+            - name: FLEET_MCP_OUTBOUND_ALLOWED_LISTENERS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            - name: FLEET_MCP_SENSITIVE_HEADERS
+              value: {{ join "," .Values.fleet.mcp.sensitiveHeaders | quote }}
+            - name: FLEET_MCP_TIMEOUT
+              value: {{ .Values.fleet.mcp.timeout | quote }}
+            - name: FLEET_MCP_DEFAULT_PAGE_SIZE
+              value: {{ .Values.fleet.mcp.defaultPageSize | int64 | quote }}
+            - name: FLEET_MCP_MAX_PAGE_SIZE
+              value: {{ .Values.fleet.mcp.maxPageSize | int64 | quote }}
+            - name: FLEET_MCP_MAX_PAYLOAD_BYTES
+              value: {{ .Values.fleet.mcp.maxPayloadBytes | int64 | quote }}
+            - name: FLEET_MCP_INCLUDED_BODY_BYTES
+              value: {{ .Values.fleet.mcp.includedBodyBytes | int64 | quote }}
+            - name: JAVA_OPTS
+              value: {{ .Values.env.javaOpts | quote }}
+            {{- if .Values.env.javaToolOptions }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ .Values.env.javaToolOptions | quote }}
+            {{- end }}
+            - name: user.dir
+              value: {{ .Values.env.userDir | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.fleet.mcp.service.ports.targetHttp }}
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: {{ .Values.fleet.mcp.probes.liveness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.mcp.probes.liveness.path }}
+              port: {{ .Values.fleet.mcp.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.mcp.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.mcp.probes.liveness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.mcp.probes.liveness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.mcp.probes.liveness.timeoutSeconds }}
+          readinessProbe:
+            failureThreshold: {{ .Values.fleet.mcp.probes.readiness.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.mcp.probes.readiness.path }}
+              port: {{ .Values.fleet.mcp.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.mcp.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.mcp.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.fleet.mcp.probes.readiness.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.mcp.probes.readiness.timeoutSeconds }}
+          startupProbe:
+            failureThreshold: {{ .Values.fleet.mcp.probes.startup.failureThreshold }}
+            httpGet:
+              path: {{ .Values.fleet.mcp.probes.startup.path }}
+              port: {{ .Values.fleet.mcp.service.ports.targetHttp }}
+              scheme: HTTP
+            initialDelaySeconds: {{ .Values.fleet.mcp.probes.startup.initialDelaySeconds }}
+            periodSeconds: {{ .Values.fleet.mcp.probes.startup.periodSeconds }}
+            successThreshold: {{ .Values.fleet.mcp.probes.startup.successThreshold }}
+            timeoutSeconds: {{ .Values.fleet.mcp.probes.startup.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.fleet.mcp.resources | nindent 12 }}
+{{- end }}

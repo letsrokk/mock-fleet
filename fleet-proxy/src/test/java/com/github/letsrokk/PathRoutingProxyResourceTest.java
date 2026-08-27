@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -136,6 +137,24 @@ class PathRoutingProxyResourceTest {
         assertEquals("/headers/check?mode=full", request.uri());
         assertEquals("value", request.headers().get("X-Test"));
         assertArrayEquals("payload".getBytes(StandardCharsets.UTF_8), request.body());
+    }
+
+    @Test
+    void directlyProxiesUnauthenticatedAdminRequestsAndResolvesTheMock() {
+        mockUpstream("demo");
+        nextResponse.set(new UpstreamResponse(200, "{\"mappings\":[]}",
+                Map.of("Content-Type", List.of("application/json"))));
+
+        given()
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/demo/__admin/mappings")
+        .then()
+                .statusCode(200)
+                .body(is("{\"mappings\":[]}"));
+
+        verify(fleetApiClient).resolveUpstreamBaseUrl("demo");
+        assertEquals("/__admin/mappings", capturedRequest.get().uri());
     }
 
     @Test

@@ -51,6 +51,15 @@ spec:
                   name: http
             path: /__fleet/proxy/version
             pathType: Prefix
+          {{- if .Values.fleet.mcp.enabled }}
+          - backend:
+              service:
+                name: {{ include "mock-fleet.mcpFullname" . }}
+                port:
+                  name: http
+            path: /__fleet/mcp
+            pathType: Prefix
+          {{- end }}
           {{- if .Values.fleet.dash.enabled }}
           - backend:
               service:

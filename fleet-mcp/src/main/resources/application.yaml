@@ -1,0 +1,49 @@
+quarkus:
+  application:
+    name: mock-fleet-mcp
+  http:
+    cors:
+      enabled: true
+      origins: ${FLEET_MCP_ALLOWED_ORIGINS:http://localhost:8080}
+  mcp:
+    server:
+      http:
+        root-path: /__fleet/mcp
+      server-info:
+        name: mock-fleet
+        title: Mock Fleet MCP
+        description: Manage Mock Fleet configuration, WireMock stubs, traffic, recordings, body files, and scenarios.
+      traffic-logging:
+        enabled: false
+      tools:
+        structured-content:
+          compatibility-mode: false
+      metrics:
+        enabled: true
+  smallrye-health:
+    root-path: /__fleet/mcp/health
+  container-image:
+    builder: docker
+    registry: ghcr.io
+    group: letsrokk/mock-fleet
+    name: mcp
+    additional-tags:
+      - latest
+    build: true
+
+mock-fleet:
+  mcp:
+    api-base-url: ${FLEET_MCP_API_BASE_URL:http://localhost:8081}
+    proxy-base-url: ${FLEET_MCP_PROXY_BASE_URL:http://localhost:8082}
+    routing-mode: ${FLEET_MCP_ROUTING_MODE:PATH}
+    fleet-host: ${FLEET_MCP_FLEET_HOST:mock-fleet.localhost}
+    wiremock-image: ${FLEET_MCP_WIREMOCK_IMAGE:wiremock/wiremock:3.13.2-2}
+    storage-enabled: ${FLEET_MCP_STORAGE_ENABLED:false}
+    timeout: ${FLEET_MCP_TIMEOUT:10S}
+    default-page-size: ${FLEET_MCP_DEFAULT_PAGE_SIZE:50}
+    max-page-size: ${FLEET_MCP_MAX_PAGE_SIZE:200}
+    max-payload-bytes: ${FLEET_MCP_MAX_PAYLOAD_BYTES:1048576}
+    included-body-bytes: ${FLEET_MCP_INCLUDED_BODY_BYTES:262144}
+    sensitive-headers: ${FLEET_MCP_SENSITIVE_HEADERS:Authorization,Proxy-Authorization,Cookie,Set-Cookie,X-API-Key}
+    outbound-exceptions: ${FLEET_MCP_OUTBOUND_EXCEPTIONS:}
+    outbound-allowed-listeners: ${FLEET_MCP_OUTBOUND_ALLOWED_LISTENERS:}

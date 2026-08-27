@@ -6,6 +6,7 @@
     "nameOverride": { "type": "string" },
     "fullnameOverride": { "type": "string" },
     "namespaceOverride": { "type": "string" },
+    "clusterDomain": { "type": "string", "minLength": 1 },
     "fleet": {
       "type": "object",
       "properties": {
@@ -59,9 +60,89 @@
               "required": ["enabled"]
             }
           ]
+        },
+        "mcp": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "replicas": { "type": "integer", "const": 1 },
+                "apiBaseUrl": { "type": "string" },
+                "proxyBaseUrl": { "type": "string" },
+                "routing": {
+                  "type": "object",
+                  "properties": {
+                    "mode": { "type": "string", "enum": ["", "PATH", "HOST"] },
+                    "fleetHost": { "type": "string" }
+                  },
+                  "required": ["mode", "fleetHost"]
+                },
+                "allowedOrigins": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "outbound": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1 }
+                    },
+                    "allowedListeners": {
+                      "type": "array",
+                      "items": { "type": "string", "minLength": 1 }
+                    },
+                    "networkPolicy": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "dnsNamespace": { "type": "string", "minLength": 1 },
+                        "dnsPodSelector": {
+                          "type": "object",
+                          "additionalProperties": { "type": "string" },
+                          "minProperties": 1
+                        },
+                        "allowedCidrs": {
+                          "type": "array",
+                          "items": { "type": "string", "minLength": 1 }
+                        }
+                      },
+                      "required": ["enabled", "dnsNamespace", "dnsPodSelector", "allowedCidrs"]
+                    }
+                  },
+                  "required": ["exceptions", "allowedListeners", "networkPolicy"]
+                },
+                "sensitiveHeaders": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "timeout": { "type": "string", "minLength": 1 },
+                "defaultPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "maxPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
+                "maxPayloadBytes": { "type": "integer", "minimum": 1 },
+                "includedBodyBytes": { "type": "integer", "minimum": 1 }
+              },
+              "required": [
+                "enabled",
+                "apiBaseUrl",
+                "proxyBaseUrl",
+                "routing",
+                "allowedOrigins",
+                "outbound",
+                "sensitiveHeaders",
+                "timeout",
+                "defaultPageSize",
+                "maxPageSize",
+                "maxPayloadBytes",
+                "includedBodyBytes"
+              ]
+            }
+          ]
         }
       },
-      "required": ["proxy", "api", "dash"]
+      "required": ["proxy", "api", "dash", "mcp"]
     },
     "ingress": { "type": "object" },
     "storage": { "type": "object" },
@@ -69,6 +150,7 @@
       "type": "object",
       "properties": {
         "podNamePrefix": { "type": "string", "minLength": 1 },
+        "containerImage": { "type": "string", "minLength": 1 },
         "serviceAccount": {
           "type": "object",
           "properties": {
@@ -96,7 +178,35 @@
       "required": ["clusterName", "port", "backupCount", "gracefulShutdownMaxWaitSeconds"]
     }
   },
-  "required": ["fleet", "ingress", "storage", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
+  "required": ["clusterDomain", "fleet", "ingress", "storage", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "hazelcast"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "fleet": {
+            "properties": {
+              "mcp": {
+                "properties": {
+                  "enabled": { "const": true }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "wiremock": {
+            "properties": {
+              "containerImage": {
+                "pattern": "^.+:3\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?(@sha256:[a-fA-F0-9]{64})?$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "definitions": {
     "app": {
       "type": "object",

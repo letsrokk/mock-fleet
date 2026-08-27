@@ -7,6 +7,10 @@ ingress:
     traefik.ingress.kubernetes.io/router.tls: "true"
 
 fleet:
+  mcp:
+    enabled: true
+    allowedOrigins:
+      - https://mock-fleet.minikube.localhost
   proxy:
     routing:
       mode: "PATH"

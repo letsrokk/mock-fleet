@@ -47,6 +47,59 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-dash" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.mcpFullname" -}}
+{{- printf "%s-mcp" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockEgressNetworkPolicyName" -}}
+{{- printf "%s-wiremock-egress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.apiServiceUrl" -}}
+{{- $host := printf "%s.%s.svc.%s" (include "mock-fleet.apiFullname" .) (include "mock-fleet.namespace" .) (required "clusterDomain is required" .Values.clusterDomain) -}}
+{{- $port := int .Values.fleet.api.service.ports.http -}}
+{{- if eq $port 80 -}}
+{{- printf "http://%s" $host -}}
+{{- else -}}
+{{- printf "http://%s:%d" $host $port -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.proxyServiceUrl" -}}
+{{- $host := printf "%s.%s.svc.%s" (include "mock-fleet.proxyFullname" .) (include "mock-fleet.namespace" .) (required "clusterDomain is required" .Values.clusterDomain) -}}
+{{- $port := int .Values.fleet.proxy.service.ports.http -}}
+{{- if eq $port 80 -}}
+{{- printf "http://%s" $host -}}
+{{- else -}}
+{{- printf "http://%s:%d" $host $port -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.mcpApiBaseUrl" -}}
+{{- default (include "mock-fleet.apiServiceUrl" .) .Values.fleet.mcp.apiBaseUrl -}}
+{{- end -}}
+
+{{- define "mock-fleet.mcpProxyBaseUrl" -}}
+{{- default (include "mock-fleet.proxyServiceUrl" .) .Values.fleet.mcp.proxyBaseUrl -}}
+{{- end -}}
+
+{{- define "mock-fleet.mcpRoutingMode" -}}
+{{- default .Values.fleet.proxy.routing.mode .Values.fleet.mcp.routing.mode -}}
+{{- end -}}
+
+{{- define "mock-fleet.mcpFleetHost" -}}
+{{- default .Values.ingress.host .Values.fleet.mcp.routing.fleetHost -}}
+{{- end -}}
+
+{{- define "mock-fleet.mcpAllowedOrigins" -}}
+{{- if .Values.fleet.mcp.allowedOrigins -}}
+{{- join "," .Values.fleet.mcp.allowedOrigins -}}
+{{- else -}}
+{{- $scheme := ternary "https" "http" (gt (len .Values.ingress.tls) 0) -}}
+{{- printf "%s://%s" $scheme .Values.ingress.host -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mock-fleet.proxySelectorLabels" -}}
 {{ include "mock-fleet.selectorLabels" . }}
 app.kubernetes.io/component: proxy
@@ -60,6 +113,11 @@ app.kubernetes.io/component: api
 {{- define "mock-fleet.dashSelectorLabels" -}}
 {{ include "mock-fleet.selectorLabels" . }}
 app.kubernetes.io/component: dash
+{{- end -}}
+
+{{- define "mock-fleet.mcpSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: mcp
 {{- end -}}
 
 {{- define "mock-fleet.serviceAccountName" -}}
@@ -100,5 +158,26 @@ app.kubernetes.io/component: dash
 {{- end -}}
 {{- if and .Values.storage.persistent (eq .Values.storage.type "s3") (not .Values.storage.s3.bucket) -}}
 {{- fail "storage.s3.bucket is required when storage.persistent=true and storage.type=s3" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.validateMcp" -}}
+{{- if .Values.fleet.mcp.enabled -}}
+{{- if ne (int .Values.fleet.mcp.replicas) 1 -}}
+{{- fail "fleet.mcp.replicas must be 1 because the stable Streamable HTTP transport keeps session state" -}}
+{{- end -}}
+{{- if not (regexMatch "^.+:3\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?(@sha256:[a-fA-F0-9]{64})?$" .Values.wiremock.containerImage) -}}
+{{- fail "wiremock.containerImage must use a parseable pinned WireMock 3.x.y tag when fleet.mcp.enabled=true" -}}
+{{- end -}}
+{{- $mode := include "mock-fleet.mcpRoutingMode" . -}}
+{{- if not (has $mode (list "PATH" "HOST")) -}}
+{{- fail "fleet.mcp.routing.mode must be PATH or HOST (or empty to inherit fleet.proxy.routing.mode)" -}}
+{{- end -}}
+{{- if and (eq $mode "HOST") (not (include "mock-fleet.mcpFleetHost" .)) -}}
+{{- fail "fleet.mcp.routing.fleetHost or ingress.host is required for HOST routing" -}}
+{{- end -}}
+{{- if or (lt (int .Values.fleet.mcp.defaultPageSize) 1) (gt (int .Values.fleet.mcp.defaultPageSize) (int .Values.fleet.mcp.maxPageSize)) (gt (int .Values.fleet.mcp.maxPageSize) 200) -}}
+{{- fail "fleet.mcp page sizes must satisfy 1 <= defaultPageSize <= maxPageSize <= 200" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
