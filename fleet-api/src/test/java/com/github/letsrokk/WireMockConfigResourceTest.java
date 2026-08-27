@@ -31,6 +31,7 @@ class WireMockConfigResourceTest {
                 .statusCode(200)
                 .body("resourceVersion", is("42"))
                 .body("mockIds[0]", is("demo"))
+                .body("savedMockIds[0]", is("demo"))
                 .body("mocks[0].mockId", is("demo"))
                 .body("mocks[0].effective.options[0]", is("--verbose"))
                 .body("options[0].name", is("--verbose"));
@@ -145,6 +146,7 @@ class WireMockConfigResourceTest {
                 List.of());
         return new WireMockConfigService.ConfigView(
                 "42",
+                List.of("demo"),
                 List.of("demo"),
                 List.of(mock),
                 List.of(option),

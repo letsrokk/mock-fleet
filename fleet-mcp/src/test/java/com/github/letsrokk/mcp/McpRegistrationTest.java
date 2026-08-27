@@ -3,11 +3,14 @@ package com.github.letsrokk.mcp;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.quarkiverse.mcp.server.ToolManager;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class McpRegistrationTest {
 
     private static final Set<String> EXPECTED_TOOLS = Set.of(
-            "list_mocks", "get_mock_config", "update_mock_config", "delete_mock_config", "stop_mock",
+            "list_mocks", "list_mock_configs", "get_mock_config", "update_mock_config", "delete_mock_config", "stop_mock",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "delete_stub",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
@@ -30,6 +33,26 @@ class McpRegistrationTest {
         Set<String> actual = new HashSet<>();
         toolManager.forEach(tool -> actual.add(tool.name()));
         assertEquals(EXPECTED_TOOLS, actual);
+    }
+
+    @Test
+    void getMockConfigRequiresOnlyThePluralMockIdsArgument() {
+        var arguments = toolManager.getTool("get_mock_config").arguments();
+
+        assertEquals(1, arguments.size());
+        assertEquals("mockIds", arguments.getFirst().name());
+        assertEquals("java.util.List<java.lang.String>", arguments.getFirst().type().getTypeName());
+        assertTrue(arguments.getFirst().required());
+    }
+
+    @Test
+    void listMockConfigsIsReadOnlyWithOptionalPaginationArguments() {
+        var tool = toolManager.getTool("list_mock_configs");
+
+        assertEquals(List.of("limit", "offset"), tool.arguments().stream().map(argument -> argument.name()).toList());
+        assertTrue(tool.arguments().stream().noneMatch(argument -> argument.required()));
+        assertTrue(tool.annotations().orElseThrow().readOnlyHint());
+        assertFalse(tool.annotations().orElseThrow().destructiveHint());
     }
 
     @Test
