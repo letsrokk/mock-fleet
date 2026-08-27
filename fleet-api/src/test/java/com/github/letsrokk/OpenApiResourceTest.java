@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashSet;
+import java.util.Set;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -54,9 +57,42 @@ class OpenApiResourceTest {
         JsonNode root = new ObjectMapper().readTree(document);
 
         assertApiError(root, "/__fleet/api/mappings/{mockId}/tree", "get", "400", "404", "503");
-        assertApiError(root, "/__fleet/api/mappings/{mockId}", "delete", "400", "503");
+        assertApiError(root, "/__fleet/api/mappings/{mockId}", "delete", "400", "404", "503");
         assertApiError(root, "/__fleet/api/mappings/{mockId}/files", "get", "400", "404", "503");
         assertApiError(root, "/__fleet/api/mappings/{mockId}/files", "delete", "400", "503");
+    }
+
+    @Test
+    void documentsEveryMappingFileResponseMediaTypeAsBinary() throws Exception {
+        String document = given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+        JsonNode content = new ObjectMapper().readTree(document)
+                .path("paths")
+                .path("/__fleet/api/mappings/{mockId}/files")
+                .path("get")
+                .path("responses")
+                .path("200")
+                .path("content");
+        Set<String> actualMediaTypes = new HashSet<>();
+        content.fieldNames().forEachRemaining(actualMediaTypes::add);
+        Set<String> expectedMediaTypes = Set.of(
+                "application/json",
+                "application/xml",
+                "application/pdf",
+                "text/plain",
+                "application/octet-stream");
+
+        assertEquals(expectedMediaTypes, actualMediaTypes);
+        for (String mediaType : expectedMediaTypes) {
+            JsonNode schema = content.path(mediaType).path("schema");
+            assertEquals("string", schema.path("type").asText(), mediaType);
+            assertEquals("binary", schema.path("format").asText(), mediaType);
+        }
     }
 
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {

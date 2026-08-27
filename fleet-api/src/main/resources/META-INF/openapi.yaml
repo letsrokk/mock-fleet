@@ -168,6 +168,8 @@ paths:
           description: Folder absent or deleted.
         "400":
           $ref: "#/components/responses/ApiError"
+        "404":
+          $ref: "#/components/responses/ApiError"
         "503":
           $ref: "#/components/responses/ApiError"
   /__fleet/api/mappings/{mockId}/files:
@@ -184,6 +186,22 @@ paths:
         "200":
           description: Stored file with a content type derived from its extension.
           content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+            application/xml:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/plain:
+              schema:
+                type: string
+                format: binary
             application/octet-stream:
               schema:
                 type: string
