@@ -312,3 +312,5 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --create-namespace \
   -f deploy/helm/mock-fleet/values.minikube.yaml
 ```
+
+The repository Makefile builds local images directly in the Minikube Docker daemon. Force a specific image rebuild after pulling clean source changes with `make local-deploy REBUILD=mcp`, replacing `mcp` with `dash`, `api`, or `proxy` as needed. Use `REBUILD=all` to rebuild every local image.
