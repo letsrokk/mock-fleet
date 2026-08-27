@@ -180,6 +180,27 @@ class FleetMcpToolsTrafficTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = { "podName", "message", "retryAfterMs" })
+    void startMockRejectsMissingRequiredNullableLifecycleFields(String missingField) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        ObjectNode lifecycle = mapper.createObjectNode().put("mockId", "orders").put("status", "RUNNING");
+        lifecycle.putNull("podName").putNull("message").putNull("retryAfterMs").remove(missingField);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, lifecycle.toString());
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.startMock("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertEquals("orders", error.details().get("mockId"));
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
     @Test
     void stopMockReturnsOnlyTheValidatedFleetStopLifecycleWithoutPreflightTraffic() {
         ObjectMapper mapper = new ObjectMapper();
@@ -187,7 +208,7 @@ class FleetMcpToolsTrafficTest {
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, """
                     {"mockId":"orders","status":"STOPPED","podName":null,
-                     "message":"already stopped","retryAfterMs":0}
+                     "message":null,"retryAfterMs":null}
                     """);
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
@@ -198,8 +219,8 @@ class FleetMcpToolsTrafficTest {
             assertEquals("orders", result.path("mockId").asText());
             assertEquals("STOPPED", result.path("status").asText());
             assertTrue(result.path("podName").isNull());
-            assertEquals("already stopped", result.path("message").asText());
-            assertEquals(0, result.path("retryAfterMs").asInt(-1));
+            assertTrue(result.path("message").isNull());
+            assertTrue(result.path("retryAfterMs").isNull());
             assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
             assertEquals(0, transport.requestCount());
         }
@@ -222,6 +243,28 @@ class FleetMcpToolsTrafficTest {
         var transport = new QueuedTransport();
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, upstreamResponse);
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.stopMock("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertEquals("orders", error.details().get("mockId"));
+            assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "podName", "message", "retryAfterMs" })
+    void stopMockRejectsMissingRequiredNullableLifecycleFields(String missingField) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        ObjectNode lifecycle = mapper.createObjectNode().put("mockId", "orders").put("status", "STOPPED");
+        lifecycle.putNull("podName").putNull("message").putNull("retryAfterMs").remove(missingField);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, lifecycle.toString());
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
             ToolResponse response = tools.stopMock("orders");

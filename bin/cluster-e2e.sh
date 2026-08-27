@@ -11,9 +11,15 @@ keep=false
 run_id=${MOCK_FLEET_E2E_RUN_ID:-$(date -u +%Y%m%d%H%M%S)-$$}
 run_id=$(printf '%s' "${run_id}" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9-')
 run_id=${run_id:0:24}
+ownership_token=$(od -An -N16 -tx1 /dev/urandom | tr -d '[:space:]')
+if [[ ! "${ownership_token}" =~ ^[0-9a-f]{32}$ ]]; then
+  printf '[cluster-e2e] ERROR: Unable to generate an S3 ownership token.\n' >&2
+  exit 1
+fi
+ownership_suffix=${ownership_token:0:12}
 namespace="mock-fleet-e2e-${run_id}"
 release="fleet-${run_id}"
-bucket="mock-fleet-e2e-data-${run_id}"
+bucket="mock-fleet-e2e-data-${run_id}-${ownership_suffix}"
 bucket_owner_key=".mock-fleet-e2e-owner"
 mcp_port=${MOCK_FLEET_E2E_MCP_PORT:-18080}
 api_port=${MOCK_FLEET_E2E_API_PORT:-18081}
@@ -56,8 +62,8 @@ Live-run prerequisites:
   MOCK_FLEET_E2E_S3_ACCESS_KEY and MOCK_FLEET_E2E_S3_SECRET_KEY
 
 The suite creates and owns namespace ${namespace} and bucket ${bucket}. It proves
-that both are absent before creation, records the run ID in an S3 ownership marker,
-and refuses to reuse or delete an unverified bucket. Image repository/tag and local
+that both are absent before creation, verifies a new bucket is empty, records a hidden
+per-execution token in an S3 ownership marker, and refuses to reuse or delete an unverified bucket. Image repository/tag and local
 ports are configurable through the MOCK_FLEET_E2E_* variables documented in this script.
 EOF
 }
@@ -115,7 +121,7 @@ cleanup() {
         run_s3_cli cleanup s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 || true
         run_s3_cli delete s3api delete-bucket --bucket "${bucket}" >/dev/null 2>&1 || true
       else
-        log "WARNING: Refusing to empty or delete ${bucket}; its ownership marker does not match run ${run_id}."
+        log "WARNING: Refusing to empty or delete ${bucket}; its ownership marker does not match this execution."
       fi
     fi
     kubectl delete pv "${release}-pv" --ignore-not-found --wait=false >/dev/null 2>&1 || true
@@ -163,6 +169,10 @@ bucket_probe_state() {
   printf 'absent\n'
 }
 
+bucket_name_for_token() {
+  printf 'mock-fleet-e2e-data-%s-%s\n' "${run_id}" "${1:0:12}"
+}
+
 require_absent_bucket_state() {
   case "$1" in
     absent) return ;;
@@ -178,14 +188,18 @@ require_absent_bucket_state() {
 bucket_ownership_marker_matches() {
   local marker_owner
   if ! marker_owner=$(run_s3_cli ownership s3api head-object --bucket "${bucket}" \
-      --key "${bucket_owner_key}" --query Metadata.runid --output text 2>/dev/null); then
+      --key "${bucket_owner_key}" --query Metadata.ownershiptoken --output text 2>/dev/null); then
     return 1
   fi
-  ownership_marker_matches_run "${marker_owner}"
+  ownership_marker_matches_token "${marker_owner}"
 }
 
-ownership_marker_matches_run() {
-  [[ "$1" == "${run_id}" ]]
+ownership_marker_matches_token() {
+  [[ "$1" == "${ownership_token}" ]]
+}
+
+empty_bucket_probe_allows_ownership() {
+  [[ $1 -eq 0 && "$2" == 0 ]]
 }
 
 helm_deploy() {
@@ -637,13 +651,28 @@ self_test() {
     fail "Bucket probe accepted an ambiguous or forbidden result."
   fi
   log "Ambiguous bucket refusal contract passed."
-  ownership_marker_matches_run "${run_id}" \
-    || fail "Ownership marker rejected the current run ID."
-  if ownership_marker_matches_run "different-run"; then
-    fail "Ownership marker accepted a different run ID."
+  local first_bucket second_bucket
+  first_bucket=$(bucket_name_for_token "11111111111111111111111111111111")
+  second_bucket=$(bucket_name_for_token "22222222222222222222222222222222")
+  [[ "${first_bucket}" != "${second_bucket}" && ${#first_bucket} -le 63 && ${#second_bucket} -le 63 ]] \
+    || fail "Ownership tokens did not isolate run-specific bucket names."
+  log "Ownership-token bucket isolation contract passed."
+  empty_bucket_probe_allows_ownership 0 0 \
+    || fail "Empty bucket probe rejected an empty bucket."
+  if empty_bucket_probe_allows_ownership 0 1 || empty_bucket_probe_allows_ownership 1 0; then
+    fail "Empty bucket probe accepted content or an ambiguous read."
   fi
-  if ownership_marker_matches_run ""; then
-    fail "Ownership marker accepted a missing run ID."
+  log "Post-create empty-bucket gate passed."
+  ownership_marker_matches_token "${ownership_token}" \
+    || fail "Ownership marker rejected this execution."
+  if ownership_marker_matches_token "${run_id}"; then
+    fail "Ownership marker accepted a run ID without the ownership token."
+  fi
+  log "Run-ID-only marker refusal contract passed."
+  local different_token="0${ownership_token:1}"
+  [[ "${different_token}" != "${ownership_token}" ]] || different_token="1${ownership_token:1}"
+  if ownership_marker_matches_token "${different_token}"; then
+    fail "Ownership marker accepted a different ownership token."
   fi
   log "Ownership marker cleanup gate passed."
   log "Self-test passed."
@@ -714,8 +743,18 @@ require_absent_bucket_state "$(bucket_probe_state "${bucket_probe_status}" "${bu
 run_s3_cli create s3api create-bucket --bucket "${bucket}" >/dev/null \
   || fail "Unable to create ${bucket} through ${s3_endpoint}. Check SeaweedFS credentials and endpoint DNS."
 bucket_created=true
+bucket_object_count=""
+bucket_empty_probe_status=0
+if bucket_object_count=$(run_s3_cli empty-check s3api list-objects-v2 --bucket "${bucket}" \
+    --max-keys 1 --query KeyCount --output text); then
+  bucket_empty_probe_status=0
+else
+  bucket_empty_probe_status=$?
+fi
+empty_bucket_probe_allows_ownership "${bucket_empty_probe_status}" "${bucket_object_count}" \
+  || fail "Cannot claim ownership of ${bucket}; the new bucket is not provably empty."
 run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
-  --body /dev/null --metadata "runid=${run_id}" >/dev/null \
+  --body /dev/null --metadata "ownershiptoken=${ownership_token}" >/dev/null 2>&1 \
   || fail "Unable to write the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 bucket_ownership_marker_matches \
   || fail "Unable to verify the ownership marker for ${bucket}. Cleanup will refuse to delete it."

@@ -510,7 +510,11 @@ public final class FleetMcpTools {
 
     private void requireNullableText(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
-        if (value != null && !value.isNull() && !value.isTextual()) {
+        if (value == null) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " is required", mockId);
+        }
+        if (!value.isNull() && !value.isTextual()) {
             throw invalidUpstreamResponse(
                     "Fleet " + operation + " response field " + field + " must be a string or null", mockId);
         }
@@ -518,8 +522,11 @@ public final class FleetMcpTools {
 
     private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
-        if (value != null && !value.isNull()
-                && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
+        if (value == null) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " is required", mockId);
+        }
+        if (!value.isNull() && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
             throw invalidUpstreamResponse(
                     "Fleet " + operation + " response field " + field
                             + " must be a non-negative integer or null",
