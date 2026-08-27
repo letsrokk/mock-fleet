@@ -1,6 +1,7 @@
 nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
+clusterDomain: cluster.local
 
 fleet:
   proxy:
@@ -155,11 +156,78 @@ fleet:
       limits:
         cpu: "0.25"
         memory: 128Mi
+  mcp:
+    enabled: false
+    image:
+      repository: ghcr.io/letsrokk/mock-fleet/mcp
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicas: 1
+    apiBaseUrl: ""
+    proxyBaseUrl: ""
+    routing:
+      mode: ""
+      fleetHost: ""
+    allowedOrigins: []
+    outbound:
+      exceptions: []
+      allowedListeners: []
+      networkPolicy:
+        enabled: true
+        dnsNamespace: kube-system
+        dnsPodSelector:
+          k8s-app: kube-dns
+        allowedCidrs: []
+    sensitiveHeaders:
+      - Authorization
+      - Proxy-Authorization
+      - Cookie
+      - Set-Cookie
+      - X-API-Key
+    timeout: 10S
+    defaultPageSize: 50
+    maxPageSize: 200
+    maxPayloadBytes: 1048576
+    includedBodyBytes: 262144
+    service:
+      type: ClusterIP
+      ports:
+        http: 80
+        targetHttp: 8080
+    probes:
+      liveness:
+        path: /__fleet/mcp/health/live
+        initialDelaySeconds: 15
+        periodSeconds: 20
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      readiness:
+        path: /__fleet/mcp/health/ready
+        initialDelaySeconds: 2
+        periodSeconds: 3
+        timeoutSeconds: 2
+        successThreshold: 1
+        failureThreshold: 3
+      startup:
+        path: /__fleet/mcp/health/started
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 10
+        successThreshold: 1
+        failureThreshold: 30
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 128Mi
+      limits:
+        cpu: "0.5"
+        memory: 512Mi
 
 wiremock:
   podNamePrefix: mock-fleet
   containerName: wiremock
-  containerImage: wiremock/wiremock:latest
+  containerImage: wiremock/wiremock:3.13.2-2
   containerImagePullPolicy: IfNotPresent
   serviceAccount:
     create: true

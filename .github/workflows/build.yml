@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       maven_version:
-        description: Maven project version to use for packaged API/proxy artifacts.
+        description: Maven project version to use for packaged API/proxy/MCP artifacts.
         required: false
         default: ""
         type: string
@@ -25,6 +25,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  helm:
+    name: Test Helm chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint deploy/helm/mock-fleet
+
+      - name: Test MCP rendering
+        run: deploy/helm/mock-fleet/tests/render-mcp.sh
+
   fleet-proxy:
     name: Build fleet-proxy
     runs-on: ubuntu-latest
@@ -85,6 +102,38 @@ jobs:
         with:
           name: fleet-api-package
           path: fleet-api/target/quarkus-app
+          if-no-files-found: error
+
+  fleet-mcp:
+    name: Build fleet-mcp
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set MCP version
+        if: ${{ inputs.maven_version != '' }}
+        run: ./fleet-api/mvnw -B -f fleet-mcp/pom.xml versions:set -DnewVersion="${{ inputs.maven_version }}" -DgenerateBackupPoms=false
+
+      - name: Build MCP
+        run: ./fleet-api/mvnw -B -f fleet-mcp/pom.xml package -Dquarkus.container-image.build=false
+
+      - name: Test supported WireMock Admin contracts
+        run: fleet-mcp/tests/wiremock-admin-contract.sh
+
+      - name: Upload MCP package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-mcp-package
+          path: fleet-mcp/target/quarkus-app
           if-no-files-found: error
 
   fleet-dash:

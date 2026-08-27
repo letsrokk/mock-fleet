@@ -1,10 +1,11 @@
 # mock-fleet Helm Chart
 
-This chart deploys `mock-fleet` as three Kubernetes services:
+This chart deploys `mock-fleet` as three core Kubernetes services and one optional service:
 
 - `fleet-proxy`: routes incoming HTTP requests to per-mock WireMock pods.
 - `fleet-api`: manages mock pods, WireMock config, lifecycle cleanup, Hazelcast state, and persisted mappings.
 - `fleet-dash`: serves the dashboard under `/__fleet/`.
+- `fleet-mcp`: exposes typed MCP tools under `/__fleet/mcp` when enabled.
 
 ## Install
 
@@ -30,6 +31,7 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 Ingress is disabled by default. When enabled, the chart routes:
 
 - `/__fleet/api/*` to `fleet-api`
+- `/__fleet/mcp` to `fleet-mcp` when `fleet.mcp.enabled=true`
 - `/__fleet/proxy/health/*` to `fleet-proxy`
 - `/__fleet/dash/health/*` to `fleet-dash`
 - `/__fleet/*` to `fleet-dash`
@@ -46,6 +48,10 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --set ingress.enabled=true \
   --set ingress.host=mock-fleet.example.com
 ```
+
+`fleet-mcp` reaches the Fleet API and Fleet Proxy through helper-derived ClusterIP DNS names. It does not call the mock-pod resolver. In `PATH` mode it sends `/<mockId>/__admin/...` to Fleet Proxy. In `HOST` mode it connects to the same Proxy ClusterIP and sets `Host: <mockId>.<fleetHost>`.
+
+Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary mock URLs without authentication. MCP uses the same external access boundary as the Fleet API and does not change that behavior.
 
 ## Persistent Mappings
 
@@ -67,6 +73,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `nameOverride` | `""` | Override the chart name used in resource names. |
 | `fullnameOverride` | `""` | Override the full release resource name. |
 | `namespaceOverride` | `""` | Override the namespace rendered into namespaced resources. |
+| `clusterDomain` | `cluster.local` | Kubernetes cluster DNS suffix used for internal API and Proxy service URLs. |
 
 ### Proxy
 
@@ -159,13 +166,47 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 | `fleet.api.resources.limits.cpu` | `"2"` | API CPU limit. |
 | `fleet.api.resources.limits.memory` | `2Gi` | API memory limit. |
 
+### MCP
+
+MCP is disabled by default. It uses Streamable HTTP and must run with one replica. When enabled, the chart requires `wiremock.containerImage` to contain a pinned, parseable WireMock 3.x tag. MCP verifies the runtime with `/__admin/version`; WireMock 3.0.x does not expose that endpoint, so MCP verifies the legacy Admin mapping response and uses the pinned configured image version for that release line.
+
+| Value | Default | Description |
+| --- | --- | --- |
+| `fleet.mcp.enabled` | `false` | Deploy the MCP service and add its ingress route. |
+| `fleet.mcp.image.repository` | `ghcr.io/letsrokk/mock-fleet/mcp` | MCP image repository. |
+| `fleet.mcp.image.tag` | `""` | MCP image tag. Defaults to the chart `appVersion` when empty. |
+| `fleet.mcp.image.pullPolicy` | `IfNotPresent` | MCP image pull policy. |
+| `fleet.mcp.replicas` | `1` | MCP replica count. The stable transport requires exactly one. |
+| `fleet.mcp.apiBaseUrl` | `""` | Fleet API base URL override. Empty renders the API ClusterIP FQDN. |
+| `fleet.mcp.proxyBaseUrl` | `""` | Fleet Proxy base URL override. Empty renders the Proxy ClusterIP FQDN. |
+| `fleet.mcp.routing.mode` | `""` | `PATH` or `HOST`; empty inherits `fleet.proxy.routing.mode`. |
+| `fleet.mcp.routing.fleetHost` | `""` | Host suffix used to select a mock in `HOST` mode; empty inherits `ingress.host`. |
+| `fleet.mcp.allowedOrigins` | `[]` | Browser origins allowed to initialize MCP sessions; empty derives the ingress origin. |
+| `fleet.mcp.outbound.exceptions` | `[]` | Explicit target hosts allowed through recorder, proxy, and webhook target checks. |
+| `fleet.mcp.outbound.allowedListeners` | `[]` | WireMock serve-event listener names allowed in mappings, such as `webhook`. |
+| `fleet.mcp.outbound.networkPolicy.enabled` | `true` | Enforce the outbound address policy at connection time for managed WireMock pods. Requires a NetworkPolicy-capable CNI. |
+| `fleet.mcp.outbound.networkPolicy.dnsNamespace` | `kube-system` | Namespace containing the cluster DNS pods allowed by the WireMock egress policy. |
+| `fleet.mcp.outbound.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | Labels selecting the cluster DNS pods allowed by the WireMock egress policy. |
+| `fleet.mcp.outbound.networkPolicy.allowedCidrs` | `[]` | Private or special-use CIDRs explicitly allowed at connection time. Configure the corresponding host in `outbound.exceptions` too. |
+| `fleet.mcp.sensitiveHeaders` | common credential headers | Headers redacted from traffic, journal, and recorder results. |
+| `fleet.mcp.timeout` | `10S` | Internal Fleet API and Proxy request timeout. |
+| `fleet.mcp.defaultPageSize` | `50` | Default collection page size. |
+| `fleet.mcp.maxPageSize` | `200` | Maximum collection page size. |
+| `fleet.mcp.maxPayloadBytes` | `1048576` | Maximum complete structured result size. |
+| `fleet.mcp.includedBodyBytes` | `262144` | Maximum body content included in a result. |
+| `fleet.mcp.service.type` | `ClusterIP` | MCP service type. |
+| `fleet.mcp.service.ports.http` | `80` | MCP service HTTP port. |
+| `fleet.mcp.service.ports.targetHttp` | `8080` | MCP container HTTP port. |
+
+The MCP pod does not receive Kubernetes RBAC or a mounted service-account token. Only HTTP and HTTPS targets are accepted. MCP validates target hostnames before configuration, and the enabled-by-default WireMock egress NetworkPolicy enforces the public-address boundary again when WireMock connects. Private, loopback, link-local, multicast, metadata, and special-use destinations remain blocked unless both the host is listed in `outbound.exceptions` and its address range is listed in `outbound.networkPolicy.allowedCidrs`. Configure the DNS namespace and pod selector for clusters that do not label CoreDNS as `k8s-app=kube-dns`; disable this policy only when another connection-time egress control provides the same boundary.
+
 ### WireMock
 
 | Value | Default | Description |
 | --- | --- | --- |
 | `wiremock.podNamePrefix` | `mock-fleet` | Base prefix used for spawned WireMock pod names. |
 | `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
-| `wiremock.containerImage` | `wiremock/wiremock:latest` | Image used for spawned WireMock pods. |
+| `wiremock.containerImage` | `wiremock/wiremock:3.13.2-2` | Image used for spawned WireMock pods. MCP supports WireMock 3.0.0 and newer. |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
 | `wiremock.serviceAccount.name` | `""` | Service account name. A generated name is used when creation is enabled and this is empty. |
@@ -247,9 +288,9 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | Value | Default | Description |
 | --- | --- | --- |
 | `securityContext.runAsNonRoot` | `true` | Set `runAsNonRoot` on app pods. |
-| `env.javaOpts` | `""` | Java options passed to proxy and API pods. |
-| `env.javaToolOptions` | unset | Optional non-dev `JAVA_TOOL_OPTIONS` for proxy and API pods. |
-| `env.userDir` | `/workspace` | Value for `user.dir` in proxy and API pods. |
+| `env.javaOpts` | `""` | Java options passed to proxy, API, and MCP pods. |
+| `env.javaToolOptions` | unset | Optional non-dev `JAVA_TOOL_OPTIONS` for proxy, API, and MCP pods. |
+| `env.userDir` | `/workspace` | Value for `user.dir` in proxy, API, and MCP pods. |
 | `serviceAccount.create` | `true` | Create a service account for `fleet-api`. |
 | `serviceAccount.name` | `""` | Existing service account name, or generated name when empty. |
 | `serviceAccount.annotations` | `{}` | Service account annotations. |
@@ -263,7 +304,7 @@ The UI-editable WireMock user ConfigMap is managed by `fleet-api` at runtime, no
 
 ## Local Minikube Values
 
-`values.minikube.yaml` enables a Traefik ingress at `mock-fleet.minikube.localhost`, attaches it to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
+`values.minikube.yaml` enables a Traefik ingress and MCP at `mock-fleet.minikube.localhost`, attaches the ingress to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \

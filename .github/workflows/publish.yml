@@ -16,6 +16,7 @@ concurrency:
 env:
   PROXY_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/proxy
   API_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/api
+  MCP_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/mcp
   DASH_IMAGE_NAME: ghcr.io/letsrokk/mock-fleet/dash
   CHART_DIR: deploy/helm/mock-fleet
   CHART_REGISTRY: oci://ghcr.io/letsrokk/charts
@@ -95,6 +96,12 @@ jobs:
           name: fleet-api-package
           path: fleet-api/target/quarkus-app
 
+      - name: Download MCP package
+        uses: actions/download-artifact@v4
+        with:
+          name: fleet-mcp-package
+          path: fleet-mcp/target/quarkus-app
+
       - name: Download dashboard package
         uses: actions/download-artifact@v4
         with:
@@ -165,12 +172,31 @@ jobs:
             org.opencontainers.image.description=Static dashboard image for mock-fleet.
             org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
 
+      - name: Extract MCP Docker metadata
+        id: mcp_docker_metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.MCP_IMAGE_NAME }}
+          tags: |
+            ${{ needs.resolve-version.outputs.image_tags }}
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.title=mock-fleet-mcp
+            org.opencontainers.image.description=Quarkus MCP server for managing mock-fleet and WireMock through internal cluster services.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+          annotations: |
+            org.opencontainers.image.title=mock-fleet-mcp
+            org.opencontainers.image.description=Quarkus MCP server for managing mock-fleet and WireMock through internal cluster services.
+            org.opencontainers.image.documentation=https://github.com/letsrokk/mock-fleet/blob/main/README.docker.md
+
       - name: Verify Docker image tags
         shell: bash
         env:
           IMAGE_TAG: ${{ needs.resolve-version.outputs.image_tag }}
           PROXY_TAGS: ${{ steps.proxy_docker_metadata.outputs.tags }}
           API_TAGS: ${{ steps.api_docker_metadata.outputs.tags }}
+          MCP_TAGS: ${{ steps.mcp_docker_metadata.outputs.tags }}
           DASH_TAGS: ${{ steps.dash_docker_metadata.outputs.tags }}
         run: |
           set -euo pipefail
@@ -190,6 +216,7 @@ jobs:
 
           require_tag "proxy" "${PROXY_TAGS}" "${PROXY_IMAGE_NAME}:${IMAGE_TAG}"
           require_tag "API" "${API_TAGS}" "${API_IMAGE_NAME}:${IMAGE_TAG}"
+          require_tag "MCP" "${MCP_TAGS}" "${MCP_IMAGE_NAME}:${IMAGE_TAG}"
           require_tag "dashboard" "${DASH_TAGS}" "${DASH_IMAGE_NAME}:${IMAGE_TAG}"
 
       - name: Build and push proxy Docker image
@@ -211,6 +238,16 @@ jobs:
           tags: ${{ steps.api_docker_metadata.outputs.tags }}
           labels: ${{ steps.api_docker_metadata.outputs.labels }}
           annotations: ${{ steps.api_docker_metadata.outputs.annotations }}
+
+      - name: Build and push MCP Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: fleet-mcp
+          file: fleet-mcp/src/main/docker/Dockerfile.jvm
+          push: true
+          tags: ${{ steps.mcp_docker_metadata.outputs.tags }}
+          labels: ${{ steps.mcp_docker_metadata.outputs.labels }}
+          annotations: ${{ steps.mcp_docker_metadata.outputs.annotations }}
 
       - name: Build and push dashboard Docker image
         uses: docker/build-push-action@v6
@@ -255,9 +292,9 @@ jobs:
             exit 1
           fi
 
-          rendered="$(helm template mock-fleet "${chart_package}")"
+          rendered="$(helm template mock-fleet "${chart_package}" --set fleet.mcp.enabled=true)"
 
-          for image in "${PROXY_IMAGE_NAME}" "${API_IMAGE_NAME}" "${DASH_IMAGE_NAME}"; do
+          for image in "${PROXY_IMAGE_NAME}" "${API_IMAGE_NAME}" "${MCP_IMAGE_NAME}" "${DASH_IMAGE_NAME}"; do
             if ! grep -Fq "image: ${image}:${IMAGE_TAG}" <<< "${rendered}"; then
               echo "Rendered chart did not include image ${image}:${IMAGE_TAG}" >&2
               exit 1

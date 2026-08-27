@@ -10,6 +10,7 @@ CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
 LOCAL_PROXY_IMAGE="ghcr.io/letsrokk/mock-fleet/proxy:latest"
 LOCAL_API_IMAGE="ghcr.io/letsrokk/mock-fleet/api:latest"
+LOCAL_MCP_IMAGE="ghcr.io/letsrokk/mock-fleet/mcp:latest"
 LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet/dash:latest"
 REMOTE_DEV_MODULE=""
 ENABLE_LOGS=false
@@ -105,6 +106,11 @@ mark_changed_modules() {
                     changed_modules+=(api)
                 fi
                 ;;
+            fleet-mcp/*)
+                if ! has_module mcp ${changed_modules[@]+"${changed_modules[@]}"}; then
+                    changed_modules+=(mcp)
+                fi
+                ;;
             fleet-dash/*)
                 if ! has_module dash ${changed_modules[@]+"${changed_modules[@]}"}; then
                     changed_modules+=(dash)
@@ -127,10 +133,14 @@ build_maven_module() {
     local module="$1"
 
     echo "Packaging ${module} application and building image via Maven..."
-    (
-        cd "${REPO_ROOT}/fleet-${module}"
-        ./mvnw "${MAVEN_ARGS[@]}"
-    )
+    if [[ "${module}" == "mcp" ]]; then
+        "${REPO_ROOT}/fleet-api/mvnw" -f "${REPO_ROOT}/fleet-mcp/pom.xml" "${MAVEN_ARGS[@]}"
+    else
+        (
+            cd "${REPO_ROOT}/fleet-${module}"
+            ./mvnw "${MAVEN_ARGS[@]}"
+        )
+    fi
 }
 
 deployment_name_for_component() {
@@ -250,7 +260,7 @@ require_minikube_running
 
 CHANGED_MODULES=()
 if ! release_exists; then
-    CHANGED_MODULES=(proxy api dash)
+    CHANGED_MODULES=(proxy api mcp dash)
     echo "Helm release ${RELEASE_NAME} is not installed in namespace ${NAMESPACE}; building all module images."
 else
     while IFS= read -r module; do
@@ -287,6 +297,10 @@ if [[ ${#CHANGED_MODULES[@]} -gt 0 ]]; then
         build_maven_module api
     fi
 
+    if has_module mcp "${CHANGED_MODULES[@]}"; then
+        build_maven_module mcp
+    fi
+
     if has_module dash "${CHANGED_MODULES[@]}"; then
         echo "Building dashboard image..."
         docker build -t "${LOCAL_DASH_IMAGE}" "${REPO_ROOT}/fleet-dash"
@@ -310,6 +324,8 @@ HELM_ARGS=(
     --set "fleet.proxy.image.tag=latest"
     --set "fleet.api.image.repository=ghcr.io/letsrokk/mock-fleet/api"
     --set "fleet.api.image.tag=latest"
+    --set "fleet.mcp.image.repository=ghcr.io/letsrokk/mock-fleet/mcp"
+    --set "fleet.mcp.image.tag=latest"
     --set "fleet.dash.image.repository=ghcr.io/letsrokk/mock-fleet/dash"
     --set "fleet.dash.image.tag=latest"
 )
@@ -333,7 +349,7 @@ else
     profile_message="default Quarkus profile"
 fi
 
-echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
+echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, MCP image=${LOCAL_MCP_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
 if has_module proxy ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
@@ -342,6 +358,13 @@ fi
 
 if has_module api ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     rollout_component api "$(deployment_name_for_component api)"
+fi
+
+if has_module mcp ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
+    mcp_deployment="$(deployment_name_for_component mcp)"
+    if [[ -n "${mcp_deployment}" ]]; then
+        rollout_component mcp "${mcp_deployment}"
+    fi
 fi
 
 if has_module dash ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then

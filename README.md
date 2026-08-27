@@ -1,12 +1,15 @@
 # mock-fleet
 
-`mock-fleet` routes HTTP requests to on-demand WireMock pods in Kubernetes and provides a small dashboard for operating those mocks.
+`mock-fleet` routes HTTP requests to on-demand WireMock pods in Kubernetes and provides a dashboard and optional MCP server for operating those mocks.
 
-It is deployed as three services:
+It is deployed as three core services and one optional service:
 
 - `fleet-proxy`: routes incoming mock traffic.
 - `fleet-api`: manages WireMock pods, configuration, state, and persisted mappings.
 - `fleet-dash`: dashboard served under `/__fleet/`.
+- `fleet-mcp`: exposes typed fleet, stub, traffic, recorder, body-file, and scenario tools under `/__fleet/mcp`.
+
+`fleet-mcp` talks only to the internal Fleet API and Fleet Proxy ClusterIP services. It never resolves mock pods or uses pod IPs. Fleet Proxy keeps ownership of resolving or starting a WireMock pod before it forwards an Admin API or mock request.
 
 ## Main Functions
 
@@ -49,6 +52,20 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 
 For all chart values and deployment options, see the [Helm chart README](deploy/helm/mock-fleet/README.md).
 
+Enable MCP explicitly:
+
+```bash
+helm upgrade --install mock-fleet deploy/helm/mock-fleet \
+  --namespace mock-fleet \
+  --create-namespace \
+  --set ingress.enabled=true \
+  --set fleet.mcp.enabled=true
+```
+
+The MCP service uses stateful Streamable HTTP and therefore runs one replica. Enabling it requires a pinned WireMock 3.x image; the default is `wiremock/wiremock:3.13.2-2`.
+
+The existing Fleet Proxy still forwards direct `/__admin` requests from normal mock URLs without authentication. Enabling MCP does not add an authorization boundary to those routes. Protect the ingress at the platform layer when public Admin API access is not acceptable.
+
 For local Minikube development:
 
 ```bash
@@ -57,7 +74,7 @@ make local-deploy
 
 For an example Minikube cluster setup for local deployment and development, see [letsrokk/minikube](https://github.com/letsrokk/minikube).
 
-The local profile uses Traefik, HTTPS, and PATH routing. Run `minikube tunnel` while using the deployment, and trust the Minikube local CA in curl, your browser, and any development JVM. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
+The local profile uses Traefik, HTTPS, PATH routing, and enables MCP. Run `minikube tunnel` while using the deployment, and trust the Minikube local CA in curl, your browser, and any development JVM. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
 
 The local lifecycle targets assume that Minikube is already running. Optional Make variables select deployment behavior without adding separate targets:
 
