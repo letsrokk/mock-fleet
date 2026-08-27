@@ -2,7 +2,6 @@ package com.github.letsrokk.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -56,6 +55,20 @@ public final class FleetMcpTools {
                 page(fleetApi.listMocks(), "mocks", limit, offset)));
     }
 
+    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse listMockConfigs(
+            @ToolArg(description = "Page size", required = false) Integer limit,
+            @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
+        return fleet("list_mock_configs", () -> {
+            JsonNode view = fleetApi.getConfig();
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            result.set("mockIds", view.path("savedMockIds"));
+            return McpToolExecutor.ToolResult.of("Listed saved mock configurations.",
+                    page(result, "mockIds", limit, offset));
+        });
+    }
+
     @Tool(name = "get_mock_config", description = "Get one mock's configuration and Fleet routing metadata.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getMockConfig(@ToolArg(description = "Mock ID") String mockId) {
         return fleet("get_mock_config", () -> {
@@ -79,7 +92,7 @@ public final class FleetMcpTools {
         });
     }
 
-    @Tool(name = "update_mock_config", description = "Replace a mock's complete options and resources using optimistic concurrency.",
+    @Tool(name = "update_mock_config", description = "Create or replace a mock's complete saved options and resources using optimistic concurrency.",
             inputSchema = @Tool.InputSchema(generator = UpdateMockConfigInputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse updateMockConfig(

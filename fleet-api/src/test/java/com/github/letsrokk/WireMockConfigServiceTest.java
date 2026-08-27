@@ -11,6 +11,7 @@ import io.fabric8.kubernetes.client.dsl.NamespaceableResource;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.io.ByteArrayInputStream;
@@ -69,6 +70,51 @@ class WireMockConfigServiceTest {
         assertEquals(Map.of(), mock.user().resources().limits());
         assertEquals(Map.of(), mock.effective().resources().requests());
         assertEquals(Map.of(), mock.effective().resources().limits());
+    }
+
+    @Test
+    void viewListsOnlySortedUserSavedMockIds() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: zeta
+                      options: []
+                    - id: alpha
+                      options:
+                        - --verbose
+                """);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        WireMockConfigService service = service(kubernetesClient, config());
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: baseline-only
+                      options:
+                        - --disable-banner
+                """.getBytes(StandardCharsets.UTF_8)));
+        when(service.podManager.listActiveMocks()).thenReturn(List.of(
+                new PodManager.ActiveMockPod("active-only", "mock-fleet-active-only-1")));
+
+        WireMockConfigService.ConfigView view = service.view();
+
+        assertEquals(List.of("alpha", "zeta"), view.savedMockIds());
+        assertEquals(List.of("active-only", "alpha", "baseline-only", "zeta"), view.mockIds());
     }
 
     @Test
@@ -197,6 +243,48 @@ class WireMockConfigServiceTest {
                 "futureOnly"));
 
         verify(createdConfigMap).create();
+    }
+
+    @Test
+    void upsertAddsMissingMockWithoutOverwritingSavedConfigs() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<ConfigMap> updatedConfigMap = mock(NamespaceableResource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: alpha
+                      options:
+                        - --verbose
+                """);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        when(namespacedConfigMaps.resource(any())).thenReturn(updatedConfigMap);
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        service.upsertMockConfig("beta", new WireMockConfigService.ConfigUpdateRequest(
+                "42",
+                List.of(),
+                new WireMockConfigService.ResourceData(Map.of(), Map.of()),
+                "futureOnly"));
+
+        ArgumentCaptor<ConfigMap> persistedConfig = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(namespacedConfigMaps).resource(persistedConfig.capture());
+        String yaml = persistedConfig.getValue().getData().get("wiremock-options.yaml");
+        assertEquals(List.of("alpha", "beta"), WireMockConfigDocument.load(yaml).mockConfigs().keySet().stream().toList());
+        verify(updatedConfigMap).update();
     }
 
     @Test

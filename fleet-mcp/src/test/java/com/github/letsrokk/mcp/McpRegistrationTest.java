@@ -22,7 +22,8 @@ import org.junit.jupiter.api.Test;
 class McpRegistrationTest {
 
     private static final Set<String> EXPECTED_TOOLS = Set.of(
-            "list_mocks", "get_mock_config", "list_option_definitions", "update_mock_config", "delete_mock_config", "stop_mock",
+            "list_mocks", "list_mock_configs", "get_mock_config", "list_option_definitions", "update_mock_config",
+            "delete_mock_config", "stop_mock",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "delete_stub",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
@@ -83,6 +84,26 @@ class McpRegistrationTest {
             assertEquals("object", argument.path("type").asText(), toolName + "." + argumentName);
             assertFalse(argument.path("properties").has("map"), toolName + "." + argumentName);
         });
+    }
+
+    @Test
+    void getMockConfigRequiresOnlyTheSingularMockIdArgument() {
+        var arguments = toolManager.getTool("get_mock_config").arguments();
+
+        assertEquals(1, arguments.size());
+        assertEquals("mockId", arguments.getFirst().name());
+        assertEquals("java.lang.String", arguments.getFirst().type().getTypeName());
+        assertTrue(arguments.getFirst().required());
+    }
+
+    @Test
+    void listMockConfigsIsReadOnlyWithOptionalPaginationArguments() {
+        var tool = toolManager.getTool("list_mock_configs");
+
+        assertEquals(List.of("limit", "offset"), tool.arguments().stream().map(argument -> argument.name()).toList());
+        assertTrue(tool.arguments().stream().noneMatch(argument -> argument.required()));
+        assertTrue(tool.annotations().orElseThrow().readOnlyHint());
+        assertFalse(tool.annotations().orElseThrow().destructiveHint());
     }
 
     @Test
