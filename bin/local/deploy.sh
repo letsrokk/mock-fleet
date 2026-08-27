@@ -13,13 +13,14 @@ LOCAL_API_IMAGE="ghcr.io/letsrokk/mock-fleet/api:latest"
 LOCAL_MCP_IMAGE="ghcr.io/letsrokk/mock-fleet/mcp:latest"
 LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet/dash:latest"
 REMOTE_DEV_MODULE=""
+REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
@@ -31,6 +32,8 @@ Options:
   --routing <mode>    Override fleet.proxy.routing.mode from Helm values. Allowed: HOST, PATH.
   --remote-dev <module>
                       Enable Quarkus remote dev for one module. Allowed: proxy, api.
+  --rebuild <target>  Force one module image, or all module images, to rebuild.
+                      Allowed: dash, api, proxy, mcp, all.
   --help              Show this help.
 EOF
 }
@@ -195,6 +198,11 @@ while [[ $# -gt 0 ]]; do
             REMOTE_DEV_MODULE="$2"
             shift 2
             ;;
+        --rebuild)
+            require_option_value "$1" "${2:-}"
+            REBUILD_TARGET="$2"
+            shift 2
+            ;;
         --help)
             usage
             exit 0
@@ -215,6 +223,13 @@ fi
 
 if [[ -n "${REMOTE_DEV_MODULE}" && "${REMOTE_DEV_MODULE}" != "proxy" && "${REMOTE_DEV_MODULE}" != "api" ]]; then
     echo "Invalid remote dev module: ${REMOTE_DEV_MODULE}. Expected proxy or api." >&2
+    usage >&2
+    exit 1
+fi
+
+if [[ "${REBUILD_TARGET}" != "false" && "${REBUILD_TARGET}" != "dash" && "${REBUILD_TARGET}" != "api" \
+    && "${REBUILD_TARGET}" != "proxy" && "${REBUILD_TARGET}" != "mcp" && "${REBUILD_TARGET}" != "all" ]]; then
+    echo "Invalid rebuild target: ${REBUILD_TARGET}. Expected false, dash, api, proxy, mcp, or all." >&2
     usage >&2
     exit 1
 fi
@@ -268,6 +283,12 @@ else
             CHANGED_MODULES+=("${module}")
         fi
     done < <(mark_changed_modules)
+fi
+
+if [[ "${REBUILD_TARGET}" == "all" ]]; then
+    CHANGED_MODULES=(proxy api mcp dash)
+elif [[ "${REBUILD_TARGET}" != "false" ]] && ! has_module "${REBUILD_TARGET}" ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
+    CHANGED_MODULES+=("${REBUILD_TARGET}")
 fi
 
 if [[ -n "${REMOTE_DEV_MODULE}" ]] && ! has_module "${REMOTE_DEV_MODULE}" ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then

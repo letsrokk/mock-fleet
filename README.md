@@ -83,6 +83,8 @@ make local-deploy LOGS=true
 make local-deploy DEV=true                 # API remote development
 make local-deploy DEV=proxy
 make local-deploy DEV=proxy PORT_FORWARD=true
+make local-deploy REBUILD=mcp            # Force one local image rebuild
+make local-deploy REBUILD=all            # Force all local image rebuilds
 make local-deploy NAMESPACE=test-fleet
 
 make local-destroy
@@ -90,7 +92,7 @@ make local-destroy RELEASE=mock-fleet NAMESPACE=test-fleet
 make local-destroy DELETE_NAMESPACE=true
 ```
 
-`DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. Run `make help` for the complete target and variable summary.
+`DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
 
 ## License And Copyright
 

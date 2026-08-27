@@ -42,6 +42,9 @@ jobs:
       - name: Test MCP rendering
         run: deploy/helm/mock-fleet/tests/render-mcp.sh
 
+      - name: Test local rebuild selection
+        run: bin/local/tests/deploy-rebuild.sh
+
   fleet-proxy:
     name: Build fleet-proxy
     runs-on: ubuntu-latest
