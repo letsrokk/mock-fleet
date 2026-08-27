@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkiverse.mcp.server.ToolResponse;
 import io.vertx.core.http.HttpMethod;
-import io.vertx.core.json.JsonObject;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -40,10 +39,10 @@ class FleetMcpToolsTrafficTest {
                 new McpToolExecutor(registry), metrics);
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var create = executor.submit(() -> tools.createStub("orders", new JsonObject("{}")));
+            var create = executor.submit(() -> tools.createStub("orders", Map.of()));
             assertTrue(transport.createEntered.await(1, TimeUnit.SECONDS));
 
-            var snapshot = executor.submit(() -> tools.snapshotRequests("orders", new JsonObject("{}")));
+            var snapshot = executor.submit(() -> tools.snapshotRequests("orders", Map.of()));
             assertFalse(transport.snapshotScanEntered.await(100, TimeUnit.MILLISECONDS));
 
             transport.releaseCreate.countDown();

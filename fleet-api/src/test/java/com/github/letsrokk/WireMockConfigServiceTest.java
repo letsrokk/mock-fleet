@@ -13,11 +13,14 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
@@ -27,6 +30,46 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WireMockConfigServiceTest {
+
+    @Test
+    void viewPreservesInheritedUserResourcesAsNull() {
+        WireMockConfigService.ConfigView view = configViewForUserYaml("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --verbose
+                """);
+
+        WireMockConfigService.MockConfigView mock = view.mocks().getFirst();
+        assertNull(mock.user().resources());
+        assertEquals("0.5", mock.effective().resources().requests().get("cpu"));
+        assertEquals("1Gi", mock.effective().resources().limits().get("memory"));
+    }
+
+    @Test
+    void viewPreservesExplicitEmptyUserResourcesAsAnOverride() {
+        WireMockConfigService.ConfigView view = configViewForUserYaml("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --verbose
+                      resources:
+                        requests: {}
+                        limits: {}
+                """);
+
+        WireMockConfigService.MockConfigView mock = view.mocks().getFirst();
+        assertEquals(Map.of(), mock.user().resources().requests());
+        assertEquals(Map.of(), mock.user().resources().limits());
+        assertEquals(Map.of(), mock.effective().resources().requests());
+        assertEquals(Map.of(), mock.effective().resources().limits());
+    }
 
     @Test
     void loadUserConfigCreatesMissingUserConfigMapBeforeStartingWatch() {
@@ -207,6 +250,38 @@ class WireMockConfigServiceTest {
         service.podManager = mock(PodManager.class);
         when(service.podManager.listActiveMocks()).thenReturn(List.of());
         return service;
+    }
+
+    private WireMockConfigService.ConfigView configViewForUserYaml(String userYaml) {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("mock-fleet")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(configMap("user-config", "42", userYaml));
+
+        WireMockConfigService service = service(kubernetesClient, config());
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                        memory: 512Mi
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                  mocks: []
+                """.getBytes(StandardCharsets.UTF_8)));
+        return service.view();
     }
 
     private MockFleetConfig config() {
