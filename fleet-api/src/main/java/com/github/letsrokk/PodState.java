@@ -45,7 +45,7 @@ public class PodState {
         return this.podMap.get(mockId);
     }
 
-    public StartClaim claimStart(String mockId) {
+    public StartClaim claimStart(String mockId, long nowEpochMillis, long startupLeaseMillis) {
         podLifecycleMap.lock(mockId);
         try {
             MockPodRef pod = podMap.get(mockId);
@@ -53,13 +53,16 @@ public class PodState {
                 return new StartClaim(false, MockPodLifecycle.running(null, pod.podName()), pod);
             }
             MockPodLifecycle current = podLifecycleMap.get(mockId);
-            if (current != null && current.status() == MockLifecycleStatus.STARTING) {
-                return new StartClaim(false, current, null);
+            if (isFreshStartingAttempt(current, nowEpochMillis, startupLeaseMillis)) {
+                return new StartClaim(false, current, null, null);
             }
+            String previousPodName = current != null && current.status() == MockLifecycleStatus.STARTING
+                    ? current.podName()
+                    : null;
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle starting = MockPodLifecycle.starting(attemptId, null);
+            MockPodLifecycle starting = MockPodLifecycle.starting(attemptId, previousPodName, nowEpochMillis);
             podLifecycleMap.put(mockId, starting);
-            return new StartClaim(true, starting, null);
+            return new StartClaim(true, starting, null, previousPodName);
         } finally {
             podLifecycleMap.unlock(mockId);
         }
@@ -84,7 +87,7 @@ public class PodState {
                 lastAccessTimeMap.remove(pod.podName());
             }
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle replacement = MockPodLifecycle.starting(attemptId, null);
+            MockPodLifecycle replacement = MockPodLifecycle.starting(attemptId, null, System.currentTimeMillis());
             podLifecycleMap.put(mockId, replacement);
             return new RestartClaim(true, replacement, previousPodName);
         } finally {
@@ -99,7 +102,8 @@ public class PodState {
             if (!isCurrentStartingAttempt(current, attemptId)) {
                 return false;
             }
-            podLifecycleMap.put(mockId, MockPodLifecycle.starting(attemptId, podName));
+            podLifecycleMap.put(mockId,
+                    MockPodLifecycle.starting(attemptId, podName, current.startedAtEpochMillis()));
             return true;
         } finally {
             podLifecycleMap.unlock(mockId);
@@ -146,7 +150,11 @@ public class PodState {
             if (pod != null) {
                 lastAccessTimeMap.remove(pod.podName());
             }
-            podLifecycleMap.put(mockId, MockPodLifecycle.stopped(podName));
+            if (podName != null && !podName.isBlank()) {
+                podLifecycleMap.put(mockId, MockPodLifecycle.stopped(podName));
+            } else if (lifecycle != null) {
+                podLifecycleMap.remove(mockId);
+            }
             return new StopClaim(pod, podName);
         } finally {
             podLifecycleMap.unlock(mockId);
@@ -160,7 +168,7 @@ public class PodState {
             if (current != null
                     && current.status() == MockLifecycleStatus.STOPPED
                     && java.util.Objects.equals(current.podName(), podName)) {
-                podLifecycleMap.put(mockId, MockPodLifecycle.stopped());
+                podLifecycleMap.remove(mockId);
             }
         } finally {
             podLifecycleMap.unlock(mockId);
@@ -183,6 +191,17 @@ public class PodState {
                 && java.util.Objects.equals(current.attemptId(), attemptId);
     }
 
+    private boolean isFreshStartingAttempt(MockPodLifecycle current, long nowEpochMillis, long startupLeaseMillis) {
+        if (current == null || current.status() != MockLifecycleStatus.STARTING
+                || current.startedAtEpochMillis() <= 0L) {
+            return false;
+        }
+        if (nowEpochMillis < current.startedAtEpochMillis()) {
+            return true;
+        }
+        return nowEpochMillis - current.startedAtEpochMillis() < Math.max(1L, startupLeaseMillis);
+    }
+
     public IMap<String, MockPodRef> getPods() {
         return this.podMap;
     }
@@ -193,7 +212,9 @@ public class PodState {
 
     public void markStartupPodName(String mockId, String podName) {
         MockPodLifecycle current = podLifecycleMap.get(mockId);
-        podLifecycleMap.put(mockId, MockPodLifecycle.starting(current == null ? null : current.attemptId(), podName));
+        podLifecycleMap.put(mockId, MockPodLifecycle.starting(
+                current == null ? null : current.attemptId(), podName,
+                current == null ? 0L : current.startedAtEpochMillis()));
     }
 
     void markStartupFailed(String mockId, RuntimeException exception) {
@@ -310,7 +331,10 @@ public class PodState {
         }
     }
 
-    public record StartClaim(boolean claimed, MockPodLifecycle lifecycle, MockPodRef pod) {
+    public record StartClaim(boolean claimed, MockPodLifecycle lifecycle, MockPodRef pod, String previousPodName) {
+        public StartClaim(boolean claimed, MockPodLifecycle lifecycle, MockPodRef pod) {
+            this(claimed, lifecycle, pod, null);
+        }
     }
 
     public record RestartClaim(boolean claimed, MockPodLifecycle lifecycle, String previousPodName) {

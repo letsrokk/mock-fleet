@@ -7,6 +7,10 @@ import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.MapListener;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -41,14 +45,50 @@ class PodStateTest {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap, lifecycleMap);
-        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1");
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L);
         when(lifecycleMap.get("demo")).thenReturn(starting);
 
-        PodState.StartClaim claim = podState.claimStart("demo");
+        PodState.StartClaim claim = podState.claimStart("demo", 1_999L, 1_000L);
 
         assertEquals(false, claim.claimed());
         assertEquals(starting, claim.lifecycle());
         verify(lifecycleMap, never()).put(eq("demo"), any());
+    }
+
+    @Test
+    void claimStartAtomicallyReclaimsAStaleAttempt() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodLifecycle stale = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L);
+        when(lifecycleMap.get("demo")).thenReturn(stale);
+
+        PodState.StartClaim claim = podState.claimStart("demo", 2_000L, 1_000L);
+
+        assertEquals(true, claim.claimed());
+        assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
+        assertEquals(2_000L, claim.lifecycle().startedAtEpochMillis());
+        assertEquals("mock-fleet-demo-1", claim.lifecycle().podName());
+        assertEquals("mock-fleet-demo-1", claim.previousPodName());
+        org.junit.jupiter.api.Assertions.assertNotEquals("attempt-1", claim.lifecycle().attemptId());
+        verify(lifecycleMap).put("demo", claim.lifecycle());
+        when(lifecycleMap.get("demo")).thenReturn(claim.lifecycle());
+        assertEquals(false, podState.completeStart("demo", "attempt-1",
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1")));
+    }
+
+    @Test
+    void startupPodNameUpdatePreservesLeaseTimestamp() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null, 1_000L);
+        when(lifecycleMap.get("demo")).thenReturn(starting);
+
+        assertEquals(true, podState.markStartupPodName("demo", "attempt-1", "mock-fleet-demo-1"));
+
+        verify(lifecycleMap).put("demo",
+                MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L));
     }
 
     @Test
@@ -59,7 +99,7 @@ class PodStateTest {
         when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.failed(
                 "attempt-1", "mock-fleet-demo-1", "image pull failed"));
 
-        PodState.StartClaim claim = podState.claimStart("demo");
+        PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 1_000L);
 
         assertEquals(true, claim.claimed());
         assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
@@ -113,6 +153,71 @@ class PodStateTest {
         assertEquals("mock-fleet-demo-1", result.podName());
         verify(lifecycleMap).put("demo", new MockPodLifecycle(
                 null, "mock-fleet-demo-1", MockLifecycleStatus.STOPPED, null));
+    }
+
+    @Test
+    void stopOfAbsentMockDoesNotCreateATombstone() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(podMap.remove("demo")).thenReturn(null);
+        when(lifecycleMap.get("demo")).thenReturn(null);
+
+        PodState.StopClaim result = podState.stop("demo");
+
+        assertEquals(null, result.podName());
+        verify(lifecycleMap, never()).put(eq("demo"), any());
+    }
+
+    @Test
+    void stopWithoutAStartupPodNameRemovesStateAndInvalidatesLateCompletion() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        when(lifecycleMap.get("demo"))
+                .thenReturn(MockPodLifecycle.starting("attempt-1", null, 1_000L))
+                .thenReturn(null);
+
+        PodState.StopClaim result = podState.stop("demo");
+        boolean accepted = podState.completeStart(
+                "demo", "attempt-1", new MockPodRef("mock-fleet-demo-1", "10.0.0.1"));
+
+        assertEquals(null, result.podName());
+        assertEquals(false, accepted);
+        verify(lifecycleMap).remove("demo");
+        verify(podMap, never()).put(eq("demo"), any());
+    }
+
+    @Test
+    void confirmedKubernetesDeletionRemovesStoppedLifecycleState() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodLifecycle stopped = MockPodLifecycle.stopped("mock-fleet-demo-1");
+        when(lifecycleMap.get("demo")).thenReturn(stopped);
+
+        podState.confirmStopped("demo", "mock-fleet-demo-1");
+
+        verify(lifecycleMap).remove("demo");
+        verify(lifecycleMap, never()).put("demo", MockPodLifecycle.stopped());
+    }
+
+    @Test
+    void startupLeaseTimestampSurvivesJavaSerialization() throws Exception {
+        MockPodLifecycle lifecycle = MockPodLifecycle.starting(
+                "attempt-1", "mock-fleet-demo-1", 1_234L);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(lifecycle);
+        }
+
+        MockPodLifecycle restored;
+        try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            restored = (MockPodLifecycle) input.readObject();
+        }
+
+        assertEquals(lifecycle, restored);
+        assertEquals(1_234L, restored.startedAtEpochMillis());
     }
 
     @Test

@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
@@ -139,6 +140,24 @@ class PodManagerTest {
     }
 
     @Test
+    void listMocksOmitsStoppedDeletionRetryState() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        IMap<String, MockPodRef> pods = mock(IMap.class);
+        @SuppressWarnings("unchecked")
+        IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+        when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
+        when(pods.entrySet()).thenReturn(Map.<String, MockPodRef>of().entrySet());
+        when(lifecycles.entrySet()).thenReturn(Map.of(
+                "deleting", MockPodLifecycle.stopped("mock-fleet-deleting-1")).entrySet());
+
+        assertEquals(List.of(), podManager.listMocks());
+    }
+
+    @Test
     void restartActiveDoesNotStartAReplacementForFailedMock() {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager();
@@ -201,6 +220,7 @@ class PodManagerTest {
             }
         };
         podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.startExecutor = task -> {
             Thread thread = new Thread(task);
             thread.setUncaughtExceptionHandler((ignored, error) -> { });
@@ -214,7 +234,8 @@ class PodManagerTest {
         };
         MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null);
         MockPodLifecycle failed = MockPodLifecycle.failed("attempt-1", null, failure.getMessage());
-        when(podState.claimStart("demo")).thenReturn(new PodState.StartClaim(true, starting, null));
+        when(podState.claimStart(eq("demo"), anyLong(), eq(2_000L)))
+                .thenReturn(new PodState.StartClaim(true, starting, null));
         when(podState.lifecycle("demo")).thenReturn(failed);
 
         PodManager.MockPodStatus result = podManager.startMock("demo");
@@ -222,6 +243,46 @@ class PodManagerTest {
         assertEquals(MockLifecycleStatus.FAILED, result.status());
         assertEquals("ImagePullBackOff: denied", result.message());
         verify(podState).failStart("demo", "attempt-1", failure);
+    }
+
+    @Test
+    void supersededStartupWorkerDeletesItsLatePod() {
+        PodState podState = mock(PodState.class);
+        AtomicBoolean latePodDeleted = new AtomicBoolean();
+        MockPodRef latePod = new MockPodRef("mock-fleet-demo-old", "10.0.0.1");
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                return latePod;
+            }
+
+            @Override
+            boolean deletePod(MockPodRef pod) {
+                latePodDeleted.set(true);
+                return true;
+            }
+        };
+        podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        podManager.startExecutor = task -> {
+            try {
+                task.run();
+            } catch (PodCreationException ignored) {
+                // The request already observes the replacement lifecycle below.
+            }
+        };
+        MockPodLifecycle oldAttempt = MockPodLifecycle.starting("attempt-old", null, 1_000L);
+        MockPodLifecycle replacement = MockPodLifecycle.starting("attempt-new", null, 2_000L);
+        when(podState.claimStart(eq("demo"), anyLong(), eq(2_000L)))
+                .thenReturn(new PodState.StartClaim(true, oldAttempt, null));
+        when(podState.completeStart("demo", "attempt-old", latePod)).thenReturn(false);
+        when(podState.lifecycle("demo")).thenReturn(replacement);
+
+        PodManager.MockPodStatus result = podManager.startMock("demo");
+
+        assertTrue(latePodDeleted.get());
+        assertEquals("attempt-new", replacement.attemptId());
+        assertEquals(MockLifecycleStatus.STARTING, result.status());
     }
 
     @Test
@@ -366,6 +427,8 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         IMap<String, MockPodRef> pods = mock(IMap.class);
         @SuppressWarnings("unchecked")
+        IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        @SuppressWarnings("unchecked")
         MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
         @SuppressWarnings("unchecked")
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
@@ -376,9 +439,10 @@ class PodManagerTest {
         podManager.config = config;
 
         Pod ownedPod = pod("owned-pod", "Running");
+        Pod startingPod = pod("starting-pod", "Pending", false);
         Pod orphanPod = pod("orphan-pod", "Running");
         PodList podList = new PodList();
-        podList.setItems(List.of(ownedPod, orphanPod));
+        podList.setItems(List.of(ownedPod, startingPod, orphanPod));
 
         when(kubernetesClient.getNamespace()).thenReturn("test");
         when(kubernetesClient.pods()).thenReturn(podOperations);
@@ -386,7 +450,10 @@ class PodManagerTest {
         when(namespacedPods.withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)).thenReturn(namespacedPods);
         when(namespacedPods.list()).thenReturn(podList);
         when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
         when(pods.values()).thenReturn(List.of(new MockPodRef("owned-pod", "10.0.0.1")));
+        when(lifecycles.values()).thenReturn(List.of(
+                MockPodLifecycle.starting("attempt-1", "starting-pod", 1_000L)));
         when(kubernetesClient.resource(orphanPod).delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
 
         podManager.cleanUpOrphanedPods();
@@ -394,6 +461,7 @@ class PodManagerTest {
         verify(namespacedPods).withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE);
         verify(kubernetesClient.resource(orphanPod)).delete();
         verify(kubernetesClient.resource(ownedPod), never()).delete();
+        verify(kubernetesClient.resource(startingPod), never()).delete();
         verify(kubernetesClient, never()).services();
     }
 
@@ -527,10 +595,11 @@ class PodManagerTest {
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
 
         when(podState.getPod("demo")).thenReturn(null);
-        when(podState.claimStart("demo")).thenReturn(new PodState.StartClaim(true,
-                MockPodLifecycle.starting("attempt-1", null), null));
+        when(podState.claimStart(eq("demo"), anyLong(), eq(2_000L))).thenReturn(new PodState.StartClaim(true,
+                MockPodLifecycle.starting("attempt-1", null, 1_000L), null));
         when(podState.completeStart(eq("demo"), eq("attempt-1"), any())).thenReturn(true);
 
         String upstreamBaseUrl = podManager.getUpstreamBaseUrl("demo");

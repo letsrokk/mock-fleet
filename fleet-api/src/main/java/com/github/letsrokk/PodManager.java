@@ -62,9 +62,10 @@ public class PodManager {
     }
 
     public MockPodStatus startMock(String mockId) {
-        PodState.StartClaim claim = podState.claimStart(mockId);
+        PodState.StartClaim claim = claimStart(mockId);
         if (claim.claimed()) {
-            startExecutor.execute(() -> startClaimedMock(mockId, claim.lifecycle().attemptId()));
+            startExecutor.execute(() -> startClaimedMock(
+                    mockId, claim.lifecycle().attemptId(), claim.previousPodName()));
         }
         return status(mockId);
     }
@@ -106,12 +107,12 @@ public class PodManager {
         if (existing != null) {
             return existing;
         }
-        PodState.StartClaim claim = podState.claimStart(mockId);
+        PodState.StartClaim claim = claimStart(mockId);
         if (claim.pod() != null) {
             return claim.pod();
         }
         if (claim.claimed()) {
-            return startClaimedMock(mockId, claim.lifecycle().attemptId());
+            return startClaimedMock(mockId, claim.lifecycle().attemptId(), claim.previousPodName());
         }
         long deadline = System.nanoTime() + podCreationTimeout.toNanos();
         while (System.nanoTime() < deadline) {
@@ -137,7 +138,15 @@ public class PodManager {
     }
 
     private MockPodRef startClaimedMock(String mockId, String attemptId) {
+        return startClaimedMock(mockId, attemptId, null);
+    }
+
+    private MockPodRef startClaimedMock(String mockId, String attemptId, String previousPodName) {
         try {
+            if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
+                throw new PodCreationException(
+                        "Failed to delete stale startup pod '" + previousPodName + "' before retry.");
+            }
             MockPodRef pod = spawnPod(mockId, attemptId);
             if (!podState.completeStart(mockId, attemptId, pod)) {
                 deletePod(pod);
@@ -148,6 +157,14 @@ public class PodManager {
             podState.failStart(mockId, attemptId, error);
             throw error;
         }
+    }
+
+    private PodState.StartClaim claimStart(String mockId) {
+        long configuredTimeoutMillis = Math.max(1L, podCreationTimeout.toMillis());
+        long startupLeaseMillis = configuredTimeoutMillis > Long.MAX_VALUE / 2L
+                ? Long.MAX_VALUE
+                : configuredTimeoutMillis * 2L;
+        return podState.claimStart(mockId, System.currentTimeMillis(), startupLeaseMillis);
     }
 
     @PreDestroy
@@ -168,6 +185,9 @@ public class PodManager {
         Map<String, MockPodStatus> mocks = new HashMap<>();
         podState.getPodLifecycles().entrySet().forEach(entry -> {
             MockPodLifecycle lifecycle = entry.getValue();
+            if (lifecycle.status() == MockLifecycleStatus.STOPPED) {
+                return;
+            }
             mocks.put(entry.getKey(), new MockPodStatus(
                     entry.getKey(), lifecycle.podName(), lifecycle.status(), lifecycle.message()));
         });
@@ -402,11 +422,20 @@ public class PodManager {
                 .withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
                 .list();
 
-        List<String> ownedPods = podState.getPods().values().stream().map(MockPodRef::podName).toList();
+        java.util.Set<String> ownedPods = new java.util.HashSet<>();
+        podState.getPods().values().stream()
+                .map(MockPodRef::podName)
+                .filter(Objects::nonNull)
+                .forEach(ownedPods::add);
+        podState.getPodLifecycles().values().stream()
+                .map(MockPodLifecycle::podName)
+                .filter(Objects::nonNull)
+                .filter(podName -> !podName.isBlank())
+                .forEach(ownedPods::add);
 
         podList.getItems().forEach(p -> {
             String podName = p.getMetadata().getName();
-            boolean isOrphaned = ownedPods.stream().noneMatch(v -> v.equals(podName));
+            boolean isOrphaned = !ownedPods.contains(podName);
             if (isOrphaned) {
                 boolean deleted = deletePod(p);
                 if (deleted) {

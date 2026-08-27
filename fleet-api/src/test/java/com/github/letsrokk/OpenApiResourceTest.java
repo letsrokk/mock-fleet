@@ -95,6 +95,27 @@ class OpenApiResourceTest {
         }
     }
 
+    @Test
+    void documentsDefaultedConfigUpdateFieldsAsOptional() throws Exception {
+        String document = given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+        JsonNode schema = new ObjectMapper().readTree(document)
+                .path("components")
+                .path("schemas")
+                .path("ConfigUpdateRequest");
+
+        assertTrue(schema.path("required").isMissingNode() || schema.path("required").isEmpty());
+        assertTrue(schema.path("properties").has("resourceVersion"));
+        assertTrue(schema.path("properties").has("options"));
+        assertTrue(schema.path("properties").has("resources"));
+        assertTrue(schema.path("properties").has("applyMode"));
+    }
+
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {
         for (String status : statuses) {
             JsonNode response = root.path("paths").path(path).path(operation).path("responses").path(status);

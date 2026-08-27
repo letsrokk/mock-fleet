@@ -137,10 +137,10 @@ public class WireMockConfigService {
 
     ConfigMutationResult deleteMockConfig(String mockId, ConfigUpdateRequest request) {
         validateMockId(mockId);
+        ApplyMode applyMode = ApplyMode.from(request == null ? null : request.applyMode());
         updateUserConfigMap(mockId, "deleted", request == null ? null : request.resourceVersion(), current ->
                 current.withoutMockConfig(mockId));
         refreshUserConfig();
-        ApplyMode applyMode = ApplyMode.from(request == null ? null : request.applyMode());
         MockLifecycleStatus lifecycle = applyMode.apply(mockId, podManager);
         return new ConfigMutationResult(view(), new ApplyResult(mockId, applyMode.wireValue, lifecycle));
     }
@@ -299,22 +299,40 @@ public class WireMockConfigService {
 
         if (current != null && expectedResourceVersion != null
                 && !Objects.equals(expectedResourceVersion, resourceVersion(current))) {
-            LOG.warnf("WireMock user ConfigMap conflict namespace=%s name=%s mockId=%s expectedResourceVersion=%s actualResourceVersion=%s.",
-                    namespace, name, mockId, expectedResourceVersion, resourceVersion(current));
-            throw new ApiException(Response.Status.CONFLICT,
-                    new ApiError("CONFIG_CONFLICT", "WireMock config was modified by another writer.",
-                            true, false, Map.of(
-                            "expectedVersion", expectedResourceVersion,
-                            "currentVersion", resourceVersion(current))));
+            throw configConflict(namespace, name, mockId, expectedResourceVersion, current);
         }
 
         LOG.infof("Persisting WireMock user ConfigMap namespace=%s name=%s mockId=%s action=%s.",
                 namespace, name, mockId, action);
         WireMockConfigDocument currentConfig = loadUserConfig(current);
         WireMockConfigDocument nextConfig = update.apply(currentConfig);
-        ConfigMap persisted = createOrUpdateUserConfigMap(namespace, name, current, nextConfig, current == null);
+        ConfigMap persisted;
+        try {
+            persisted = createOrUpdateUserConfigMap(namespace, name, current, nextConfig, current == null);
+        } catch (KubernetesClientException error) {
+            if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
+                throw error;
+            }
+            ConfigMap latest = kubernetesClient.configMaps()
+                    .inNamespace(namespace)
+                    .withName(name)
+                    .get();
+            throw configConflict(namespace, name, mockId, expectedResourceVersion, latest);
+        }
         LOG.infof("Persisted WireMock user ConfigMap namespace=%s name=%s mockId=%s action=%s resourceVersion=%s.",
                 namespace, name, mockId, action, resourceVersion(persisted));
+    }
+
+    private ApiException configConflict(String namespace, String name, String mockId,
+                                        String expectedResourceVersion, ConfigMap current) {
+        String currentResourceVersion = resourceVersion(current);
+        LOG.warnf("WireMock user ConfigMap conflict namespace=%s name=%s mockId=%s expectedResourceVersion=%s actualResourceVersion=%s.",
+                namespace, name, mockId, expectedResourceVersion, currentResourceVersion);
+        return new ApiException(Response.Status.CONFLICT,
+                new ApiError("CONFIG_CONFLICT", "WireMock config was modified by another writer.",
+                        true, false, Map.of(
+                        "expectedVersion", expectedResourceVersion == null ? "" : expectedResourceVersion,
+                        "currentVersion", currentResourceVersion == null ? "" : currentResourceVersion)));
     }
 
     private ConfigMap createOrUpdateUserConfigMap(String namespace, String name, ConfigMap current,

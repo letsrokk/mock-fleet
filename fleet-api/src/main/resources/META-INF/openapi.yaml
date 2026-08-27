@@ -372,7 +372,6 @@ components:
           $ref: "#/components/schemas/RoutingView"
     ConfigUpdateRequest:
       type: object
-      required: [resourceVersion, options, applyMode]
       properties:
         resourceVersion: { type: [string, "null"] }
         options:
