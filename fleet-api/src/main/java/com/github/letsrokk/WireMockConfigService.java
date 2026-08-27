@@ -97,6 +97,9 @@ public class WireMockConfigService {
         Set<String> activeIds = new LinkedHashSet<>(podManager.listActiveMocks().stream()
                 .map(PodManager.ActiveMockPod::mockId)
                 .toList());
+        List<String> savedMockIds = userConfig.mockConfigs().keySet().stream()
+                .sorted()
+                .toList();
 
         List<MockConfigView> mocks = mockIds.stream()
                 .sorted()
@@ -106,6 +109,7 @@ public class WireMockConfigService {
         return new ConfigView(
                 resourceVersion(userConfigMap),
                 List.copyOf(mockIds.stream().sorted().toList()),
+                savedMockIds,
                 mocks,
                 optionDefinitions(),
                 routingView());
@@ -487,7 +491,8 @@ public class WireMockConfigService {
         return new OptionDefinition(name, label, "select", group, description, values);
     }
 
-    public record ConfigView(String resourceVersion, List<String> mockIds, List<MockConfigView> mocks,
+    public record ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
+                             List<MockConfigView> mocks,
                              List<OptionDefinition> options, RoutingView routing) {
     }
 

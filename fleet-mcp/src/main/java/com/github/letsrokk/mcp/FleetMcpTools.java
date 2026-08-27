@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -57,21 +58,48 @@ public final class FleetMcpTools {
                 page(fleetApi.listMocks(), "mocks", limit, offset)));
     }
 
-    @Tool(name = "get_mock_config", description = "Get the complete Fleet configuration view for one mock.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public ToolResponse getMockConfig(@ToolArg(description = "Mock ID") String mockId) {
-        return fleet("get_mock_config", () -> {
-            MockIdValidator.requireValid(mockId);
+    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse listMockConfigs(
+            @ToolArg(description = "Page size", required = false) Integer limit,
+            @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
+        return fleet("list_mock_configs", () -> {
             JsonNode view = fleetApi.getConfig();
             ObjectNode result = mapper.createObjectNode();
             result.set("resourceVersion", view.path("resourceVersion"));
-            result.set("mock", findMockConfig(view.path("mocks"), mockId));
-            result.set("optionDefinitions", view.path("options"));
-            result.set("routing", view.path("routing"));
-            return McpToolExecutor.ToolResult.of("Loaded configuration for " + mockId + ".", result);
+            result.set("mockIds", view.path("savedMockIds"));
+            return McpToolExecutor.ToolResult.of("Listed saved mock configurations.",
+                    page(result, "mockIds", limit, offset));
         });
     }
 
-    @Tool(name = "update_mock_config", description = "Replace a mock's complete options and resources using optimistic concurrency.",
+    @Tool(name = "get_mock_config", description = "Get complete Fleet configuration views for multiple mocks.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse getMockConfig(@ToolArg(description = "Mock IDs") List<String> mockIds) {
+        return fleet("get_mock_config", () -> {
+            List<String> requestedMockIds = requireMockIds(mockIds);
+            JsonNode view = fleetApi.getConfig();
+            Map<String, JsonNode> configsByMockId = indexMockConfigs(view.path("mocks"));
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            ArrayNode mocks = mapper.createArrayNode();
+            ArrayNode missingMockIds = mapper.createArrayNode();
+            for (String mockId : requestedMockIds) {
+                JsonNode mock = configsByMockId.get(mockId);
+                if (mock == null) {
+                    missingMockIds.add(mockId);
+                } else {
+                    mocks.add(mock);
+                }
+            }
+            result.set("mocks", mocks);
+            result.set("missingMockIds", missingMockIds);
+            result.set("optionDefinitions", view.path("options"));
+            result.set("routing", view.path("routing"));
+            return McpToolExecutor.ToolResult.of(
+                    "Loaded " + mocks.size() + " mock configurations; " + missingMockIds.size() + " not found.", result);
+        });
+    }
+
+    @Tool(name = "update_mock_config", description = "Create or replace a mock's complete saved options and resources using optimistic concurrency.",
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
@@ -80,7 +108,7 @@ public final class FleetMcpTools {
             @ToolArg(description = "Complete Kubernetes requests and limits object") JsonObject resources,
             @ToolArg(description = "futureOnly or restartActive") String applyMode) {
         return fleet("update_mock_config", () -> McpToolExecutor.ToolResult.of(
-                "Updated configuration for " + mockId + ".",
+                "Saved configuration for " + mockId + ".",
                 fleetApi.updateConfig(mockId, resourceVersion, options, json(resources), applyMode)));
     }
 
@@ -535,15 +563,28 @@ public final class FleetMcpTools {
         }
     }
 
-    private JsonNode findMockConfig(JsonNode mocks, String mockId) {
+    private List<String> requireMockIds(List<String> mockIds) {
+        if (mockIds == null || mockIds.isEmpty()) {
+            throw new IllegalArgumentException("mockIds must contain at least one mock ID");
+        }
+        LinkedHashSet<String> uniqueMockIds = new LinkedHashSet<>();
+        for (String mockId : mockIds) {
+            uniqueMockIds.add(MockIdValidator.requireValid(mockId));
+        }
+        return List.copyOf(uniqueMockIds);
+    }
+
+    private Map<String, JsonNode> indexMockConfigs(JsonNode mocks) {
+        Map<String, JsonNode> configsByMockId = new LinkedHashMap<>();
         if (mocks.isArray()) {
             for (JsonNode mock : mocks) {
-                if (mockId.equals(mock.path("mockId").asText())) {
-                    return mock;
+                JsonNode mockId = mock.get("mockId");
+                if (mockId != null && mockId.isTextual()) {
+                    configsByMockId.put(mockId.textValue(), mock);
                 }
             }
         }
-        return mapper.nullNode();
+        return configsByMockId;
     }
 
     private static void collectTextFields(JsonNode node, String fieldName, List<String> values) {
