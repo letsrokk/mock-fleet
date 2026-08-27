@@ -1,0 +1,573 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "${script_dir}/.." && pwd)
+chart_dir="${repo_root}/deploy/helm/mock-fleet"
+fixture_dir="${repo_root}/tests/cluster/fixtures"
+
+mode=live
+keep=false
+run_id=${MOCK_FLEET_E2E_RUN_ID:-$(date -u +%Y%m%d%H%M%S)-$$}
+run_id=$(printf '%s' "${run_id}" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9-')
+run_id=${run_id:0:24}
+namespace="mock-fleet-e2e-${run_id}"
+release="fleet-${run_id}"
+bucket="mock-fleet-e2e-data-${run_id}"
+mcp_port=${MOCK_FLEET_E2E_MCP_PORT:-18080}
+api_port=${MOCK_FLEET_E2E_API_PORT:-18081}
+timeout_seconds=${MOCK_FLEET_E2E_TIMEOUT_SECONDS:-180}
+storage_class=${MOCK_FLEET_E2E_STORAGE_CLASS:-seaweedfs-s3}
+s3_provisioner=${MOCK_FLEET_E2E_S3_PROVISIONER:-s3.csi.aws.com}
+s3_endpoint=${MOCK_FLEET_E2E_S3_ENDPOINT:-http://seaweedfs-s3.seaweedfs.svc.cluster.local:8333}
+s3_access_key=${MOCK_FLEET_E2E_S3_ACCESS_KEY:-}
+s3_secret_key=${MOCK_FLEET_E2E_S3_SECRET_KEY:-}
+s3_admin_image=${MOCK_FLEET_E2E_S3_ADMIN_IMAGE:-amazon/aws-cli:2.17.57}
+wiremock_image=${MOCK_FLEET_E2E_WIREMOCK_IMAGE:-wiremock/wiremock:3.13.2-2}
+image_tag=${MOCK_FLEET_E2E_IMAGE_TAG:-latest}
+proxy_image=${MOCK_FLEET_E2E_PROXY_IMAGE:-ghcr.io/letsrokk/mock-fleet/proxy}
+api_image=${MOCK_FLEET_E2E_API_IMAGE:-ghcr.io/letsrokk/mock-fleet/api}
+mcp_image=${MOCK_FLEET_E2E_MCP_IMAGE:-ghcr.io/letsrokk/mock-fleet/mcp}
+dash_image=${MOCK_FLEET_E2E_DASH_IMAGE:-ghcr.io/letsrokk/mock-fleet/dash}
+work_dir=""
+mcp_pf_pid=""
+api_pf_pid=""
+mcp_session=""
+namespace_created=false
+bucket_created=false
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--self-test|--dry-run] [--keep]
+
+Run the opt-in Mock Fleet Minikube/SeaweedFS contract suite.
+
+Modes:
+  --self-test  Check script syntax, fixtures, identifier isolation, and dry-run output.
+  --dry-run    Print resolved resources and prerequisites without changing the cluster.
+  --keep       Keep the failed live-run namespace and bucket for investigation.
+
+Live-run prerequisites:
+  minikube, kubectl, helm, curl, jq, awk, sed, and a running Minikube profile
+  CSI driver MOCK_FLEET_E2E_S3_PROVISIONER (default: ${s3_provisioner})
+  StorageClass MOCK_FLEET_E2E_STORAGE_CLASS (default: ${storage_class})
+  reachable SeaweedFS S3 endpoint MOCK_FLEET_E2E_S3_ENDPOINT
+  MOCK_FLEET_E2E_S3_ACCESS_KEY and MOCK_FLEET_E2E_S3_SECRET_KEY
+
+The suite creates and owns namespace ${namespace} and bucket ${bucket}. It refuses
+to reuse either. Image repository/tag and local ports are configurable through the
+MOCK_FLEET_E2E_* variables documented in this script.
+EOF
+}
+
+log() {
+  printf '[cluster-e2e] %s\n' "$*"
+}
+
+fail() {
+  printf '[cluster-e2e] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || fail "Missing prerequisite '$1'. Install it and retry."
+}
+
+assert_jq() {
+  local json=$1
+  local expression=$2
+  local message=$3
+  if ! jq -e "${expression}" >/dev/null <<<"${json}"; then
+    printf '%s\n' "${json}" | jq . >&2 || true
+    fail "${message} (jq: ${expression})"
+  fi
+}
+
+poll_until() {
+  local description=$1
+  local deadline=$((SECONDS + timeout_seconds))
+  shift
+  while (( SECONDS < deadline )); do
+    if "$@"; then
+      return 0
+    fi
+    sleep 1
+  done
+  fail "Timed out after ${timeout_seconds}s waiting for ${description}."
+}
+
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM
+  [[ -n "${mcp_pf_pid}" ]] && kill "${mcp_pf_pid}" >/dev/null 2>&1 || true
+  [[ -n "${api_pf_pid}" ]] && kill "${api_pf_pid}" >/dev/null 2>&1 || true
+  if [[ "${keep}" == true && ${exit_code} -ne 0 ]]; then
+    log "Keeping namespace ${namespace} and bucket ${bucket} after failure."
+  else
+    kubectl delete pod --namespace "${namespace}" \
+      -l 'app.kubernetes.io/name=mock-fleet-wiremock,app.kubernetes.io/managed-by=mock-fleet' \
+      --ignore-not-found --wait=true --timeout="${timeout_seconds}s" >/dev/null 2>&1 || true
+    helm uninstall "${release}" --namespace "${namespace}" --ignore-not-found >/dev/null 2>&1 || true
+    if [[ "${bucket_created}" == true && "${namespace_created}" == true ]]; then
+      run_s3_cli cleanup s3 rm "s3://${bucket}" --recursive >/dev/null 2>&1 || true
+      run_s3_cli delete s3api delete-bucket --bucket "${bucket}" >/dev/null 2>&1 || true
+    fi
+    kubectl delete pv "${release}-pv" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    if [[ "${namespace_created}" == true ]]; then
+      kubectl delete namespace "${namespace}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+    fi
+  fi
+  [[ -n "${work_dir}" ]] && rm -rf "${work_dir}"
+  exit "${exit_code}"
+}
+
+run_s3_cli() {
+  local suffix=$1
+  shift
+  local pod="${release}-s3-${suffix}"
+  kubectl delete pod "${pod}" --namespace "${namespace}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  kubectl run "${pod}" --namespace "${namespace}" --restart=Never --image="${s3_admin_image}" \
+    --env="AWS_ACCESS_KEY_ID=${s3_access_key}" \
+    --env="AWS_SECRET_ACCESS_KEY=${s3_secret_key}" \
+    --env="AWS_DEFAULT_REGION=us-east-1" \
+    -- "$@" --endpoint-url "${s3_endpoint}" >/dev/null
+  if ! kubectl wait pod/"${pod}" --namespace "${namespace}" \
+      --for=jsonpath='{.status.phase}'=Succeeded --timeout="${timeout_seconds}s" >/dev/null 2>&1; then
+    kubectl logs "${pod}" --namespace "${namespace}" >&2 || true
+    return 1
+  fi
+  kubectl logs "${pod}" --namespace "${namespace}" || true
+  kubectl delete pod "${pod}" --namespace "${namespace}" --wait=false >/dev/null 2>&1 || true
+}
+
+helm_deploy() {
+  local selected_wiremock_image=$1
+  local selected_pull_policy=$2
+  local target_host="recording-target.${namespace}.svc.cluster.local"
+  local target_ip
+  target_ip=$(kubectl get service recording-target --namespace "${namespace}" -o jsonpath='{.spec.clusterIP}')
+  helm upgrade --install "${release}" "${chart_dir}" --namespace "${namespace}" \
+    --set fullnameOverride="${release}" \
+    --set fleet.api.replicas=2 \
+    --set fleet.proxy.replicas=1 \
+    --set fleet.proxy.routing.mode=PATH \
+    --set fleet.mcp.enabled=true \
+    --set fleet.mcp.replicas=1 \
+    --set "fleet.mcp.outbound.exceptions[0]=${target_host}" \
+    --set "fleet.mcp.outbound.networkPolicy.allowedCidrs[0]=${target_ip}/32" \
+    --set fleet.proxy.image.repository="${proxy_image}" \
+    --set fleet.proxy.image.tag="${image_tag}" \
+    --set fleet.proxy.image.pullPolicy=IfNotPresent \
+    --set fleet.api.image.repository="${api_image}" \
+    --set fleet.api.image.tag="${image_tag}" \
+    --set fleet.api.image.pullPolicy=IfNotPresent \
+    --set fleet.mcp.image.repository="${mcp_image}" \
+    --set fleet.mcp.image.tag="${image_tag}" \
+    --set fleet.mcp.image.pullPolicy=IfNotPresent \
+    --set fleet.dash.image.repository="${dash_image}" \
+    --set fleet.dash.image.tag="${image_tag}" \
+    --set fleet.dash.image.pullPolicy=IfNotPresent \
+    --set wiremock.containerImage="${selected_wiremock_image}" \
+    --set wiremock.containerImagePullPolicy="${selected_pull_policy}" \
+    --set storage.persistent=true \
+    --set storage.type=s3 \
+    --set storage.s3.provisioner="${s3_provisioner}" \
+    --set storage.s3.storageClassName="${storage_class}" \
+    --set storage.s3.bucket="${bucket}" \
+    --set storage.s3.path="/mock-fleet/${run_id}" \
+    --set "storage.s3.mountOptions[0]=endpoint-url ${s3_endpoint}" \
+    --set 'storage.s3.mountOptions[1]=force-path-style' \
+    --set 'storage.s3.mountOptions[2]=allow-delete' \
+    --set 'storage.s3.mountOptions[3]=region us-east-1' \
+    --wait --timeout="${timeout_seconds}s"
+}
+
+extract_mcp_json() {
+  local file=$1
+  if jq -e . "${file}" >/dev/null 2>&1; then
+    cat "${file}"
+    return
+  fi
+  local data
+  data=$(sed -n 's/^data: //p' "${file}" | tail -n 1)
+  jq -e . >/dev/null <<<"${data}" || fail "MCP returned neither JSON nor JSON SSE data: $(cat "${file}")"
+  printf '%s\n' "${data}"
+}
+
+mcp_post() {
+  local payload=$1
+  local headers_file="${work_dir}/mcp-headers"
+  local body_file="${work_dir}/mcp-body"
+  local request_headers=(-H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream')
+  if [[ -n "${mcp_session}" ]]; then
+    request_headers+=(-H "Mcp-Session-Id: ${mcp_session}" -H 'Mcp-Protocol-Version: 2025-11-25')
+  fi
+  curl --fail-with-body --silent --show-error -D "${headers_file}" -o "${body_file}" \
+    "${request_headers[@]}" --data "${payload}" "http://127.0.0.1:${mcp_port}/__fleet/mcp"
+  extract_mcp_json "${body_file}"
+}
+
+initialize_mcp() {
+  local payload response
+  payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cluster-e2e","version":"1"}}}'
+  response=$(mcp_post "${payload}")
+  assert_jq "${response}" '.result.protocolVersion == "2025-11-25"' "MCP initialization failed"
+  mcp_session=$(awk 'BEGIN{IGNORECASE=1} /^Mcp-Session-Id:/{gsub("\r", "", $2); print $2}' "${work_dir}/mcp-headers" | tail -n 1)
+  [[ -n "${mcp_session}" ]] || fail "MCP initialization did not return Mcp-Session-Id."
+  mcp_post '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+}
+
+mcp_tool_raw() {
+  local tool=$1
+  local arguments=$2
+  local payload
+  payload=$(jq -cn --arg name "${tool}" --argjson arguments "${arguments}" \
+    '{jsonrpc:"2.0",id:2,method:"tools/call",params:{name:$name,arguments:$arguments}}')
+  mcp_post "${payload}" | jq -c '.result'
+}
+
+mcp_success() {
+  local tool=$1
+  local arguments=$2
+  local result
+  result=$(mcp_tool_raw "${tool}" "${arguments}")
+  if [[ $(jq -r '.isError // false' <<<"${result}") == true ]]; then
+    printf '%s\n' "${result}" | jq . >&2
+    fail "MCP tool ${tool} returned an error."
+  fi
+  jq -c '.structuredContent' <<<"${result}"
+}
+
+mcp_expect_error() {
+  local tool=$1
+  local arguments=$2
+  local code=$3
+  local result
+  result=$(mcp_tool_raw "${tool}" "${arguments}")
+  assert_jq "${result}" ".isError == true and .structuredContent.error.code == \"${code}\"" \
+    "${tool} did not return structured ${code}"
+  jq -c '.structuredContent.error' <<<"${result}"
+}
+
+poll_mcp_success() {
+  local tool=$1
+  local arguments=$2
+  local result_file="${work_dir}/poll-result"
+  poll_until "${tool} success" poll_mcp_attempt "${tool}" "${arguments}" "${result_file}"
+  cat "${result_file}"
+}
+
+poll_mcp_attempt() {
+  local tool=$1
+  local arguments=$2
+  local result_file=$3
+  local result code
+  result=$(mcp_tool_raw "${tool}" "${arguments}") || return 1
+  if [[ $(jq -r '.isError // false' <<<"${result}") == false ]]; then
+    jq -c '.structuredContent' <<<"${result}" >"${result_file}"
+    return 0
+  fi
+  code=$(jq -r '.structuredContent.error.code' <<<"${result}")
+  [[ "${code}" == MOCK_STARTING ]] || {
+    printf '%s\n' "${result}" | jq . >&2
+    fail "${tool} failed while polling with ${code}."
+  }
+  return 1
+}
+
+api_request() {
+  local method=$1
+  local path=$2
+  local body=${3:-}
+  local output="${work_dir}/api-body"
+  local args=(--silent --show-error -o "${output}" -w '%{http_code}' -X "${method}" -H 'Accept: application/json')
+  if [[ -n "${body}" ]]; then
+    args+=(-H 'Content-Type: application/json' --data "${body}")
+  fi
+  api_status=$(curl "${args[@]}" "http://127.0.0.1:${api_port}${path}")
+  api_body=$(cat "${output}")
+}
+
+start_api_port_forward() {
+  if [[ -n "${api_pf_pid}" ]]; then
+    kill "${api_pf_pid}" >/dev/null 2>&1 || true
+    wait "${api_pf_pid}" >/dev/null 2>&1 || true
+  fi
+  kubectl port-forward --namespace "${namespace}" service/"${release}-api" "${api_port}:80" \
+    >"${work_dir}/api-port-forward.log" 2>&1 &
+  api_pf_pid=$!
+  poll_until "API port-forward" curl --silent --fail --output /dev/null \
+    "http://127.0.0.1:${api_port}/__fleet/api/config"
+}
+
+api_mock_failed() {
+  local mock_id=$1
+  api_request GET /__fleet/api/mocks
+  [[ "${api_status}" == 200 ]] || return 1
+  jq -e --arg id "${mock_id}" '.[] | select(.mockId == $id and .status == "FAILED")' >/dev/null <<<"${api_body}"
+}
+
+verify_api_replicas() {
+  local mock_id=$1
+  local expected_option=$2
+  local pod config
+  api_pods=()
+  while IFS= read -r pod; do
+    [[ -n "${pod}" ]] && api_pods+=("${pod}")
+  done < <(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o json | jq -r \
+      '.items[] | select(.metadata.deletionTimestamp == null) | select(any(.status.conditions[]?; .type == "Ready" and .status == "True")) | .metadata.name')
+  [[ ${#api_pods[@]} -eq 2 ]] || fail "Expected two API replicas, found ${#api_pods[@]}."
+  for pod in "${api_pods[@]}"; do
+    config=$(kubectl get --raw "/api/v1/namespaces/${namespace}/pods/${pod}:8080/proxy/__fleet/api/config")
+    assert_jq "${config}" ".mocks[] | select(.mockId == \"${mock_id}\") | .user.options | index(\"${expected_option}\") != null" \
+      "API pod ${pod} did not load the saved config"
+  done
+}
+
+run_contracts() {
+  local config rv mutation current_rv invalid_rv lifecycle result stub_id unmatched_stub_id candidate_id body_args
+  local main_mock="m-${run_id:0:18}"
+  local cold_mock="cold-${run_id:0:16}"
+  local cleanup_mock="stop-${run_id:0:16}"
+  local failed_mock="fail-${run_id:0:16}"
+
+  log "Checking 32-tool discovery and renamed recorder status."
+  result=$(mcp_post '{"jsonrpc":"2.0","id":3,"method":"tools/list"}')
+  assert_jq "${result}" '.result.tools | length == 32' "MCP did not publish 32 tools"
+  assert_jq "${result}" '[.result.tools[].name] | index("start_mock") != null and index("get_recording_status") != null and index("recording_status") == null' \
+    "MCP lifecycle/recording tool names are incorrect"
+
+  log "Checking config replication, server validation, and conflict details."
+  api_request GET /__fleet/api/config
+  [[ "${api_status}" == 200 ]] || fail "GET config returned ${api_status}: ${api_body}"
+  rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+  mutation=$(jq -cn --arg rv "${rv}" '{resourceVersion:$rv,options:["--verbose"],resources:null,applyMode:"futureOnly"}')
+  api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
+  [[ "${api_status}" == 200 ]] || fail "Valid config update returned ${api_status}: ${api_body}"
+  assert_jq "${api_body}" ".apply.mockId == \"${main_mock}\" and .apply.mode == \"futureOnly\" and .apply.lifecycle == \"STOPPED\"" \
+    "Config mutation did not return lifecycle apply metadata"
+  current_rv=$(jq -r '.config.resourceVersion' <<<"${api_body}")
+  verify_api_replicas "${main_mock}" --verbose
+
+  invalid_rv=${current_rv}
+  mutation=$(jq -cn --arg rv "${invalid_rv}" '{resourceVersion:$rv,options:["--not-advertised"],resources:null,applyMode:"futureOnly"}')
+  api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
+  [[ "${api_status}" == 400 ]] || fail "Invalid config returned ${api_status}, expected 400: ${api_body}"
+  assert_jq "${api_body}" '.code == "INVALID_OPTIONS" and .stateMayHaveChanged == false' \
+    "Invalid config did not return ApiError"
+  api_request GET /__fleet/api/config
+  assert_jq "${api_body}" ".resourceVersion == \"${invalid_rv}\" and (.mocks[] | select(.mockId == \"${main_mock}\") | .user.options == [\"--verbose\"])" \
+    "Invalid config mutated persisted state"
+
+  mutation=$(jq -cn --arg rv "${invalid_rv}" '{resourceVersion:$rv,options:["--verbose","--disable-banner"],resources:null,applyMode:"futureOnly"}')
+  api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
+  [[ "${api_status}" == 200 ]] || fail "Second valid config update failed: ${api_body}"
+  current_rv=$(jq -r '.config.resourceVersion' <<<"${api_body}")
+  api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
+  [[ "${api_status}" == 409 ]] || fail "Stale config update returned ${api_status}, expected 409: ${api_body}"
+  assert_jq "${api_body}" ".code == \"CONFIG_CONFLICT\" and .details.expectedVersion == \"${invalid_rv}\" and .details.currentVersion == \"${current_rv}\"" \
+    "Config conflict omitted reconciliation versions"
+
+  log "Restarting one API replica and checking fresh-replica config."
+  local old_pod
+  old_pod=$(kubectl get pods --namespace "${namespace}" -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
+  kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
+  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
+  verify_api_replicas "${main_mock}" --disable-banner
+
+  log "Checking cold-start retry and STARTING cleanup."
+  lifecycle=$(mcp_success start_mock "$(jq -cn --arg id "${cold_mock}" '{mockId:$id}')")
+  assert_jq "${lifecycle}" '.status == "STARTING" or .status == "RUNNING"' "start_mock returned an invalid lifecycle"
+  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10,offset:0}')")
+  assert_jq "${result}" ".mockId == \"${cold_mock}\" and (.stubs | type == \"array\")" "Cold mock never became usable"
+
+  api_request POST "/__fleet/api/mocks/${cleanup_mock}/start"
+  [[ "${api_status}" == 202 || "${api_status}" == 200 ]] || fail "Cleanup mock did not start: ${api_body}"
+  api_request DELETE "/__fleet/api/mocks/${cleanup_mock}"
+  [[ "${api_status}" == 200 ]] || fail "Deleting starting mock failed: ${api_body}"
+  assert_jq "${api_body}" '.status == "STOPPED"' "DELETE did not stop starting mock"
+  api_request DELETE "/__fleet/api/mocks/${cleanup_mock}"
+  assert_jq "${api_body}" '.status == "STOPPED"' "Repeated DELETE was not idempotent"
+
+  log "Checking recoverable persistent update and restart survival."
+  config=$(cat "${fixture_dir}/persistent-stub.json")
+  result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
+  stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
+  [[ -n "${stub_id}" && "${stub_id}" != null ]] || fail "create_stub did not return a stub ID: ${result}"
+  mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
+  config=$(cat "${fixture_dir}/persistent-stub-updated.json")
+  result=$(mcp_success update_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" --argjson mapping "${config}" '{mockId:$id,stubId:$stub,mapping:$mapping}')")
+  assert_jq "${result}" '.stub.persistent == true and .stub.response.body == "persisted-v2"' \
+    "Persistent update did not preserve persistence and replacement"
+  mcp_success stop_mock "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
+  poll_mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/persistent"}')" >"${work_dir}/persistent-response"
+  result=$(cat "${work_dir}/persistent-response")
+  assert_jq "${result}" '.response.status == 200 and .response.body.encoding == "utf8" and .response.body.data == "persisted-v2"' \
+    "Persistent update did not survive restart"
+
+  log "Checking body files and encoded byte contracts."
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5},contentType:"text/plain"}')
+  mcp_success put_body_file "${body_args}" >/dev/null
+  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
+  assert_jq "${result}" '.body == {encoding:"utf8",data:"hello",sizeBytes:5}' "UTF-8 body file did not round-trip"
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2},contentType:"application/octet-stream"}')
+  mcp_success put_body_file "${body_args}" >/dev/null
+  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
+  assert_jq "${result}" '.body == {encoding:"base64",data:"AAE=",sizeBytes:2}' "Binary body file did not round-trip"
+
+  log "Checking matched/missed analysis, redaction, and Admin-path guards."
+  config='{"request":{"method":"GET","urlPath":"/matched"},"response":{"status":204}}'
+  mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')" >/dev/null
+  config='{"request":{"method":"GET","urlPath":"/never-hit"},"response":{"status":204}}'
+  result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
+  unmatched_stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/matched",headers:{Authorization:"Bearer secret"}}')" >/dev/null
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/missed",headers:{Authorization:"Bearer secret"}}')" >/dev/null
+  result=$(mcp_success count_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/matched"}}')")
+  assert_jq "${result}" '.count >= 1' "Matched request count was empty"
+  result=$(mcp_success list_unmatched_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50,offset:0}')")
+  assert_jq "${result}" '[.requests[] | select(.request.url == "/missed" or .url == "/missed")] | length >= 1' \
+    "Missed request was absent from unmatched analysis"
+  result=$(mcp_success list_unmatched_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50,offset:0}')")
+  assert_jq "${result}" ".stubs | any((.id // .uuid) == \"${unmatched_stub_id}\")" \
+    "Never-hit stub was absent from unmatched-stub analysis"
+  result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPathPattern:"/(matched|missed)"},limit:50,offset:0}')")
+  assert_jq "${result}" '.. | objects | to_entries[]? | select((.key | ascii_downcase) == "authorization") | .value | if type == "array" then index("[REDACTED]") != null else . == "[REDACTED]" end' \
+    "Sensitive journal headers were not redacted"
+  mcp_success get_near_misses "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/almost-matched"}}')" >/dev/null
+  for path in '/__admin' '/%5f%5fadmin/mappings' '/x/../__admin/requests'; do
+    mcp_expect_error send_request "$(jq -cn --arg id "${main_mock}" --arg path "${path}" '{mockId:$id,method:"GET",path:$path}')" INVALID_ARGUMENT >/dev/null
+  done
+
+  log "Checking recording candidates, explicit zero matches, and SSRF policy."
+  mcp_expect_error start_recording "$(jq -cn --arg id "${main_mock}" '{mockId:$id,recording:{targetBaseUrl:"http://127.0.0.1:8080"}}')" INVALID_ARGUMENT >/dev/null
+  local recording_target="http://recording-target.${namespace}.svc.cluster.local:5678"
+  result=$(mcp_success start_recording "$(jq -cn --arg id "${main_mock}" --arg target "${recording_target}" '{mockId:$id,recording:{targetBaseUrl:$target}}')")
+  assert_jq "${result}" '.status.status == "Recording" or .status.status == "recording" or .status.recording == true' \
+    "Recorder did not report active status"
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/record-me",headers:{Authorization:"Bearer secret"}}')" >/dev/null
+  result=$(mcp_success stop_recording "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')")
+  assert_jq "${result}" '.candidateCount >= 1 and .matchedRequests == true and (.candidateIds | length) == .candidateCount' \
+    "Recording stop omitted candidate results"
+  candidate_id=$(jq -r '.candidateIds[0]' <<<"${result}")
+  result=$(mcp_success get_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${candidate_id}" '{mockId:$id,stubId:$stub}')")
+  assert_jq "${result}" '[.. | objects | keys[] | ascii_downcase | select(. == "authorization" or . == "cookie" or . == "set-cookie")] | length == 0' \
+    "Recorded candidate retained sensitive headers"
+  result=$(mcp_success snapshot_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,snapshot:{filters:{urlPath:"/never-requested"}}}')")
+  assert_jq "${result}" '.candidateIds == [] and .candidateCount == 0 and .matchedRequests == false' \
+    "Zero-match snapshot was not explicit"
+
+  log "Checking eager restart lifecycle."
+  api_request GET /__fleet/api/config
+  rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+  mutation=$(jq -cn --arg rv "${rv}" '{resourceVersion:$rv,options:["--verbose"],resources:null,applyMode:"restartActive"}')
+  api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
+  [[ "${api_status}" == 200 ]] || fail "restartActive config update failed: ${api_body}"
+  assert_jq "${api_body}" '.apply.lifecycle == "STARTING"' "Active config restart did not return STARTING"
+  poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:10,offset:0}')" >/dev/null
+
+  log "Checking terminal startup failure and FAILED cleanup."
+  kubectl set env deployment/"${release}-api" --namespace "${namespace}" \
+    MOCK_FLEET_WIREMOCK_IMAGE=mock-fleet-e2e/missing:3.13.2 \
+    MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY=Never >/dev/null
+  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
+  start_api_port_forward
+  api_request POST "/__fleet/api/mocks/${failed_mock}/start"
+  [[ "${api_status}" == 202 || "${api_status}" == 503 ]] || fail "Failure probe start returned ${api_status}: ${api_body}"
+  poll_until "${failed_mock} FAILED lifecycle" api_mock_failed "${failed_mock}"
+  api_request DELETE "/__fleet/api/mocks/${failed_mock}"
+  assert_jq "${api_body}" '.status == "STOPPED"' "DELETE did not clean up FAILED mock"
+
+  log "All live cluster contract assertions passed."
+}
+
+self_test() {
+  bash -n "$0"
+  [[ -s "${fixture_dir}/persistent-stub.json" && -s "${fixture_dir}/persistent-stub-updated.json" ]] \
+    || fail "Cluster fixtures are missing."
+  [[ "${namespace}" == mock-fleet-e2e-* && "${bucket}" == mock-fleet-e2e-* && "${namespace}" != "${bucket}" ]] \
+    || fail "Run resources are not isolated."
+  local dry_output
+  dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
+  grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."
+  log "Self-test passed."
+}
+
+dry_run() {
+  cat <<EOF
+Run ID:       ${run_id}
+Namespace:    ${namespace}
+Release:      ${release}
+S3 bucket:    ${bucket}
+S3 endpoint:  ${s3_endpoint}
+CSI driver:   ${s3_provisioner}
+StorageClass: ${storage_class}
+MCP URL:      http://127.0.0.1:${mcp_port}/__fleet/mcp
+API URL:      http://127.0.0.1:${api_port}/__fleet/api
+No cluster changes were made.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --self-test) mode=self-test ;;
+    --dry-run) mode=dry-run ;;
+    --keep) keep=true ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; fail "Unknown option: $1" ;;
+  esac
+  shift
+done
+
+case "${mode}" in
+  self-test) self_test; exit 0 ;;
+  dry-run) dry_run; exit 0 ;;
+esac
+
+for command in minikube kubectl helm curl jq awk sed; do
+  require_command "${command}"
+done
+[[ -n "${run_id}" ]] || fail "MOCK_FLEET_E2E_RUN_ID contains no valid identifier characters."
+[[ -n "${s3_access_key}" ]] || fail "Set MOCK_FLEET_E2E_S3_ACCESS_KEY for the isolated SeaweedFS bucket."
+[[ -n "${s3_secret_key}" ]] || fail "Set MOCK_FLEET_E2E_S3_SECRET_KEY for the isolated SeaweedFS bucket."
+[[ $(minikube status --format='{{.Host}}' 2>/dev/null || true) == Running ]] \
+  || fail "Minikube is not running. Start the intended profile before this opt-in suite."
+[[ $(kubectl config current-context) == minikube* ]] \
+  || fail "Current kubectl context is not Minikube. Refusing to create cluster resources."
+kubectl get csidriver "${s3_provisioner}" >/dev/null 2>&1 \
+  || fail "CSI driver ${s3_provisioner} is unavailable. Install the SeaweedFS-compatible S3 CSI driver."
+kubectl get storageclass "${storage_class}" >/dev/null 2>&1 \
+  || fail "StorageClass ${storage_class} is unavailable. Install the SeaweedFS S3 StorageClass."
+kubectl get namespace "${namespace}" >/dev/null 2>&1 \
+  && fail "Namespace ${namespace} already exists. Choose a unique MOCK_FLEET_E2E_RUN_ID."
+
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/mock-fleet-e2e.XXXXXX")
+trap cleanup EXIT INT TERM
+kubectl create namespace "${namespace}" >/dev/null
+namespace_created=true
+
+log "Creating isolated SeaweedFS bucket ${bucket}."
+run_s3_cli create s3api create-bucket --bucket "${bucket}" >/dev/null \
+  || fail "Unable to create ${bucket} through ${s3_endpoint}. Check SeaweedFS credentials and endpoint DNS."
+bucket_created=true
+
+kubectl create deployment recording-target --namespace "${namespace}" \
+  --image=hashicorp/http-echo:0.2.3 -- --listen=:5678 --text=recorded >/dev/null
+kubectl expose deployment recording-target --namespace "${namespace}" --port=5678 --target-port=5678 >/dev/null
+kubectl rollout status deployment/recording-target --namespace "${namespace}" --timeout="${timeout_seconds}s"
+
+log "Installing Mock Fleet into ${namespace}."
+helm_deploy "${wiremock_image}" IfNotPresent
+kubectl get deployment --namespace "${namespace}" -l 'app.kubernetes.io/component=api' \
+  -o jsonpath='{.items[0].status.readyReplicas}' | grep -qx '2' \
+  || fail "Fleet API did not reach two ready replicas."
+
+kubectl port-forward --namespace "${namespace}" service/"${release}-mcp" "${mcp_port}:80" \
+  >"${work_dir}/mcp-port-forward.log" 2>&1 &
+mcp_pf_pid=$!
+poll_until "MCP port-forward" curl --silent --output /dev/null "http://127.0.0.1:${mcp_port}/__fleet/mcp"
+start_api_port_forward
+
+initialize_mcp
+run_contracts

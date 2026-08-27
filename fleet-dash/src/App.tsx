@@ -13,37 +13,26 @@ import {
   resourcesFromDraft,
   type ConfigData,
   type DraftConfig,
-  type OptionDefinition,
-  type UserConfigData
+  type OptionDefinition
 } from "./configOptions";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
+import {
+  configMutation,
+  errorMessage,
+  isActiveLifecycle,
+  lifecycleLabel,
+  type ApplyMode,
+  type ConfigMutationResult,
+  type ConfigView,
+  type MockConfigView,
+  type RoutingView
+} from "./apiContracts";
 
 type MockRow = {
   mockId: string;
   podName: string | null;
   status: MockStatus;
   message: string | null;
-};
-
-type MockConfigView = {
-  mockId: string;
-  active: boolean;
-  baseline: ConfigData;
-  user: UserConfigData;
-  effective: ConfigData;
-};
-
-type ConfigView = {
-  resourceVersion: string | null;
-  mockIds: string[];
-  mocks: MockConfigView[];
-  options: OptionDefinition[];
-  routing: RoutingView;
-};
-
-type RoutingView = {
-  mode: "HOST" | "PATH";
-  host: string;
 };
 
 type ConfirmDialogState = {
@@ -62,8 +51,6 @@ type MappingsView = {
   routing: RoutingView;
   error?: string | null;
 };
-
-type ApplyMode = "futureOnly" | "restartActive";
 
 type MappingFileNode = {
   name: string;
@@ -142,7 +129,7 @@ export default function App() {
     try {
       const response = await fetch(CONFIG_API_PATH);
       if (!response.ok) {
-        throw new Error(`Unable to load config (${response.status})`);
+        throw new Error(await errorMessage(response, `Unable to load config (${response.status})`));
       }
       const data = normalizeConfigView((await response.json()) as ConfigView & { routing?: RoutingView });
       const preserveDraft = configDirty && selectedMockId !== null;
@@ -180,7 +167,7 @@ export default function App() {
     try {
       const response = await fetch(MAPPINGS_API_PATH);
       if (!response.ok) {
-        throw new Error(`Unable to load mappings (${response.status})`);
+        throw new Error(await errorMessage(response, `Unable to load mappings (${response.status})`));
       }
       const data = normalizeMappingsView((await response.json()) as MappingsView & { routing?: RoutingView });
       const nextSelected = selectedMappingsMockId && data.mockIds.includes(selectedMappingsMockId)
@@ -243,11 +230,8 @@ export default function App() {
       const response = await fetch(`${MOCKS_API_PATH}/${encodeURIComponent(mockId)}`, {
         method: "DELETE"
       });
-      if (response.status === 404) {
-        throw new Error(`Mock '${mockId}' no longer exists.`);
-      }
       if (!response.ok) {
-        throw new Error(`Unable to delete mock '${mockId}'.`);
+        throw new Error(await errorMessage(response, `Unable to delete mock '${mockId}'.`));
       }
       setRows((currentRows) => currentRows.filter((row) => row.mockId !== mockId));
       showToast(`Deleted mock '${mockId}'.`);
@@ -263,13 +247,7 @@ export default function App() {
       return;
     }
 
-    let nextOptions: string[];
-    try {
-      nextOptions = optionsFromDraft(draft, configView.options, selectedMock?.baseline ?? emptyConfig());
-    } catch (validationError) {
-      setError(validationError instanceof Error ? validationError.message : "Invalid WireMock arguments.");
-      return;
-    }
+    const nextOptions = optionsFromDraft(draft, configView.options, selectedMock?.baseline ?? emptyConfig());
 
     setSaving(true);
     setError(null);
@@ -287,13 +265,14 @@ export default function App() {
       if (!response.ok) {
         throw new Error(await errorMessage(response, "Unable to save config."));
       }
-      const data = (await response.json()) as ConfigView;
+      const mutation = configMutation((await response.json()) as ConfigMutationResult);
+      const data = normalizeConfigView(mutation.config);
       setConfigView(data);
       setSelectedMockId(selectedMockId);
       const mock = data.mocks.find((item) => item.mockId === selectedMockId);
       setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
       setConfigDirty(false);
-      showToast(`Saved config for '${selectedMockId}'.`);
+      showToast(configMutationToast("Saved config", selectedMockId, mutation.apply.lifecycle));
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Unable to save config.");
     } finally {
@@ -316,14 +295,15 @@ export default function App() {
       if (!response.ok) {
         throw new Error(await errorMessage(response, "Unable to delete override."));
       }
-      const data = (await response.json()) as ConfigView;
+      const mutation = configMutation((await response.json()) as ConfigMutationResult);
+      const data = normalizeConfigView(mutation.config);
       setConfigView(data);
       const nextSelected = data.mockIds.includes(selectedMockId) ? selectedMockId : data.mockIds[0] ?? null;
       setSelectedMockId(nextSelected);
       const mock = data.mocks.find((item) => item.mockId === nextSelected);
       setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
       setConfigDirty(false);
-      showToast(`Deleted override for '${selectedMockId}'.`);
+      showToast(configMutationToast("Deleted override", selectedMockId, mutation.apply.lifecycle));
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : "Unable to delete override.");
     } finally {
@@ -397,7 +377,7 @@ export default function App() {
       mockIds: [...configView.mockIds, mockId].sort(),
       mocks: [
         ...configView.mocks,
-        { mockId, active: false, baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() }
+        emptyMockConfigView(mockId)
       ].sort((left, right) => left.mockId.localeCompare(right.mockId))
     });
     setSelectedMockId(mockId);
@@ -463,7 +443,7 @@ export default function App() {
   }
 
   function requestSaveConfig() {
-    if (!selectedMock?.active) {
+    if (!selectedMock || !isActiveLifecycle(selectedMock.lifecycle)) {
       void saveConfig("futureOnly");
       return;
     }
@@ -482,7 +462,7 @@ export default function App() {
     if (!selectedMockId) {
       return;
     }
-    if (selectedMock?.active) {
+    if (selectedMock && isActiveLifecycle(selectedMock.lifecycle)) {
       setConfirmDialog({
         title: "Delete config for active mock?",
         body: `Mock '${selectedMock.mockId}' has an active pod. Delete the override only for future pods, or restart the active pod so the next request uses the updated config?`,
@@ -963,7 +943,9 @@ export default function App() {
                   <span className="mono">{mockId}</span>
                   <span className="mock-base-url">{mockBaseUrl(mockId, configView.routing)}</span>
                 </span>
-                {configView.mocks.find((mock) => mock.mockId === mockId)?.active ? <span className="badge">active</span> : null}
+                {configView.mocks.find((mock) => mock.mockId === mockId)?.lifecycle !== "STOPPED" ? (
+                  <span className="badge">{configView.mocks.find((mock) => mock.mockId === mockId)?.lifecycle.toLowerCase()}</span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -979,7 +961,7 @@ export default function App() {
                     {mockBaseUrl(selectedMock.mockId, configView.routing)}
                   </a>
                 </span>
-                <span className="panel-status">{selectedMock.active ? "Active pod running" : "Future pods"}</span>
+                <span className="panel-status">{lifecycleLabel(selectedMock.lifecycle)}</span>
               </div>
               <div className="editor-body">
                 <div className="form-section">
@@ -1459,9 +1441,13 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
     mockIds: [...configView.mockIds, mockId].sort(),
     mocks: [
       ...configView.mocks,
-      { mockId, active: false, baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() }
+      emptyMockConfigView(mockId)
     ].sort((left, right) => left.mockId.localeCompare(right.mockId))
   };
+}
+
+function emptyMockConfigView(mockId: string): MockConfigView {
+  return { mockId, lifecycle: "STOPPED", baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() };
 }
 
 function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
@@ -1629,10 +1615,10 @@ function folderItemLabel(count: number) {
   return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
-async function errorMessage(response: Response, fallback: string) {
-  if (response.status === 409) {
-    return "Config changed. Refresh and retry.";
-  }
-  const body = await response.text();
-  return body.trim() || fallback;
+function configMutationToast(action: string, mockId: string, lifecycle: MockConfigView["lifecycle"]) {
+  const suffix = lifecycle === "STARTING" ? " Pod restart is starting."
+    : lifecycle === "RUNNING" ? " Pod is running."
+    : lifecycle === "FAILED" ? " Pod restart failed."
+    : "";
+  return `${action} for '${mockId}'.${suffix}`;
 }
