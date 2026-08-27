@@ -105,22 +105,54 @@ public final class WireMockAdminClient {
     }
 
     public JsonNode updateStub(String mockId, String stubId, ObjectNode mapping) {
-        JsonNode current = getStub(mockId, stubId);
+        String id = requireIdentifier(stubId, "stubId");
+        PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
+        JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
         ObjectNode payload = serverManagedCopy(mapping);
         copyIfPresent(current, payload, "id");
         copyIfPresent(current, payload, "uuid");
-        payload.put("persistent", current.path("persistent").asBoolean(false));
-        return sendJson(mockId, HttpMethod.PUT,
-                "/__admin/mappings/" + requireIdentifier(stubId, "stubId"), payload);
+        payload.put("persistent", pending == null
+                ? current.path("persistent").asBoolean(false)
+                : pending.after().path("persistent").asBoolean(false));
+        if (payload.path("persistent").asBoolean(false)) {
+            return persistentMutation(mockId, "update", id, (ObjectNode) current, payload, pending);
+        }
+        try {
+            return sendJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, payload);
+        } catch (RuntimeException updateFailure) {
+            JsonNode verified = getStubAfterAmbiguousFailure(mockId, id, updateFailure);
+            if (mappingMatches(verified, payload)) {
+                return verified;
+            }
+            throw updateFailure;
+        }
     }
 
     public void deleteStub(String mockId, String stubId) {
-        send(mockId, new TransportRequest(HttpMethod.DELETE,
-                "/__admin/mappings/" + requireIdentifier(stubId, "stubId"), Map.of(), new byte[0]));
+        String id = requireIdentifier(stubId, "stubId");
+        try {
+            send(mockId, new TransportRequest(HttpMethod.DELETE,
+                    "/__admin/mappings/" + id, Map.of(), new byte[0]));
+        } catch (RuntimeException deleteFailure) {
+            if (getStubAfterAmbiguousFailure(mockId, id, deleteFailure) == null) {
+                return;
+            }
+            throw deleteFailure;
+        }
     }
 
     public JsonNode setPersistent(String mockId, String stubId, boolean persistent) {
         String id = requireIdentifier(stubId, "stubId");
+        PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
+        if (pending != null) {
+            String operation = persistent ? "persist" : "unpersist";
+            if (!operation.equals(pending.operation())
+                    || pending.after().path("persistent").asBoolean(false) != persistent) {
+                throw persistentUpdateConflict(pending, getStubOrNull(mockId, id));
+            }
+            return persistentMutation(mockId, operation, id,
+                    pending.before(), pending.after(), pending);
+        }
         if (persistent) {
             JsonNode current = getStub(mockId, id);
             if (current.path("persistent").asBoolean(false)) {
@@ -128,34 +160,16 @@ public final class WireMockAdminClient {
             }
             ObjectNode payload = (ObjectNode) current.deepCopy();
             payload.put("persistent", true);
-            return sendJson(mockId, HttpMethod.PUT,
-                    "/__admin/mappings/" + id, payload);
+            return persistentMutation(mockId, "persist", id, (ObjectNode) current, payload, null);
         }
 
-        ObjectNode recovery = loadRecoveryMapping(mockId, id);
-        JsonNode current = getStubOrNull(mockId, id);
-        if (recovery == null) {
-            if (current == null) {
-                return getStub(mockId, id);
-            }
-            if (!current.path("persistent").asBoolean(false)) {
-                return current;
-            }
-            recovery = (ObjectNode) current.deepCopy();
-            writeRecoveryMapping(mockId, id, recovery);
-        } else if (current != null && !current.path("persistent").asBoolean(false)) {
-            deleteRecoveryMapping(mockId, id);
+        JsonNode current = getStub(mockId, id);
+        if (!current.path("persistent").asBoolean(false)) {
             return current;
         }
-
-        if (current != null) {
-            deleteStub(mockId, id);
-        }
-        ObjectNode payload = recovery.deepCopy();
+        ObjectNode payload = (ObjectNode) current.deepCopy();
         payload.put("persistent", false);
-        JsonNode result = sendJson(mockId, HttpMethod.POST, "/__admin/mappings", payload);
-        deleteRecoveryMapping(mockId, id);
-        return result;
+        return persistentMutation(mockId, "unpersist", id, (ObjectNode) current, payload, null);
     }
 
     public JsonNode findRequests(String mockId, JsonNode requestPattern) {
@@ -464,20 +478,30 @@ public final class WireMockAdminClient {
         return response;
     }
 
-    private ObjectNode loadRecoveryMapping(String mockId, String stubId) {
+    private PersistentTransaction loadRecoveryTransaction(String mockId, String stubId) {
         JsonNode marker = getStubOrNull(mockId, recoveryMappingId(stubId));
         if (marker == null) {
             return null;
         }
         JsonNode recovery = marker.path("metadata").path(RECOVERY_METADATA_KEY);
-        JsonNode mapping = recovery.path("mapping");
-        if (!"unpersist".equals(recovery.path("operation").asText())
-                || !stubId.equals(recovery.path("stubId").asText())
-                || !mapping.isObject() || !stubId.equals(mapping.path("id").asText())) {
-            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
-                    "Stored unpersist recovery mapping is invalid", false, Map.of("stubId", stubId));
+        JsonNode before = recovery.path("before");
+        JsonNode after = recovery.path("after");
+        String operation = recovery.path("operation").asText();
+        if ("unpersist".equals(operation) && !before.isObject() && !after.isObject()
+                && recovery.path("mapping").isObject()) {
+            before = recovery.path("mapping");
+            ObjectNode legacyAfter = (ObjectNode) before.deepCopy();
+            legacyAfter.put("persistent", false);
+            after = legacyAfter;
         }
-        return (ObjectNode) mapping.deepCopy();
+        if (operation.isBlank() || !stubId.equals(recovery.path("stubId").asText())
+                || !before.isObject() || !after.isObject()
+                || !stubId.equals(before.path("id").asText()) || !stubId.equals(after.path("id").asText())) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "Stored persistent recovery mapping is invalid", false, Map.of("stubId", stubId));
+        }
+        return new PersistentTransaction(operation, stubId,
+                (ObjectNode) before.deepCopy(), (ObjectNode) after.deepCopy());
     }
 
     private JsonNode getStubOrNull(String mockId, String stubId) {
@@ -491,7 +515,17 @@ public final class WireMockAdminClient {
         }
     }
 
-    private void writeRecoveryMapping(String mockId, String stubId, ObjectNode mapping) {
+    private JsonNode getStubAfterAmbiguousFailure(String mockId, String stubId, RuntimeException mutationFailure) {
+        try {
+            return getStubOrNull(mockId, stubId);
+        } catch (RuntimeException verificationFailure) {
+            mutationFailure.addSuppressed(verificationFailure);
+            throw mutationFailure;
+        }
+    }
+
+    private void writeRecoveryMapping(String mockId, PersistentTransaction transaction) {
+        String stubId = transaction.stubId();
         String markerId = recoveryMappingId(stubId);
         ObjectNode marker = mapper.createObjectNode();
         marker.put("id", markerId);
@@ -503,14 +537,174 @@ public final class WireMockAdminClient {
         request.putObject("headers").putObject("X-Mock-Fleet-MCP-Recovery").put("equalTo", markerId);
         marker.putObject("response").put("status", 503);
         ObjectNode recovery = marker.putObject("metadata").putObject(RECOVERY_METADATA_KEY);
-        recovery.put("operation", "unpersist");
+        recovery.put("operation", transaction.operation());
         recovery.put("stubId", stubId);
-        recovery.set("mapping", mapping.deepCopy());
-        sendJson(mockId, HttpMethod.POST, "/__admin/mappings", marker);
+        recovery.set("before", transaction.before().deepCopy());
+        recovery.set("after", transaction.after().deepCopy());
+        RuntimeException creationFailure = null;
+        try {
+            sendJson(mockId, HttpMethod.POST, "/__admin/mappings", marker);
+        } catch (RuntimeException failure) {
+            creationFailure = failure;
+        }
+        PersistentTransaction stored;
+        try {
+            stored = loadRecoveryTransaction(mockId, stubId);
+        } catch (RuntimeException verificationFailure) {
+            if (creationFailure != null) {
+                creationFailure.addSuppressed(verificationFailure);
+                throw creationFailure;
+            }
+            throw verificationFailure;
+        }
+        if (!transaction.equals(stored)) {
+            if (stored == null) {
+                if (creationFailure != null) {
+                    throw creationFailure;
+                }
+                throw new McpOperationException("WIREMOCK_ADMIN_ERROR",
+                        "Persistent recovery marker creation could not be verified", true,
+                        Map.of("stubId", stubId, "recoveryMarkerId", markerId));
+            }
+            throw persistentUpdateIncomplete(transaction, getStubOrNull(mockId, stubId),
+                    "Recovery marker creation could not be verified");
+        }
     }
 
     private void deleteRecoveryMapping(String mockId, String stubId) {
         deleteStub(mockId, recoveryMappingId(stubId));
+        if (getStubOrNull(mockId, recoveryMappingId(stubId)) != null) {
+            throw new McpOperationException("WIREMOCK_ADMIN_ERROR",
+                    "Persistent recovery marker removal could not be verified", true,
+                    Map.of("stubId", stubId, "recoveryMarkerId", recoveryMappingId(stubId)));
+        }
+    }
+
+    private JsonNode persistentMutation(String mockId, String operation, String stubId,
+            ObjectNode requestedBefore, ObjectNode requestedAfter, PersistentTransaction transaction) {
+        if (transaction == null) {
+            transaction = new PersistentTransaction(operation, stubId,
+                    requestedBefore.deepCopy(), requestedAfter.deepCopy());
+            writeRecoveryMapping(mockId, transaction);
+        } else if (!operation.equals(transaction.operation()) || !transaction.after().equals(requestedAfter)) {
+            throw persistentUpdateConflict(transaction, getStubOrNull(mockId, stubId));
+        }
+
+        JsonNode current = getStubOrNull(mockId, stubId);
+        if (mappingMatches(current, transaction.after())) {
+            deleteRecoveryMapping(mockId, stubId);
+            return current;
+        }
+        if (current != null && !mappingMatches(current, transaction.before())) {
+            throw persistentUpdateConflict(transaction, current);
+        }
+        if (current != null) {
+            deleteStub(mockId, stubId);
+            if (getStubOrNull(mockId, stubId) != null) {
+                throw persistentUpdateIncomplete(transaction, current,
+                        "Persistent mapping deletion could not be verified");
+            }
+        }
+        RuntimeException replacementFailure = null;
+        try {
+            sendJson(mockId, HttpMethod.POST, "/__admin/mappings", transaction.after());
+        } catch (RuntimeException failure) {
+            replacementFailure = failure;
+        }
+        JsonNode replacement;
+        try {
+            replacement = getStubOrNull(mockId, stubId);
+        } catch (RuntimeException verificationFailure) {
+            McpOperationException incomplete = persistentUpdateIncomplete(transaction, null,
+                    "Neither persistent replacement nor rollback can be verified");
+            incomplete.addSuppressed(verificationFailure);
+            if (replacementFailure != null) {
+                incomplete.addSuppressed(replacementFailure);
+            }
+            throw incomplete;
+        }
+        if (!mappingMatches(replacement, transaction.after())) {
+            RuntimeException failure = replacementFailure == null
+                    ? new McpOperationException("WIREMOCK_ADMIN_ERROR",
+                            "Persistent replacement creation could not be verified", true,
+                            reconciliationDetails(transaction, replacement))
+                    : replacementFailure;
+            throw restoreBeforeAndRethrow(mockId, transaction, replacement, failure);
+        }
+        deleteRecoveryMapping(mockId, stubId);
+        return replacement;
+    }
+
+    private RuntimeException restoreBeforeAndRethrow(String mockId, PersistentTransaction transaction, JsonNode current,
+            RuntimeException replacementFailure) {
+        if (current != null && !mappingMatches(current, transaction.before())) {
+            McpOperationException conflict = persistentUpdateConflict(transaction, current);
+            conflict.addSuppressed(replacementFailure);
+            throw conflict;
+        }
+        RuntimeException rollbackFailure = null;
+        if (current == null) {
+            try {
+                sendJson(mockId, HttpMethod.POST, "/__admin/mappings", transaction.before());
+            } catch (RuntimeException failure) {
+                rollbackFailure = failure;
+            }
+        }
+        JsonNode restored;
+        try {
+            restored = getStubOrNull(mockId, transaction.stubId());
+        } catch (RuntimeException verificationFailure) {
+            McpOperationException incomplete = persistentUpdateIncomplete(transaction, null,
+                    "Persistent replacement and rollback could not be verified");
+            incomplete.addSuppressed(replacementFailure);
+            incomplete.addSuppressed(verificationFailure);
+            if (rollbackFailure != null) {
+                incomplete.addSuppressed(rollbackFailure);
+            }
+            throw incomplete;
+        }
+        if (!mappingMatches(restored, transaction.before())) {
+            McpOperationException incomplete = persistentUpdateIncomplete(transaction, restored,
+                    "Persistent replacement and rollback could not be verified");
+            incomplete.addSuppressed(replacementFailure);
+            if (rollbackFailure != null) {
+                incomplete.addSuppressed(rollbackFailure);
+            }
+            throw incomplete;
+        }
+        deleteRecoveryMapping(mockId, transaction.stubId());
+        throw replacementFailure;
+    }
+
+    private static boolean mappingMatches(JsonNode actual, JsonNode expected) {
+        return actual != null && actual.equals(expected);
+    }
+
+    private McpOperationException persistentUpdateConflict(PersistentTransaction transaction, JsonNode current) {
+        return new McpOperationException("PERSISTENT_UPDATE_CONFLICT",
+                "Persistent mapping differs from both transaction states", false,
+                reconciliationDetails(transaction, current));
+    }
+
+    private McpOperationException persistentUpdateIncomplete(PersistentTransaction transaction, JsonNode current,
+            String message) {
+        return new McpOperationException("PERSISTENT_UPDATE_INCOMPLETE", message, true,
+                reconciliationDetails(transaction, current));
+    }
+
+    private Map<String, Object> reconciliationDetails(PersistentTransaction transaction, JsonNode current) {
+        return Map.of(
+                "operation", transaction.operation(),
+                "stubId", transaction.stubId(),
+                "recoveryMarkerId", recoveryMappingId(transaction.stubId()),
+                "markerPreserved", true,
+                "reconciliation", "manual-reconciliation-required",
+                "before", transaction.before(),
+                "after", transaction.after(),
+                "current", current == null ? mapper.nullNode() : current);
+    }
+
+    private record PersistentTransaction(String operation, String stubId, ObjectNode before, ObjectNode after) {
     }
 
     private JsonNode withoutRecoveryMappings(JsonNode response) {
@@ -535,10 +729,11 @@ public final class WireMockAdminClient {
     }
 
     private static boolean isRecoveryMapping(JsonNode mapping) {
-        return "unpersist".equals(mapping.path("metadata").path(RECOVERY_METADATA_KEY).path("operation").asText());
+        return mapping.path("metadata").path(RECOVERY_METADATA_KEY).isObject();
     }
 
     private static String recoveryMappingId(String stubId) {
+        // Keep the original namespace so retries can find markers written by earlier releases.
         return UUID.nameUUIDFromBytes(("mock-fleet-mcp:unpersist:" + stubId)
                 .getBytes(StandardCharsets.UTF_8)).toString();
     }
