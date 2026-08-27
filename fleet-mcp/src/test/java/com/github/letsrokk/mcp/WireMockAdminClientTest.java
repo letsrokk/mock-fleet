@@ -281,6 +281,7 @@ class WireMockAdminClientTest {
 
         assertEquals("PERSISTENT_UPDATE_INCOMPLETE", error.code());
         assertTrue(error.retryable());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(true, error.details().get("markerPreserved"));
         assertEquals("manual-reconciliation-required", error.details().get("reconciliation"));
         assertEquals("update", error.details().get("operation"));
@@ -574,16 +575,19 @@ class WireMockAdminClientTest {
     @Test
     void recorderStartForcesReviewableNonPersistentIdOutput() throws Exception {
         transport.respond(200, "{}");
+        transport.respond(200, "{\"status\":\"Recording\"}");
         ObjectNode input = (ObjectNode) mapper.readTree("""
                 {"targetBaseUrl":"https://example.test","persist":true,"outputFormat":"FULL"}
                 """);
 
-        client.startRecording("orders", input);
+        JsonNode status = client.startRecording("orders", input);
 
-        ObjectNode sent = transport.lastJson(mapper);
+        ObjectNode sent = transport.jsonAt(mapper, 0);
         assertFalse(sent.get("persist").booleanValue());
         assertEquals("IDS", sent.get("outputFormat").textValue());
-        assertEquals("/__admin/recordings/start", transport.last().target());
+        assertEquals("/__admin/recordings/start", transport.requestAt(0).target());
+        assertEquals("/__admin/recordings/status", transport.last().target());
+        assertEquals("Recording", status.path("status").asText());
     }
 
     @Test
@@ -682,6 +686,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderStopDoesNotTreatStubsCreatedDuringTheSessionAsCandidates() {
         transport.respond(200, "{}");
+        transport.respond(200, "{\"status\":\"Recording\"}");
         transport.respond(200, """
                 {"mappings":[{"id":"existing-id"},{"id":"normal-id"}],"meta":{"total":2}}
                 """);
@@ -697,10 +702,10 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
-        assertEquals("/__admin/recordings/stop", transport.requestAt(2).target());
-        assertEquals("/__admin/mappings/recorded-id", transport.requestAt(4).target());
-        assertFalse(transport.requestAt(4).target().contains("normal-id"));
-        assertEquals(6, transport.requestCount());
+        assertEquals("/__admin/recordings/stop", transport.requestAt(3).target());
+        assertEquals("/__admin/mappings/recorded-id", transport.requestAt(5).target());
+        assertFalse(transport.requestAt(5).target().contains("normal-id"));
+        assertEquals(7, transport.requestCount());
     }
 
     @Test

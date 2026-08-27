@@ -202,7 +202,13 @@ public final class WireMockAdminClient {
         ObjectNode payload = recordingSpec.deepCopy();
         payload.put("persist", false);
         payload.put("outputFormat", "IDS");
-        return sendJson(mockId, HttpMethod.POST, "/__admin/recordings/start", payload);
+        sendJson(mockId, HttpMethod.POST, "/__admin/recordings/start", payload);
+        JsonNode status = recordingStatus(mockId);
+        if (!status.isObject() || !status.path("status").isTextual()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "WireMock did not return a verifiable recording status", false, Map.of("mockId", mockId));
+        }
+        return status;
     }
 
     public JsonNode recordingStatus(String mockId) {
@@ -717,7 +723,7 @@ public final class WireMockAdminClient {
 
     private McpOperationException persistentUpdateIncomplete(PersistentTransaction transaction, JsonNode current,
             String message) {
-        return new McpOperationException("PERSISTENT_UPDATE_INCOMPLETE", message, true,
+        return new McpOperationException("PERSISTENT_UPDATE_INCOMPLETE", message, true, true,
                 reconciliationDetails(transaction, current));
     }
 

@@ -2,6 +2,7 @@ package com.github.letsrokk.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpMethod;
@@ -50,8 +51,12 @@ public final class FleetApiClient {
         return json(HttpMethod.GET, "/__fleet/api/mocks", null);
     }
 
-    public void stopMock(String mockId) {
-        raw(HttpMethod.DELETE, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId), null);
+    public JsonNode startMock(String mockId) {
+        return json(HttpMethod.POST, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId) + "/start", null);
+    }
+
+    public JsonNode stopMock(String mockId) {
+        return json(HttpMethod.DELETE, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId), null);
     }
 
     public JsonNode getConfig() {
@@ -129,8 +134,7 @@ public final class FleetApiClient {
             }
             TransportResponse response = HttpTransportSupport.await(request, body, maxPayloadBytes);
             if (response.status() < 200 || response.status() >= 300) {
-                throw new McpOperationException("FLEET_API_ERROR", "Fleet API returned HTTP " + response.status(),
-                        response.status() >= 500, Map.of("status", response.status(), "body", response.bodyAsString()));
+                throw apiError(response);
             }
             return response;
         } catch (McpOperationException e) {
@@ -138,6 +142,25 @@ public final class FleetApiClient {
         } catch (Exception e) {
             throw new McpOperationException("INVALID_JSON", "Unable to serialize Fleet API request", false, Map.of());
         }
+    }
+
+    private McpOperationException apiError(TransportResponse response) {
+        try {
+            JsonNode body = mapper.readTree(response.body());
+            if (body != null && body.isObject() && body.path("code").isTextual()
+                    && body.path("message").isTextual() && body.path("retryable").isBoolean()
+                    && body.path("stateMayHaveChanged").isBoolean() && body.path("details").isObject()) {
+                Map<String, Object> details = mapper.convertValue(body.path("details"),
+                        new TypeReference<Map<String, Object>>() {});
+                return new McpOperationException(body.path("code").asText(), body.path("message").asText(),
+                        body.path("retryable").asBoolean(), body.path("stateMayHaveChanged").asBoolean(), details);
+            }
+        } catch (Exception ignored) {
+            // Fall through to a stable transport-level error when the API did not return ApiError JSON.
+        }
+        return new McpOperationException("FLEET_API_ERROR", "Fleet API returned HTTP " + response.status(),
+                response.status() >= 500, false,
+                Map.of("status", response.status(), "body", response.bodyAsString()));
     }
 
     private static URI normalize(URI value) {

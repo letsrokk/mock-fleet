@@ -4,15 +4,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkiverse.mcp.server.ToolResponse;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpMethod;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,21 +38,25 @@ class FleetMcpToolsTrafficTest {
         var metrics = new McpMetrics(registry);
         var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
                 new WireMockVersion(3, 13, 2));
-        var tools = new FleetMcpTools(null, wireMock, config(), mapper,
-                new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
-                new McpToolExecutor(registry), metrics);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, running());
+            var tools = new FleetMcpTools(fleet.client(), wireMock, config(), mapper,
+                    new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
+                    new McpToolExecutor(registry), metrics);
 
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var create = executor.submit(() -> tools.createStub("orders", Map.of()));
-            assertTrue(transport.createEntered.await(1, TimeUnit.SECONDS));
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                var create = executor.submit(() -> tools.createStub("orders", Map.of()));
+                assertTrue(transport.createEntered.await(1, TimeUnit.SECONDS));
 
-            var snapshot = executor.submit(() -> tools.snapshotRequests("orders", Map.of()));
-            assertFalse(transport.snapshotScanEntered.await(100, TimeUnit.MILLISECONDS));
+                var snapshot = executor.submit(() -> tools.snapshotRequests("orders", Map.of()));
+                assertFalse(transport.snapshotScanEntered.await(100, TimeUnit.MILLISECONDS));
 
-            transport.releaseCreate.countDown();
-            assertFalse(create.get(1, TimeUnit.SECONDS).isError());
-            assertFalse(snapshot.get(1, TimeUnit.SECONDS).isError());
-            assertTrue(transport.snapshotScanEntered.await(1, TimeUnit.SECONDS));
+                transport.releaseCreate.countDown();
+                assertFalse(create.get(1, TimeUnit.SECONDS).isError());
+                assertFalse(snapshot.get(1, TimeUnit.SECONDS).isError());
+                assertTrue(transport.snapshotScanEntered.await(1, TimeUnit.SECONDS));
+            }
         }
     }
 
@@ -63,15 +71,226 @@ class FleetMcpToolsTrafficTest {
         var metrics = new McpMetrics(registry);
         var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
                 new WireMockVersion(3, 13, 2));
-        var tools = new FleetMcpTools(null, wireMock, config(), mapper, null, null,
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            var tools = new FleetMcpTools(fleet.client(), wireMock, config(), mapper, null, null,
+                    new McpToolExecutor(registry), metrics);
+
+            ToolResponse response = tools.sendRequest("orders", "GET", "/expected-error", null, null);
+
+            assertFalse(response.isError());
+            ObjectNode structured = (ObjectNode) response.structuredContent();
+            assertEquals("orders", structured.path("mockId").asText());
+            assertEquals(status, structured.path("response").path("status").asInt());
+            assertEquals("utf8", structured.path("response").path("body").path("encoding").asText());
+            assertEquals("upstream-body", structured.path("response").path("body").path("data").asText());
+        }
+    }
+
+    @Test
+    void coldStartReturnsRetryableErrorWithoutProxyTrafficThenSucceeds() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[{\"id\":\"stub-1\"}],\"meta\":{\"total\":1}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(202, starting());
+            fleet.respond(200, running());
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse starting = tools.listStubs("orders", 50, 0);
+            assertTrue(starting.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) starting.structuredContent()).error();
+            assertEquals("MOCK_STARTING", error.code());
+            assertTrue(error.retryable());
+            assertEquals(1000, error.details().get("retryAfterMs"));
+            assertEquals(0, transport.requestCount());
+
+            ToolResponse running = tools.listStubs("orders", 50, 0);
+            assertFalse(running.isError());
+            ObjectNode result = (ObjectNode) running.structuredContent();
+            assertEquals("orders", result.path("mockId").asText());
+            assertEquals("stub-1", result.path("stubs").get(0).path("id").asText());
+            assertEquals(1, result.path("page").path("total").asInt());
+            assertEquals(2, transport.requestCount());
+        }
+    }
+
+    @Test
+    void terminalFleetStartFailureKeepsStructuredDiagnosticsAndSkipsProxy() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(503, """
+                    {"code":"MOCK_START_FAILED","message":"ImagePullBackOff: denied","retryable":true,
+                     "stateMayHaveChanged":false,"details":{"mockId":"orders","status":"FAILED"}}
+                    """);
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.getStub("orders", "stub-1");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("MOCK_START_FAILED", error.code());
+            assertEquals("FAILED", error.details().get("status"));
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @Test
+    void startMockExposesStartingLifecycleWithoutProxyTraffic() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(202, starting());
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.startMock("orders");
+
+            assertFalse(response.isError());
+            ObjectNode result = (ObjectNode) response.structuredContent();
+            assertEquals("STARTING", result.path("status").asText());
+            assertEquals(1000, result.path("retryAfterMs").asInt());
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "", "application/octet-stream" })
+    void infersPrintableUtf8WhenContentTypeIsMissingOrGeneric(String contentType) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, contentType, "hello\nworld".getBytes(StandardCharsets.UTF_8));
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .sendRequest("orders", "GET", "/body", null, null);
+
+            JsonNode body = ((ObjectNode) response.structuredContent()).path("response").path("body");
+            assertEquals("utf8", body.path("encoding").asText());
+            assertEquals("hello\nworld", body.path("data").asText());
+            assertEquals(11, body.path("sizeBytes").asInt());
+        }
+    }
+
+    @Test
+    void encodesNonPrintableOrInvalidUtf8AsBase64() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        byte[] bytes = { 0, (byte) 0xff, 1 };
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "application/octet-stream", bytes);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .sendRequest("orders", "GET", "/binary", null, null);
+
+            JsonNode body = ((ObjectNode) response.structuredContent()).path("response").path("body");
+            assertEquals("base64", body.path("encoding").asText());
+            assertEquals(Base64.getEncoder().encodeToString(bytes), body.path("data").asText());
+            assertEquals(3, body.path("sizeBytes").asInt());
+        }
+    }
+
+    @Test
+    void bodyFilesUseTheSameEncodedBodyContract() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "", "file text".getBytes(StandardCharsets.UTF_8));
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).getBodyFile("orders", "result.txt");
+
+            JsonNode result = (ObjectNode) response.structuredContent();
+            assertEquals("orders", result.path("mockId").asText());
+            assertEquals("result.txt", result.path("fileName").asText());
+            assertEquals("utf8", result.path("body").path("encoding").asText());
+            assertEquals("file text", result.path("body").path("data").asText());
+            assertEquals(9, result.path("body").path("sizeBytes").asInt());
+        }
+    }
+
+    @Test
+    void malformedBodyEncodingReturnsStructuredInvalidArgument() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).sendRequest(
+                    "orders", "POST", "/body", null,
+                    Map.of("encoding", "hex", "data", "00", "sizeBytes", 1));
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_ARGUMENT", error.code());
+            assertEquals("Unsupported body.encoding: hex", error.message());
+            assertEquals(1, transport.requestCount());
+        }
+    }
+
+    @Test
+    void stopRecordingReturnsAnExplicitZeroMatchResult() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"ids\":[]}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+
+            ObjectNode result = (ObjectNode) response.structuredContent();
+            assertFalse(response.isError());
+            assertEquals(mapper.createArrayNode(), result.path("candidateIds"));
+            assertEquals(0, result.path("candidateCount").asInt());
+            assertFalse(result.path("matchedRequests").asBoolean(true));
+        }
+    }
+
+    @Test
+    void snapshotReturnsSanitizedCandidateIdsAndCount() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"ids\":[\"candidate-1\"]}");
+        transport.respond(200, "{\"id\":\"candidate-1\",\"request\":{},\"response\":{\"status\":200}}");
+        transport.respond(200, "{\"id\":\"candidate-1\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).snapshotRequests("orders", Map.of());
+
+            ObjectNode result = (ObjectNode) response.structuredContent();
+            assertFalse(response.isError());
+            assertEquals("candidate-1", result.path("candidateIds").get(0).asText());
+            assertEquals(1, result.path("candidateCount").asInt());
+            assertTrue(result.path("matchedRequests").asBoolean());
+        }
+    }
+
+    private static FleetMcpTools tools(FleetApiClient fleetApi, FleetProxyTransport transport, ObjectMapper mapper) {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new McpMetrics(registry);
+        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
+                new WireMockVersion(3, 13, 2));
+        return new FleetMcpTools(fleetApi, wireMock, config(), mapper,
+                new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
                 new McpToolExecutor(registry), metrics);
+    }
 
-        ToolResponse response = tools.sendRequest("orders", "GET", "/expected-error", null, null, null);
+    private static String running() {
+        return "{\"mockId\":\"orders\",\"status\":\"RUNNING\",\"podName\":\"mock-orders-1\",\"message\":null,\"retryAfterMs\":null}";
+    }
 
-        assertFalse(response.isError());
-        ObjectNode structured = (ObjectNode) response.structuredContent();
-        assertEquals(status, structured.path("status").asInt());
-        assertEquals("upstream-body", structured.path("body").asText());
+    private static String starting() {
+        return "{\"mockId\":\"orders\",\"status\":\"STARTING\",\"podName\":null,\"message\":null,\"retryAfterMs\":1000}";
     }
 
     private static FleetMcpConfig config() {
@@ -101,10 +320,57 @@ class FleetMcpToolsTrafficTest {
                     body.getBytes(StandardCharsets.UTF_8)));
         }
 
+        void respond(int status, String contentType, byte[] body) {
+            Map<String, List<String>> headers = contentType.isEmpty()
+                    ? Map.of() : Map.of("content-type", List.of(contentType));
+            responses.add(new TransportResponse(status, headers, body));
+        }
+
+        int requestCount() {
+            return requests;
+        }
+
+        private int requests;
         @Override
         public TransportResponse execute(String mockId, TransportRequest request) {
+            requests++;
             return responses.removeFirst();
         }
+    }
+
+    private static final class FleetApiHarness implements AutoCloseable {
+        private final ObjectMapper mapper = new ObjectMapper();
+        private final ArrayDeque<FleetResponse> responses = new ArrayDeque<>();
+        private final Vertx vertx = Vertx.vertx();
+        private final HttpServer server;
+        private final FleetApiClient client;
+
+        private FleetApiHarness() {
+            server = vertx.createHttpServer().requestHandler(request -> request.bodyHandler(ignored -> {
+                FleetResponse response = responses.isEmpty() ? new FleetResponse(200, running()) : responses.removeFirst();
+                request.response().setStatusCode(response.status()).putHeader("Content-Type", "application/json")
+                        .end(response.body());
+            })).listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
+            client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
+                    Duration.ofSeconds(2), 4096, mapper, new McpMetrics(new SimpleMeterRegistry()));
+        }
+
+        void respond(int status, String body) {
+            responses.add(new FleetResponse(status, body));
+        }
+
+        FleetApiClient client() {
+            return client;
+        }
+
+        @Override
+        public void close() {
+            client.close();
+            server.close().toCompletionStage().toCompletableFuture().join();
+            vertx.close().toCompletionStage().toCompletableFuture().join();
+        }
+
+        private record FleetResponse(int status, String body) {}
     }
 
     private static final class BlockingRecorderTransport implements FleetProxyTransport {

@@ -73,9 +73,9 @@ class FleetMcpToolsConfigTest {
         ObjectNode result = (ObjectNode) response.structuredContent();
         assertEquals("42", result.path("resourceVersion").asText());
         assertEquals(mapper.readTree("[\"beta\",\"zeta\"]"), result.path("mockIds"));
-        assertEquals(3, result.path("meta").path("total").asInt());
-        assertEquals(2, result.path("meta").path("limit").asInt());
-        assertEquals(1, result.path("meta").path("offset").asInt());
+        assertEquals(3, result.path("page").path("total").asInt());
+        assertEquals(2, result.path("page").path("limit").asInt());
+        assertEquals(1, result.path("page").path("offset").asInt());
         assertFalse(result.has("mocks"));
         assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
@@ -91,9 +91,9 @@ class FleetMcpToolsConfigTest {
         assertFalse(response.isError());
         ObjectNode result = (ObjectNode) response.structuredContent();
         assertEquals(mapper.readTree("[]"), result.path("mockIds"));
-        assertEquals(0, result.path("meta").path("total").asInt());
-        assertEquals(50, result.path("meta").path("limit").asInt());
-        assertEquals(0, result.path("meta").path("offset").asInt());
+        assertEquals(0, result.path("page").path("total").asInt());
+        assertEquals(50, result.path("page").path("limit").asInt());
+        assertEquals(0, result.path("page").path("offset").asInt());
     }
 
     @Test
@@ -116,7 +116,7 @@ class FleetMcpToolsConfigTest {
         var response = tools.getMockConfig("missing");
 
         assertTrue(response.isError());
-        assertEquals("NOT_FOUND", ((McpToolExecutor.ErrorContent) response.structuredContent()).code());
+        assertEquals("NOT_FOUND", ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
         assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
@@ -125,7 +125,7 @@ class FleetMcpToolsConfigTest {
         var response = tools.getMockConfig("bad_id");
 
         assertTrue(response.isError());
-        assertEquals("INVALID_ARGUMENT", ((McpToolExecutor.ErrorContent) response.structuredContent()).code());
+        assertEquals("INVALID_ARGUMENT", ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
         assertEquals(List.of(), requests);
     }
 
