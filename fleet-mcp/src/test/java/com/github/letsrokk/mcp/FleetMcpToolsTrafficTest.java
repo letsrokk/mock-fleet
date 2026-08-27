@@ -156,6 +156,52 @@ class FleetMcpToolsTrafficTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {
+            "\"podName\":42",
+            "\"message\":true",
+            "\"retryAfterMs\":\"1000\"",
+            "\"retryAfterMs\":-1",
+            "\"retryAfterMs\":1.5"
+    })
+    void startMockRejectsMalformedOptionalLifecycleFields(String malformedField) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, "{\"mockId\":\"orders\",\"status\":\"RUNNING\"," + malformedField + "}");
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.startMock("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertEquals("orders", error.details().get("mockId"));
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @Test
+    void adminPreflightRejectsMismatchedLifecycleMockIdWithoutProxyTraffic() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, """
+                    {"mockId":"payments","status":"RUNNING","podName":"mock-payments-1",
+                     "message":null,"retryAfterMs":null}
+                    """);
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+
+            ToolResponse response = tools.getStub("orders", "stub-1");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertEquals("orders", error.details().get("mockId"));
+            assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = { "", "application/octet-stream" })
     void infersPrintableUtf8WhenContentTypeIsMissingOrGeneric(String contentType) {
         ObjectMapper mapper = new ObjectMapper();

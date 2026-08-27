@@ -458,12 +458,18 @@ public final class FleetMcpTools {
         if (!response.isObject() || !response.path("mockId").isTextual() || !response.path("status").isTextual()) {
             throw invalidUpstreamResponse("Fleet start response is missing lifecycle fields", mockId);
         }
+        if (!mockId.equals(response.path("mockId").asText())) {
+            throw invalidUpstreamResponse("Fleet start response mockId does not match the requested mock", mockId);
+        }
         String status = response.path("status").asText();
         if (!"RUNNING".equals(status) && !"STARTING".equals(status)) {
             throw invalidUpstreamResponse("Fleet start response contains unsupported status " + status, mockId);
         }
+        requireNullableText(response, "podName", mockId);
+        requireNullableText(response, "message", mockId);
+        requireNullableNonNegativeInteger(response, "retryAfterMs", mockId);
         ObjectNode result = mapper.createObjectNode();
-        result.put("mockId", response.path("mockId").asText());
+        result.put("mockId", mockId);
         result.put("status", status);
         copyNullable(result, response, "podName");
         copyNullable(result, response, "message");
@@ -489,6 +495,22 @@ public final class FleetMcpTools {
             details.put("retryAfterMs", lifecycle.path("retryAfterMs").asInt());
         }
         throw new McpOperationException("MOCK_STARTING", "Mock " + mockId + " is still starting", true, false, details);
+    }
+
+    private void requireNullableText(JsonNode response, String field, String mockId) {
+        JsonNode value = response.get(field);
+        if (value != null && !value.isNull() && !value.isTextual()) {
+            throw invalidUpstreamResponse("Fleet start response field " + field + " must be a string or null", mockId);
+        }
+    }
+
+    private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId) {
+        JsonNode value = response.get(field);
+        if (value != null && !value.isNull()
+                && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
+            throw invalidUpstreamResponse(
+                    "Fleet start response field " + field + " must be a non-negative integer or null", mockId);
+        }
     }
 
     private void copyNullable(ObjectNode target, JsonNode source, String field) {
