@@ -64,6 +64,14 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 
 The MCP service uses stateful Streamable HTTP and therefore runs one replica. Enabling it requires a pinned WireMock 3.x image; the default is `wiremock/wiremock:3.13.2-2`.
 
+MCP tools that accept native WireMock JSON, including `mapping`, `headers`, `requestPattern`, `recording`, and `snapshot`, accept ordinary JSON objects directly. Do not wrap them in a `map` property.
+
+`get_mock_config` returns only `resourceVersion`, the selected `mock`, and `routing`. It returns a structured `NOT_FOUND` error with `details.mockId` when the mock has no configuration. `list_option_definitions` returns the option metadata separately as `{ "optionDefinitions": [...] }`.
+
+`update_mock_config` accepts `applyMode` as `futureOnly` or `restartActive`. Its optional `resources` value has required `requests` and `limits` string maps. Omit `resources` to inherit the baseline; provide both maps, including two empty maps, to replace the inherited values. The response contains only `resourceVersion`, the updated `mock`, and `applyMode`. `delete_mock_config` returns only `resourceVersion`, `mockId`, `deleted`, and `applyMode`.
+
+Configuration views use `null` for inherited `user.resources`. The `baseline.resources` and `effective.resources` fields always contain resolved request and limit maps.
+
 The existing Fleet Proxy still forwards direct `/__admin` requests from normal mock URLs without authentication. Enabling MCP does not add an authorization boundary to those routes. Protect the ingress at the platform layer when public Admin API access is not acceptable.
 
 For local Minikube development:

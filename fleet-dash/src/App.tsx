@@ -4,6 +4,7 @@ import trashIcon from "./assets/trash.svg";
 import {
   draftFromConfig,
   emptyConfig,
+  emptyUserConfig,
   emptyDraft,
   groupOptions,
   hasOption,
@@ -12,7 +13,8 @@ import {
   resourcesFromDraft,
   type ConfigData,
   type DraftConfig,
-  type OptionDefinition
+  type OptionDefinition,
+  type UserConfigData
 } from "./configOptions";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 
@@ -27,7 +29,7 @@ type MockConfigView = {
   mockId: string;
   active: boolean;
   baseline: ConfigData;
-  user: ConfigData;
+  user: UserConfigData;
   effective: ConfigData;
 };
 
@@ -395,7 +397,7 @@ export default function App() {
       mockIds: [...configView.mockIds, mockId].sort(),
       mocks: [
         ...configView.mocks,
-        { mockId, active: false, baseline: emptyConfig(), user: emptyConfig(), effective: emptyConfig() }
+        { mockId, active: false, baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() }
       ].sort((left, right) => left.mockId.localeCompare(right.mockId))
     });
     setSelectedMockId(mockId);
@@ -1457,7 +1459,7 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
     mockIds: [...configView.mockIds, mockId].sort(),
     mocks: [
       ...configView.mocks,
-      { mockId, active: false, baseline: emptyConfig(), user: emptyConfig(), effective: emptyConfig() }
+      { mockId, active: false, baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() }
     ].sort((left, right) => left.mockId.localeCompare(right.mockId))
   };
 }

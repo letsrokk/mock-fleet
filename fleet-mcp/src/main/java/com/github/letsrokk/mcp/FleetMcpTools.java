@@ -2,20 +2,17 @@ package com.github.letsrokk.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkiverse.mcp.server.ToolResponse;
 import io.vertx.core.http.HttpMethod;
-import io.vertx.core.json.JsonObject;
 import jakarta.inject.Singleton;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,44 +69,52 @@ public final class FleetMcpTools {
         });
     }
 
-    @Tool(name = "get_mock_config", description = "Get complete Fleet configuration views for multiple mocks.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public ToolResponse getMockConfig(@ToolArg(description = "Mock IDs") List<String> mockIds) {
+    @Tool(name = "get_mock_config", description = "Get one mock's configuration and Fleet routing metadata.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse getMockConfig(@ToolArg(description = "Mock ID") String mockId) {
         return fleet("get_mock_config", () -> {
-            List<String> requestedMockIds = requireMockIds(mockIds);
+            MockIdValidator.requireValid(mockId);
             JsonNode view = fleetApi.getConfig();
-            Map<String, JsonNode> configsByMockId = indexMockConfigs(view.path("mocks"));
             ObjectNode result = mapper.createObjectNode();
             result.set("resourceVersion", view.path("resourceVersion"));
-            ArrayNode mocks = mapper.createArrayNode();
-            ArrayNode missingMockIds = mapper.createArrayNode();
-            for (String mockId : requestedMockIds) {
-                JsonNode mock = configsByMockId.get(mockId);
-                if (mock == null) {
-                    missingMockIds.add(mockId);
-                } else {
-                    mocks.add(mock);
-                }
-            }
-            result.set("mocks", mocks);
-            result.set("missingMockIds", missingMockIds);
-            result.set("optionDefinitions", view.path("options"));
+            result.set("mock", requireMockConfig(view.path("mocks"), mockId, "NOT_FOUND"));
             result.set("routing", view.path("routing"));
-            return McpToolExecutor.ToolResult.of(
-                    "Loaded " + mocks.size() + " mock configurations; " + missingMockIds.size() + " not found.", result);
+            return McpToolExecutor.ToolResult.of("Loaded configuration for " + mockId + ".", result);
+        });
+    }
+
+    @Tool(name = "list_option_definitions", description = "List supported WireMock CLI option definitions.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse listOptionDefinitions() {
+        return fleet("list_option_definitions", () -> {
+            JsonNode view = fleetApi.getConfig();
+            ObjectNode result = mapper.createObjectNode();
+            result.set("optionDefinitions", view.path("options"));
+            return McpToolExecutor.ToolResult.of("Listed WireMock option definitions.", result);
         });
     }
 
     @Tool(name = "update_mock_config", description = "Create or replace a mock's complete saved options and resources using optimistic concurrency.",
+            inputSchema = @Tool.InputSchema(generator = UpdateMockConfigInputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
-            @ToolArg(description = "Complete WireMock CLI option list") List<String> options,
-            @ToolArg(description = "Complete Kubernetes requests and limits object") JsonObject resources,
-            @ToolArg(description = "futureOnly or restartActive") String applyMode) {
-        return fleet("update_mock_config", () -> McpToolExecutor.ToolResult.of(
-                "Saved configuration for " + mockId + ".",
-                fleetApi.updateConfig(mockId, resourceVersion, options, json(resources), applyMode)));
+            @ToolArg(description = "Complete mock-specific WireMock CLI option override list") List<String> options,
+            @ToolArg(description = "Kubernetes requests and limits override; omit to inherit baseline resources", required = false) MockResources resources,
+            @ToolArg(description = "How to apply the saved configuration") ConfigApplyMode applyMode) {
+        return fleet("update_mock_config", () -> {
+            if (resources != null && resources.requests() == null) {
+                throw new IllegalArgumentException("resources.requests is required when resources are provided");
+            }
+            if (resources != null && resources.limits() == null) {
+                throw new IllegalArgumentException("resources.limits is required when resources are provided");
+            }
+            JsonNode view = fleetApi.updateConfig(mockId, resourceVersion, options, resources, applyMode);
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            result.set("mock", requireMockConfig(view.path("mocks"), mockId, "INVALID_UPSTREAM_RESPONSE"));
+            result.put("applyMode", applyMode.name());
+            return McpToolExecutor.ToolResult.of("Updated configuration for " + mockId + ".", result);
+        });
     }
 
     @Tool(name = "delete_mock_config", description = "Delete a mock-specific configuration using optimistic concurrency.",
@@ -117,10 +122,23 @@ public final class FleetMcpTools {
     public ToolResponse deleteMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
-            @ToolArg(description = "futureOnly or restartActive") String applyMode) {
-        return fleet("delete_mock_config", () -> McpToolExecutor.ToolResult.of(
-                "Deleted configuration for " + mockId + ".",
-                fleetApi.deleteConfig(mockId, resourceVersion, applyMode)));
+            @ToolArg(description = "How to apply the deletion") ConfigApplyMode applyMode) {
+        return fleet("delete_mock_config", () -> {
+            JsonNode view = fleetApi.deleteConfig(mockId, resourceVersion, applyMode);
+            JsonNode mocks = view.get("mocks");
+            if (mocks == null || !mocks.isArray()) {
+                throw invalidUpstreamResponse("Fleet API response does not contain a mocks array", mockId);
+            }
+            if (findMockConfig(mocks, mockId) != null) {
+                throw invalidUpstreamResponse("Deleted mock is still present", mockId);
+            }
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            result.put("mockId", mockId);
+            result.put("deleted", true);
+            result.put("applyMode", applyMode.name());
+            return McpToolExecutor.ToolResult.of("Deleted configuration for " + mockId + ".", result);
+        });
     }
 
     @Tool(name = "stop_mock", description = "Stop an active mock pod. The next proxied request may start it again.",
@@ -159,7 +177,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "create_stub", description = "Create a temporary WireMock stub. Client-supplied id, uuid, and persistent fields are ignored.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse createStub(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock stub mapping JSON") JsonObject mapping) {
+            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
         return wireMock("create_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
@@ -171,7 +189,7 @@ public final class FleetMcpTools {
     @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse updateStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
-            @ToolArg(description = "Native WireMock stub mapping JSON") JsonObject mapping) {
+            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
         return wireMock("update_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
@@ -217,7 +235,7 @@ public final class FleetMcpTools {
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "HTTP method") String method,
             @ToolArg(description = "Relative path and optional query") String path,
-            @ToolArg(description = "Request headers", required = false) JsonObject headers,
+            @ToolArg(description = "Request headers", required = false) Map<String, Object> headers,
             @ToolArg(description = "UTF-8 request body", required = false) String body,
             @ToolArg(description = "Base64 request body for binary content", required = false) String bodyBase64) {
         return wireMock("send_request", mockId, () -> {
@@ -230,7 +248,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "find_requests", description = "Find journaled requests matching a native WireMock request pattern. Sensitive headers are redacted.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse findRequests(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock request-pattern JSON") JsonObject requestPattern,
+            @ToolArg(description = "Native WireMock request-pattern JSON") Map<String, Object> requestPattern,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("find_requests", mockId, () -> McpToolExecutor.ToolResult.of(
@@ -240,7 +258,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "count_requests", description = "Count journaled requests matching a native WireMock request pattern.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse countRequests(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock request-pattern JSON") JsonObject requestPattern) {
+            @ToolArg(description = "Native WireMock request-pattern JSON") Map<String, Object> requestPattern) {
         return wireMock("count_requests", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Counted matching requests for " + mockId + ".", wireMock.countRequests(mockId, json(requestPattern))));
     }
@@ -256,7 +274,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "get_near_misses", description = "Get near misses for unmatched requests or an optional request pattern.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getNearMisses(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Optional native WireMock request-pattern JSON", required = false) JsonObject requestPattern) {
+            @ToolArg(description = "Optional native WireMock request-pattern JSON", required = false) Map<String, Object> requestPattern) {
         return wireMock("get_near_misses", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Loaded near misses for " + mockId + ".",
                 wireMock.getNearMisses(mockId, requestPattern == null ? null : json(requestPattern))));
@@ -273,7 +291,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "start_recording", description = "Start WireMock recording with persist=false and outputFormat=IDS. The target is checked against the outbound policy.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse startRecording(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock recorder JSON") JsonObject recording) {
+            @ToolArg(description = "Native WireMock recorder JSON") Map<String, Object> recording) {
         return wireMock("start_recording", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(recording, "recording");
             outboundTargets.validate(payload);
@@ -296,7 +314,7 @@ public final class FleetMcpTools {
 
     @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse snapshotRequests(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock snapshot JSON") JsonObject snapshot) {
+            @ToolArg(description = "Native WireMock snapshot JSON") Map<String, Object> snapshot) {
         return wireMock("snapshot_requests", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(snapshot, "snapshot");
             outboundTargets.validate(payload);
@@ -477,17 +495,16 @@ public final class FleetMcpTools {
         return result;
     }
 
-    private Map<String, List<String>> headerMap(JsonObject headers) {
+    private Map<String, List<String>> headerMap(Map<String, Object> headers) {
         if (headers == null) {
             return Map.of();
         }
         Map<String, List<String>> result = new LinkedHashMap<>();
-        headers.forEach(entry -> {
-            Object value = entry.getValue();
+        headers.forEach((name, value) -> {
             if (value instanceof List<?> values) {
-                result.put(entry.getKey(), values.stream().map(String::valueOf).toList());
+                result.put(name, values.stream().map(String::valueOf).toList());
             } else {
-                result.put(entry.getKey(), List.of(String.valueOf(value)));
+                result.put(name, List.of(String.valueOf(value)));
             }
         });
         return Map.copyOf(result);
@@ -544,7 +561,7 @@ public final class FleetMcpTools {
         }
     }
 
-    private ObjectNode object(JsonObject value, String name) {
+    private ObjectNode object(Map<String, Object> value, String name) {
         JsonNode node = json(value);
         if (!(node instanceof ObjectNode object)) {
             throw new IllegalArgumentException(name + " must be a JSON object");
@@ -552,39 +569,38 @@ public final class FleetMcpTools {
         return object;
     }
 
-    private JsonNode json(JsonObject value) {
+    private JsonNode json(Map<String, Object> value) {
         if (value == null) {
             throw new IllegalArgumentException("JSON argument is required");
         }
-        try {
-            return mapper.readTree(value.encode());
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid JSON argument", e);
-        }
+        return mapper.valueToTree(value);
     }
 
-    private List<String> requireMockIds(List<String> mockIds) {
-        if (mockIds == null || mockIds.isEmpty()) {
-            throw new IllegalArgumentException("mockIds must contain at least one mock ID");
+    private JsonNode requireMockConfig(JsonNode mocks, String mockId, String missingCode) {
+        JsonNode mock = findMockConfig(mocks, mockId);
+        if (mock != null) {
+            return mock;
         }
-        LinkedHashSet<String> uniqueMockIds = new LinkedHashSet<>();
-        for (String mockId : mockIds) {
-            uniqueMockIds.add(MockIdValidator.requireValid(mockId));
+        if ("NOT_FOUND".equals(missingCode)) {
+            throw new McpOperationException("NOT_FOUND", "No configuration exists for mock " + mockId + ".", false,
+                    Map.of("mockId", mockId));
         }
-        return List.copyOf(uniqueMockIds);
+        throw invalidUpstreamResponse("Updated mock is missing", mockId);
     }
 
-    private Map<String, JsonNode> indexMockConfigs(JsonNode mocks) {
-        Map<String, JsonNode> configsByMockId = new LinkedHashMap<>();
+    private McpOperationException invalidUpstreamResponse(String message, String mockId) {
+        return new McpOperationException("INVALID_UPSTREAM_RESPONSE", message, false, Map.of("mockId", mockId));
+    }
+
+    private JsonNode findMockConfig(JsonNode mocks, String mockId) {
         if (mocks.isArray()) {
             for (JsonNode mock : mocks) {
-                JsonNode mockId = mock.get("mockId");
-                if (mockId != null && mockId.isTextual()) {
-                    configsByMockId.put(mockId.textValue(), mock);
+                if (mockId.equals(mock.path("mockId").asText())) {
+                    return mock;
                 }
             }
         }
-        return configsByMockId;
+        return null;
     }
 
     private static void collectTextFields(JsonNode node, String fieldName, List<String> values) {

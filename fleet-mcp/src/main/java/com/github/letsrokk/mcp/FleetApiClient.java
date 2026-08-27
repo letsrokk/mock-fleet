@@ -58,30 +58,41 @@ public final class FleetApiClient {
         return json(HttpMethod.GET, "/__fleet/api/config", null);
     }
 
-    public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, JsonNode resources,
-            String applyMode) {
-        if (resourceVersion == null || resourceVersion.isBlank() || options == null || resources == null
-                || !resources.isObject() || !resources.path("requests").isObject()
-                || !resources.path("limits").isObject()) {
-            throw new IllegalArgumentException("resourceVersion, complete options/resources, and applyMode are required");
+    public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,
+            ConfigApplyMode applyMode) {
+        if (resourceVersion == null || resourceVersion.isBlank()) {
+            throw new IllegalArgumentException("resourceVersion is required");
+        }
+        if (options == null) {
+            throw new IllegalArgumentException("options is required");
+        }
+        if (resources != null && resources.requests() == null) {
+            throw new IllegalArgumentException("resources.requests is required when resources are provided");
+        }
+        if (resources != null && resources.limits() == null) {
+            throw new IllegalArgumentException("resources.limits is required when resources are provided");
         }
         requireApplyMode(applyMode);
         var payload = mapper.createObjectNode();
         payload.put("resourceVersion", resourceVersion);
         payload.set("options", mapper.valueToTree(options));
-        payload.set("resources", resources);
-        payload.put("applyMode", applyMode);
+        if (resources == null) {
+            payload.putNull("resources");
+        } else {
+            payload.set("resources", mapper.valueToTree(resources));
+        }
+        payload.put("applyMode", applyMode.name());
         return json(HttpMethod.PUT, "/__fleet/api/config/" + MockIdValidator.requireValid(mockId), payload);
     }
 
-    public JsonNode deleteConfig(String mockId, String resourceVersion, String applyMode) {
+    public JsonNode deleteConfig(String mockId, String resourceVersion, ConfigApplyMode applyMode) {
         if (resourceVersion == null || resourceVersion.isBlank()) {
-            throw new IllegalArgumentException("resourceVersion and applyMode are required");
+            throw new IllegalArgumentException("resourceVersion is required");
         }
         requireApplyMode(applyMode);
         var payload = mapper.createObjectNode();
         payload.put("resourceVersion", resourceVersion);
-        payload.put("applyMode", applyMode);
+        payload.put("applyMode", applyMode.name());
         return json(HttpMethod.DELETE, "/__fleet/api/config/" + MockIdValidator.requireValid(mockId), payload);
     }
 
@@ -141,9 +152,9 @@ public final class FleetApiClient {
         return URI.create(normalized);
     }
 
-    private static void requireApplyMode(String value) {
-        if (!"futureOnly".equals(value) && !"restartActive".equals(value)) {
-            throw new IllegalArgumentException("applyMode must be futureOnly or restartActive");
+    private static void requireApplyMode(ConfigApplyMode value) {
+        if (value == null) {
+            throw new IllegalArgumentException("applyMode is required");
         }
     }
 

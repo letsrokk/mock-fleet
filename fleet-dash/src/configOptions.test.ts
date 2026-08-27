@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   draftFromConfig,
+  emptyUserConfig,
   hasOption,
   optionsFromDraft,
   overrideOptions,
+  resourcesFromDraft,
   type ConfigData,
   type OptionDefinition
 } from "./configOptions";
@@ -46,6 +48,21 @@ const definitions: OptionDefinition[] = [
 const emptyResources = { requests: {}, limits: {} };
 
 describe("config option helpers", () => {
+  it("represents inherited user resources as null", () => {
+    expect(emptyUserConfig()).toEqual({ options: [], resources: null });
+  });
+
+  it("keeps clearing inherited resources as an explicit empty override", () => {
+    const baseline: ConfigData = {
+      options: [],
+      resources: { requests: { cpu: "0.5" }, limits: { cpu: "1" } }
+    };
+
+    expect(resourcesFromDraft({
+      flags: {}, values: {}, rawArgs: "", requests: {}, limits: {}
+    }, baseline)).toEqual({ requests: {}, limits: {} });
+  });
+
   it("maps combined default CLI options into structured draft fields", () => {
     const config: ConfigData = {
       options: ["--verbose --max-request-journal-entries 10"],

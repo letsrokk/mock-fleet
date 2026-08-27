@@ -216,12 +216,13 @@ public class WireMockConfigService {
                 mockId,
                 active,
                 configData(baseline.optionsFor(mockId), baseline.resourcesFor(mockId)),
-                configData(userConfig.mockConfigs().getOrDefault(mockId, new WireMockPodConfig(List.of(), null))),
+                userConfigData(userConfig.mockConfigs().getOrDefault(mockId, new WireMockPodConfig(List.of(), null))),
                 configData(effective.optionsFor(mockId), effective.resourcesFor(mockId)));
     }
 
-    private ConfigData configData(WireMockPodConfig config) {
-        return configData(config.options(), config.resources());
+    private ConfigData userConfigData(WireMockPodConfig config) {
+        return new ConfigData(List.copyOf(config.options()),
+                config.resources() == null ? null : ResourceData.from(config.resources()));
     }
 
     private ConfigData configData(List<String> options, ResourceRequirements resources) {

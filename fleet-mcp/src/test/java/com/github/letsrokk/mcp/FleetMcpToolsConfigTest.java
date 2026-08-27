@@ -97,32 +97,32 @@ class FleetMcpToolsConfigTest {
     }
 
     @Test
-    void getsMultipleConfigsInRequestedOrderAndReportsMissingIds() throws Exception {
-        var response = tools.getMockConfig(List.of("zeta", "missing", "alpha", "zeta"));
+    void getsOneCompactConfig() {
+        var response = tools.getMockConfig("alpha");
 
         assertFalse(response.isError());
         ObjectNode result = (ObjectNode) response.structuredContent();
         assertEquals("42", result.path("resourceVersion").asText());
-        assertEquals(List.of("zeta", "alpha"), result.path("mocks").findValuesAsText("mockId"));
-        assertEquals(mapper.readTree("[\"missing\"]"), result.path("missingMockIds"));
-        assertEquals("--verbose", result.path("optionDefinitions").get(0).path("name").asText());
+        assertEquals("alpha", result.path("mock").path("mockId").asText());
         assertEquals("PATH", result.path("routing").path("mode").asText());
-        assertFalse(result.has("mock"));
+        assertFalse(result.has("mocks"));
+        assertFalse(result.has("missingMockIds"));
+        assertFalse(result.has("optionDefinitions"));
         assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
     @Test
-    void rejectsEmptyMockIdsBeforeCallingFleetApi() {
-        var response = tools.getMockConfig(List.of());
+    void reportsMissingConfigAsNotFound() {
+        var response = tools.getMockConfig("missing");
 
         assertTrue(response.isError());
-        assertEquals("INVALID_ARGUMENT", ((McpToolExecutor.ErrorContent) response.structuredContent()).code());
-        assertEquals(List.of(), requests);
+        assertEquals("NOT_FOUND", ((McpToolExecutor.ErrorContent) response.structuredContent()).code());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
     @Test
-    void rejectsInvalidMockIdsBeforeCallingFleetApi() {
-        var response = tools.getMockConfig(List.of("alpha", "bad_id"));
+    void rejectsInvalidMockIdBeforeCallingFleetApi() {
+        var response = tools.getMockConfig("bad_id");
 
         assertTrue(response.isError());
         assertEquals("INVALID_ARGUMENT", ((McpToolExecutor.ErrorContent) response.structuredContent()).code());

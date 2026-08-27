@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -33,6 +34,7 @@ class WireMockConfigResourceTest {
                 .body("mockIds[0]", is("demo"))
                 .body("savedMockIds[0]", is("demo"))
                 .body("mocks[0].mockId", is("demo"))
+                .body("mocks[0].user.resources", nullValue())
                 .body("mocks[0].effective.options[0]", is("--verbose"))
                 .body("options[0].name", is("--verbose"));
 
@@ -56,6 +58,28 @@ class WireMockConfigResourceTest {
         .then()
                 .statusCode(200)
                 .body("mockIds[0]", is("demo"));
+
+        verify(configService).upsertMockConfig(eq("demo"), eq(request));
+    }
+
+    @Test
+    void acceptsNullResourcesToRetainInheritance() {
+        WireMockConfigService.ConfigUpdateRequest request = new WireMockConfigService.ConfigUpdateRequest(
+                "42",
+                List.of(),
+                null,
+                "futureOnly");
+        when(configService.upsertMockConfig(eq("demo"), eq(request))).thenReturn(configView());
+
+        given()
+                .contentType("application/json")
+                .body("""
+                        {"resourceVersion":"42","options":[],"resources":null,"applyMode":"futureOnly"}
+                        """)
+        .when()
+                .put("/__fleet/api/config/demo")
+        .then()
+                .statusCode(200);
 
         verify(configService).upsertMockConfig(eq("demo"), eq(request));
     }
@@ -130,12 +154,13 @@ class WireMockConfigResourceTest {
     private WireMockConfigService.ConfigView configView() {
         WireMockConfigService.ResourceData resources = new WireMockConfigService.ResourceData(Map.of(), Map.of());
         WireMockConfigService.ConfigData empty = new WireMockConfigService.ConfigData(List.of(), resources);
+        WireMockConfigService.ConfigData user = new WireMockConfigService.ConfigData(List.of(), null);
         WireMockConfigService.ConfigData effective = new WireMockConfigService.ConfigData(List.of("--verbose"), resources);
         WireMockConfigService.MockConfigView mock = new WireMockConfigService.MockConfigView(
                 "demo",
                 true,
                 empty,
-                effective,
+                user,
                 effective);
         WireMockConfigService.OptionDefinition option = new WireMockConfigService.OptionDefinition(
                 "--verbose",

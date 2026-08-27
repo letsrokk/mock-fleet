@@ -17,6 +17,11 @@ export type ConfigData = {
   resources: ResourceData;
 };
 
+export type UserConfigData = {
+  options: string[];
+  resources: ResourceData | null;
+};
+
 export type DraftConfig = {
   flags: Record<string, boolean>;
   values: Record<string, string>;
@@ -27,6 +32,10 @@ export type DraftConfig = {
 
 export function emptyConfig(): ConfigData {
   return { options: [], resources: { requests: {}, limits: {} } };
+}
+
+export function emptyUserConfig(): UserConfigData {
+  return { options: [], resources: null };
 }
 
 export function emptyDraft(): DraftConfig {
@@ -141,7 +150,7 @@ export function resourcesFromDraft(draft: DraftConfig, baseline?: ConfigData): R
   if (baseline && recordsEqual(requests, baseline.resources.requests) && recordsEqual(limits, baseline.resources.limits)) {
     return null;
   }
-  return Object.keys(requests).length || Object.keys(limits).length ? { requests, limits } : null;
+  return baseline || Object.keys(requests).length || Object.keys(limits).length ? { requests, limits } : null;
 }
 
 export function splitArgs(value: string) {

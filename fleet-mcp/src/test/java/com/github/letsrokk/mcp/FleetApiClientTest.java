@@ -2,8 +2,8 @@ package com.github.letsrokk.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -53,8 +53,8 @@ class FleetApiClientTest {
         client.stopMock("orders");
         client.getConfig();
         client.updateConfig("orders", "42", List.of("--verbose"),
-                mapper.readTree("{\"requests\":{},\"limits\":{}}"), "futureOnly");
-        client.deleteConfig("orders", "43", "restartActive");
+                new MockResources(Map.of(), Map.of()), ConfigApplyMode.futureOnly);
+        client.deleteConfig("orders", "43", ConfigApplyMode.restartActive);
         assertTrue(client.storageEnabled());
 
         assertEquals(List.of(
@@ -74,11 +74,32 @@ class FleetApiClientTest {
     }
 
     @Test
-    void rejectsPartialConfigWritesBeforeCallingFleetApi() throws Exception {
-        assertThrows(IllegalArgumentException.class, () -> client.updateConfig("orders", "42", List.of(),
-                mapper.readTree("{\"requests\":{}}"), "futureOnly"));
-        assertThrows(IllegalArgumentException.class, () -> client.updateConfig("orders", "42", List.of(),
-                mapper.readTree("{\"requests\":{},\"limits\":{}}"), "now"));
+    void writesNullResourcesToPreserveInheritance() throws Exception {
+        client.updateConfig("orders", "42", List.of(), null, ConfigApplyMode.futureOnly);
+
+        var update = mapper.readTree(requests.getFirst().body());
+        assertTrue(update.path("resources").isNull());
+    }
+
+    @Test
+    void rejectsInvalidConfigFieldsBeforeCallingFleetApi() {
+        IllegalArgumentException resourceVersion = assertThrows(IllegalArgumentException.class,
+                () -> client.updateConfig("orders", " ", List.of(), null, ConfigApplyMode.futureOnly));
+        assertEquals("resourceVersion is required", resourceVersion.getMessage());
+
+        IllegalArgumentException requestsError = assertThrows(IllegalArgumentException.class,
+                () -> client.updateConfig("orders", "42", List.of(),
+                        new MockResources(null, Map.of()), ConfigApplyMode.futureOnly));
+        assertEquals("resources.requests is required when resources are provided", requestsError.getMessage());
+
+        IllegalArgumentException limits = assertThrows(IllegalArgumentException.class,
+                () -> client.updateConfig("orders", "42", List.of(),
+                        new MockResources(Map.of(), null), ConfigApplyMode.futureOnly));
+        assertEquals("resources.limits is required when resources are provided", limits.getMessage());
+
+        IllegalArgumentException applyMode = assertThrows(IllegalArgumentException.class,
+                () -> client.updateConfig("orders", "42", List.of(), null, null));
+        assertEquals("applyMode is required", applyMode.getMessage());
         assertEquals(0, requests.size());
     }
 
