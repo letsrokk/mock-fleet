@@ -53,11 +53,9 @@ The Helm chart will render managed-WireMock egress policy whenever network polic
 
 The chart will also render an API ingress policy. HTTP traffic on port 8080 remains reachable from the deployment ingress path. Hazelcast member traffic on port 5701 is allowed only between API pods from the same Helm release. Other namespace workloads cannot initiate member-protocol connections.
 
-All non-API workloads, including managed WireMock pods, will set `automountServiceAccountToken: false`. The API workload keeps its token because it manages WireMock pods and release configuration.
+All non-API workloads will disable the default Kubernetes API token mount. Managed WireMock pods will continue to use the dedicated service account selected by `wiremock.serviceAccount.name` or created by the chart. The chart will preserve `wiremock.serviceAccount.annotations` so a cluster owner can attach IRSA or another workload identity. When the S3 CSI volume uses `storage.s3.authenticationSource: pod`, that identity remains available to the CSI driver for the mounted PV/PVC. The API service account retains its independent annotations because API replicas mount the same volume. Disabling the default Kubernetes token must not block the separate, audience-bound token volume injected by the IRSA or EKS Pod Identity admission integration.
 
-`make local-deploy` will run a network-policy enforcement preflight before treating the deployment as secure. The check will temporarily apply a deny-egress policy to a uniquely labelled probe pod and attempt a TCP connection to a known ClusterIP. A successful connection means the CNI does not enforce `NetworkPolicy`, so deployment stops with an actionable error. The probe and policy use run-unique names and are removed on success or failure.
-
-The existing bridge CNI is therefore not a supported secure configuration. The local Minikube profile must use a network-policy-capable CNI such as Calico or Cilium. This change will not recreate or replace the user's Minikube cluster automatically.
+The chart and project documentation will state that Kubernetes accepts `NetworkPolicy` resources even when the installed CNI does not enforce them. It will identify a network-policy-capable CNI, such as Calico or Cilium, as a prerequisite for this boundary and give the cluster owner a small verification procedure. Mock Fleet will not inspect, reconfigure, or reject a cluster through `make local-deploy`; cluster capability and lifecycle remain the cluster owner's responsibility.
 
 ## Kubernetes Authority
 
@@ -72,7 +70,7 @@ Pod creation cannot be constrained by ordinary RBAC. The chart will install a `V
 - containers use the chart-defined resource limits and hardened security context;
 - pod and container fields outside the generated WireMock shape cannot add an alternate execution path.
 
-The policy will fail closed for the scoped service account. The implementation will generate validation expressions from stable chart values where necessary and will include Helm-render and live admission tests for an accepted managed pod and rejected privileged, host-path, wrong-image, wrong-service-account, and label-spoofed pods.
+The policy will fail closed for the scoped service account. It will allow the projected token volume, volume mount, and credential environment variables that the cluster's IRSA or EKS Pod Identity admission integration injects into an otherwise valid WireMock pod. The implementation will generate validation expressions from stable chart values where necessary and will include Helm-render and live admission tests for an accepted managed pod and rejected privileged, host-path, wrong-image, wrong-service-account, and label-spoofed pods.
 
 The local namespace will receive Pod Security Admission labels for the `restricted` profile at the cluster's current Kubernetes version. Existing Mock Fleet workload templates and managed WireMock pods will be updated to comply: no privilege escalation, all capabilities dropped, and `RuntimeDefault` seccomp. A read-only root filesystem is not required because WireMock and supporting images may need writable runtime paths.
 
@@ -112,9 +110,9 @@ The dependency upgrade is not accepted solely because the version changed. Tests
 
 ## Deployment and Upgrade Behavior
 
-The Helm chart remains the source of truth for Kubernetes controls. New values will expose capacity, traversal, quota, network-policy, and admission-policy settings with secure defaults. Disabling network or admission controls must require an explicit value and will make the local security verification fail visibly.
+The Helm chart remains the source of truth for Kubernetes controls. New values will expose capacity, traversal, quota, network-policy, and admission-policy settings with secure defaults. Disabling network or admission controls must require an explicit value and will be documented as weakening the corresponding security boundary.
 
-The upgrade may fail until the cluster supports `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` and enforces `NetworkPolicy`. That failure is deliberate. The deployment script will report the unmet capability and the required operator action rather than silently installing a weaker configuration.
+The cluster must support `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` to install the admission control. The chart will render `NetworkPolicy` independently of the installed CNI, and the documentation will make clear that live enforcement is an operator-owned cluster capability rather than a property Helm can prove.
 
 ## Verification
 
@@ -124,11 +122,11 @@ Implementation will follow red-green-refactor for each production behavior. The 
 - full Maven tests for every Java module;
 - Helm lint, schema validation, deterministic rendering checks, and chart tests for RBAC, admission expressions, policies, quota, labels, and security contexts;
 - dependency vulnerability and dependency-tree checks for the affected runtime artifacts;
-- a live Minikube install after the cluster has an enforcing CNI;
-- live negative tests proving egress denial, Hazelcast isolation, admission rejection, restricted Pod Security compliance, quota enforcement, and absence of mounted service-account tokens;
+- chart tests that prove the egress and Hazelcast policies select the intended pods and ports, plus an operator procedure for verifying live CNI enforcement;
+- live negative tests proving admission rejection, restricted Pod Security compliance, quota enforcement, absence of general Kubernetes API tokens, and preservation of the dedicated WireMock service account and any injected workload-identity token;
 - the existing cluster end-to-end suite and workload health/provenance checks.
 
-The current Minikube bridge CNI is expected to fail the new enforcement preflight. Recreating or changing the cluster is outside this implementation's authority and requires a separate explicit operator action.
+The current Minikube bridge CNI does not enforce the reviewed policy. That deployment limitation will remain explicit in the review results and documentation. Recreating or changing the cluster is outside this implementation's authority.
 
 ## Alternatives Not Selected
 
@@ -142,5 +140,6 @@ Moving pod management into a separate controller and namespace would create the 
 - No API or MCP authentication behavior changes.
 - Secure Helm defaults render the intended RBAC, admission, network, quota, and workload controls.
 - The full repository test suite passes after the dependency upgrades.
-- Live verification passes on a Minikube profile that enforces `NetworkPolicy`; the current non-enforcing profile is reported as an external prerequisite, not treated as a passing deployment.
+- Chart tests prove the intended network isolation rules, and the documentation assigns CNI enforcement and live verification to the cluster owner. The current non-enforcing Minikube profile remains a reported deployment limitation.
+- Managed WireMock pods retain their dedicated, annotatable service account and support IRSA or EKS Pod Identity injection without receiving a general-purpose Kubernetes API token.
 - An independent bypass review finds no practical way around the proxy, capacity, traversal, secret, RBAC, admission, or network controls.
