@@ -10,6 +10,7 @@ import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
 import java.nio.file.attribute.BasicFileAttributeView;
@@ -78,31 +79,44 @@ public class MappingsService {
         validateMockId(mockId);
         Path mockRoot = mappingsRoot().resolve(mockId).normalize();
         ensureInside(mappingsRoot(), mockRoot);
-        if (Files.isSymbolicLink(mockRoot)) {
-            throw invalidMappingRoot(mockId, true);
+        BasicFileAttributes rootAttributes;
+        try {
+            rootAttributes = Files.readAttributes(mockRoot, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
+            throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
+                    false, false, Map.of("mockId", mockId));
+        } catch (IOException e) {
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Unable to inspect mappings folder: " + ioErrorMessage(e), true, false,
+                    Map.of("mockId", mockId, "path", ""));
         }
-        if (!Files.isDirectory(mockRoot, LinkOption.NOFOLLOW_LINKS)) {
+        if (!rootAttributes.isDirectory()) {
+            if (rootAttributes.isSymbolicLink()) {
+                throw invalidMappingRoot(mockId, true);
+            }
             throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
                     false, false, Map.of("mockId", mockId));
         }
-        List<TraversalEntry> manifest;
+
+        TraversalEntry root = entry(mockRoot, "", 0, rootAttributes);
         try {
-            manifest = discover(mockRoot);
+            List<TraversalEntry> manifest;
+            try (SecureTraversalSession session = openSecureRoot(root)) {
+                manifest = discover(session, root);
+                validateManifest(session, manifest);
+            }
+            return assembleTree(manifest);
         } catch (TraversalBudget.LimitExceeded e) {
             throw traversalLimit(mockId, e);
         } catch (TraversalStorageException e) {
             throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
                     "Unable to list mappings folder: " + ioErrorMessage(e.ioException()), true, false,
                     Map.of("mockId", mockId, "path", e.relativePath()));
-        }
-        try {
-            validateManifest(manifest);
         } catch (IOException e) {
             throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
                     "Mappings folder changed during discovery: " + ioErrorMessage(e), true, false,
                     Map.of("mockId", mockId, "path", ""));
         }
-        return assembleTree(manifest);
     }
 
     Path file(String mockId, String relativePath) {
@@ -140,94 +154,121 @@ public class MappingsService {
         Path root = mappingsRoot();
         Path mockRoot = root.resolve(mockId).normalize();
         ensureInside(root, mockRoot);
-        if (!Files.exists(mockRoot, LinkOption.NOFOLLOW_LINKS)) {
+        BasicFileAttributes rootAttributes;
+        try {
+            rootAttributes = Files.readAttributes(mockRoot, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
             return;
+        } catch (IOException e) {
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Unable to inspect mappings folder: " + ioErrorMessage(e), true, false,
+                    Map.of("mockId", mockId));
         }
-        if (Files.isSymbolicLink(mockRoot)) {
-            throw invalidMappingRoot(mockId, false);
-        }
-        if (!Files.isDirectory(mockRoot, LinkOption.NOFOLLOW_LINKS)) {
+        if (!rootAttributes.isDirectory()) {
+            if (rootAttributes.isSymbolicLink()) {
+                throw invalidMappingRoot(mockId, false);
+            }
             throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
                     false, false, Map.of("mockId", mockId));
         }
 
-        List<TraversalEntry> manifest;
+        TraversalEntry rootEntry = entry(mockRoot, "", 0, rootAttributes);
+        boolean deletionStarted = false;
         try {
-            manifest = discover(mockRoot);
+            try (SecureTraversalSession session = openSecureRoot(rootEntry)) {
+                List<TraversalEntry> manifest = discover(session, rootEntry);
+                validateManifest(session, manifest);
+
+                List<TraversalEntry> deleteOrder = manifest.stream()
+                        .sorted(Comparator.comparingInt(TraversalEntry::relativeDepth).reversed())
+                        .toList();
+                Map<Path, TraversalEntry> entriesByPath = entriesByPath(manifest);
+                deletionStarted = true;
+                for (TraversalEntry entry : deleteOrder) {
+                    deleteMappingPath(session, entry, entriesByPath);
+                }
+            }
         } catch (TraversalBudget.LimitExceeded e) {
             throw traversalLimit(mockId, e);
         } catch (TraversalStorageException e) {
             throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
                     "Unable to discover mappings folder: " + ioErrorMessage(e.ioException()), true, false,
                     Map.of("mockId", mockId));
-        }
-
-        try {
-            validateManifest(manifest);
         } catch (IOException e) {
+            String message = deletionStarted
+                    ? "Unable to delete mappings folder: "
+                    : "Mappings folder changed during discovery: ";
             throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
-                    "Mappings folder changed during discovery: " + ioErrorMessage(e), true, false,
+                    message + ioErrorMessage(e), true, deletionStarted,
                     Map.of("mockId", mockId));
         }
+    }
 
-        List<TraversalEntry> deleteOrder = manifest.stream()
-                .sorted(Comparator.comparingInt(TraversalEntry::relativeDepth).reversed())
-                .toList();
-        try {
-            for (TraversalEntry entry : deleteOrder) {
-                deleteMappingPath(entry);
+    private void deleteMappingPath(SecureTraversalSession session, TraversalEntry entry,
+                                   Map<Path, TraversalEntry> entriesByPath) throws IOException {
+        withSecureEntry(session, entry, entriesByPath, (parent, name) -> {
+            if (entry.directory()) {
+                parent.deleteDirectory(name);
+            } else {
+                parent.deleteFile(name);
             }
-        } catch (IOException e) {
-            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
-                    "Unable to delete mappings folder: " + ioErrorMessage(e), true, true,
-                    Map.of("mockId", mockId));
-        }
+        });
     }
 
-    private void deleteMappingPath(TraversalEntry entry) throws IOException {
-        validateIdentity(entry);
-        Files.delete(entry.path());
-    }
-
-    private List<TraversalEntry> discover(Path mockRoot) {
+    private List<TraversalEntry> discover(SecureTraversalSession session, TraversalEntry root) {
         TraversalBudget budget = new TraversalBudget(config.mappings().maxDepth(), config.mappings().maxEntries());
         List<TraversalEntry> manifest = new ArrayList<>();
-        BasicFileAttributes rootAttributes;
-        try {
-            rootAttributes = Files.readAttributes(mockRoot, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        } catch (IOException e) {
-            throw new TraversalStorageException("", e);
-        }
-        if (!rootAttributes.isDirectory()) {
-            throw new TraversalStorageException("",
-                    new IOException("Mappings root is not a directory or changed during traversal."));
-        }
-
-        TraversalEntry root = entry(mockRoot, "", 0, rootAttributes);
         budget.visit(0);
         manifest.add(root);
-        DirectoryStream<Path> rootStream;
-        try {
-            rootStream = Files.newDirectoryStream(mockRoot);
-        } catch (IOException e) {
-            throw new TraversalStorageException("", e);
+        discoverSecure(root.path(), root, session.root(), budget, manifest);
+        return List.copyOf(manifest);
+    }
+
+    private SecureTraversalSession openSecureRoot(TraversalEntry root) throws IOException {
+        // Kubernetes exposes both ordinary PVCs and the supported S3 CSI volume through the Linux VFS. The
+        // default Unix NIO provider therefore supplies openat-backed secure handles; custom providers that do
+        // not supply the same no-follow guarantee must fail before the mock directory is enumerated.
+        DirectoryStream<Path> openedParent = openTrustedDirectory(root.path().getParent());
+        if (!(openedParent instanceof SecureDirectoryStream<Path> secureParent)) {
+            IOException unsupported = new IOException(
+                    "Mappings storage provider does not support secure relative directory handles.");
+            try {
+                openedParent.close();
+            } catch (IOException closeError) {
+                unsupported.addSuppressed(closeError);
+            }
+            throw unsupported;
         }
 
-        if (rootStream instanceof SecureDirectoryStream<Path> secureRoot) {
-            discoverSecure(mockRoot, root, secureRoot, budget, manifest);
-        } else {
-            // S3 CSI providers may expose only the mandatory DirectoryStream API. The fallback verifies the
-            // no-follow identity before and after every directory open instead of assuming path stability.
-            discoverChecked(mockRoot, root, rootStream, budget, manifest);
+        SecureDirectoryStream<Path> secureRoot = null;
+        try {
+            Path rootName = root.path().getFileName();
+            validateIdentity(root.identity(), secureAttributes(secureParent, rootName));
+            secureRoot = secureParent.newDirectoryStream(rootName, LinkOption.NOFOLLOW_LINKS);
+            validateIdentity(root.identity(), secureAttributes(secureRoot));
+            return new SecureTraversalSession(root, secureParent, secureRoot);
+        } catch (IOException | RuntimeException e) {
+            if (secureRoot != null) {
+                try {
+                    secureRoot.close();
+                } catch (IOException closeError) {
+                    e.addSuppressed(closeError);
+                }
+            }
+            try {
+                secureParent.close();
+            } catch (IOException closeError) {
+                e.addSuppressed(closeError);
+            }
+            throw e;
         }
-        return List.copyOf(manifest);
     }
 
     private void discoverSecure(Path mockRoot, TraversalEntry root, SecureDirectoryStream<Path> rootStream,
                                 TraversalBudget budget, List<TraversalEntry> manifest) {
         Deque<SecureTraversalFrame> directories = new ArrayDeque<>();
         try {
-            directories.addLast(new SecureTraversalFrame(root, rootStream, rootStream.iterator()));
+            directories.addLast(new SecureTraversalFrame(root, rootStream, rootStream.iterator(), false));
             validateIdentity(root.identity(), secureAttributes(rootStream));
             while (!directories.isEmpty()) {
                 SecureTraversalFrame frame = directories.getLast();
@@ -239,7 +280,9 @@ public class MappingsService {
                 }
                 if (!hasNext) {
                     directories.removeLast();
-                    close(frame.directory(), frame.stream());
+                    if (frame.closeOnComplete()) {
+                        close(frame.directory(), frame.stream());
+                    }
                     continue;
                 }
 
@@ -268,9 +311,11 @@ public class MappingsService {
                 manifest.add(entry);
                 if (entry.directory()) {
                     SecureDirectoryStream<Path> childStream = null;
+                    Iterator<Path> childIterator;
                     try {
                         childStream = frame.stream().newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS);
                         validateIdentity(entry.identity(), secureAttributes(childStream));
+                        childIterator = childStream.iterator();
                     } catch (IOException e) {
                         if (childStream != null) {
                             try {
@@ -280,70 +325,23 @@ public class MappingsService {
                             }
                         }
                         throw new TraversalStorageException(entry.relativePath(), e);
+                    } catch (RuntimeException e) {
+                        if (childStream != null) {
+                            try {
+                                childStream.close();
+                            } catch (IOException closeError) {
+                                e.addSuppressed(closeError);
+                            }
+                        }
+                        throw e;
                     }
-                    directories.addLast(new SecureTraversalFrame(entry, childStream, childStream.iterator()));
+                    directories.addLast(new SecureTraversalFrame(entry, childStream, childIterator, true));
                 }
             }
         } catch (IOException e) {
             throw new TraversalStorageException(root.relativePath(), e);
         } finally {
             closeRemaining(directories);
-        }
-    }
-
-    private void discoverChecked(Path mockRoot, TraversalEntry root, DirectoryStream<Path> rootStream,
-                                 TraversalBudget budget, List<TraversalEntry> manifest) {
-        Deque<TraversalEntry> directories = new ArrayDeque<>();
-        directories.add(root);
-        DirectoryStream<Path> children = rootStream;
-        try {
-            validateIdentity(root);
-        } catch (IOException e) {
-            try {
-                rootStream.close();
-            } catch (IOException closeError) {
-                e.addSuppressed(closeError);
-            }
-            throw new TraversalStorageException(root.relativePath(), e);
-        }
-        while (!directories.isEmpty()) {
-            TraversalEntry directory = directories.removeFirst();
-            try (DirectoryStream<Path> opened = children == null ? openChecked(directory) : children) {
-                children = null;
-                for (Path listedChild : opened) {
-                    int relativeDepth = directory.relativeDepth() + 1;
-                    budget.visit(relativeDepth);
-                    Path child = directory.path().resolve(listedChild.getFileName()).normalize();
-                    ensureDiscoveredInside(mockRoot, child);
-                    BasicFileAttributes attributes = Files.readAttributes(child, BasicFileAttributes.class,
-                            LinkOption.NOFOLLOW_LINKS);
-                    if (!attributes.isDirectory() && !attributes.isRegularFile()) {
-                        continue;
-                    }
-
-                    TraversalEntry entry = entry(child, relativePath(mockRoot, child), relativeDepth, attributes);
-                    manifest.add(entry);
-                    if (entry.directory()) {
-                        directories.addLast(entry);
-                    }
-                }
-            } catch (DirectoryIteratorException e) {
-                throw new TraversalStorageException(directory.relativePath(), e.getCause());
-            } catch (IOException e) {
-                throw new TraversalStorageException(directory.relativePath(), e);
-            }
-        }
-    }
-
-    private DirectoryStream<Path> openChecked(TraversalEntry directory) throws IOException {
-        validateIdentity(directory);
-        DirectoryStream<Path> stream = Files.newDirectoryStream(directory.path());
-        try {
-            validateIdentity(directory);
-            return stream;
-        } catch (IOException e) {
-            stream.close();
-            throw e;
         }
     }
 
@@ -355,6 +353,10 @@ public class MappingsService {
         return view.readAttributes();
     }
 
+    DirectoryStream<Path> openTrustedDirectory(Path directory) throws IOException {
+        return Files.newDirectoryStream(directory);
+    }
+
     private BasicFileAttributes secureAttributes(SecureDirectoryStream<Path> stream, Path name) throws IOException {
         BasicFileAttributeView view = stream.getFileAttributeView(name, BasicFileAttributeView.class,
                 LinkOption.NOFOLLOW_LINKS);
@@ -364,16 +366,83 @@ public class MappingsService {
         return view.readAttributes();
     }
 
-    private void validateManifest(List<TraversalEntry> manifest) throws IOException {
+    private void validateManifest(SecureTraversalSession session, List<TraversalEntry> manifest) throws IOException {
+        Map<Path, TraversalEntry> entriesByPath = entriesByPath(manifest);
         for (TraversalEntry entry : manifest) {
-            validateIdentity(entry);
+            withSecureEntry(session, entry, entriesByPath, (parent, name) -> { });
         }
     }
 
-    private void validateIdentity(TraversalEntry entry) throws IOException {
-        BasicFileAttributes attributes = Files.readAttributes(entry.path(), BasicFileAttributes.class,
-                LinkOption.NOFOLLOW_LINKS);
-        validateIdentity(entry.identity(), attributes);
+    private Map<Path, TraversalEntry> entriesByPath(List<TraversalEntry> manifest) {
+        Map<Path, TraversalEntry> entriesByPath = new HashMap<>();
+        for (TraversalEntry entry : manifest) {
+            entriesByPath.put(entry.path(), entry);
+        }
+        return entriesByPath;
+    }
+
+    private void withSecureEntry(SecureTraversalSession session, TraversalEntry entry,
+                                 Map<Path, TraversalEntry> entriesByPath,
+                                 SecureEntryOperation operation) throws IOException {
+        if (entry.relativeDepth() == 0) {
+            Path rootName = entry.path().getFileName();
+            validateIdentity(entry.identity(), secureAttributes(session.parent(), rootName));
+            validateIdentity(entry.identity(), secureAttributes(session.root()));
+            operation.apply(session.parent(), rootName);
+            return;
+        }
+
+        Path relative = session.rootEntry().path().relativize(entry.path());
+        SecureDirectoryStream<Path> current = session.root();
+        Deque<SecureDirectoryStream<Path>> opened = new ArrayDeque<>();
+        IOException failure = null;
+        try {
+            Path currentPath = session.rootEntry().path();
+            for (int index = 0; index < relative.getNameCount() - 1; index++) {
+                Path name = relative.getName(index);
+                currentPath = currentPath.resolve(name).normalize();
+                TraversalEntry ancestor = entriesByPath.get(currentPath);
+                if (ancestor == null || !ancestor.directory()) {
+                    throw new IOException("Mappings manifest has an invalid directory ancestry.");
+                }
+                SecureDirectoryStream<Path> child = current.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS);
+                opened.addLast(child);
+                validateIdentity(ancestor.identity(), secureAttributes(child));
+                current = child;
+            }
+
+            Path name = relative.getFileName();
+            validateIdentity(entry.identity(), secureAttributes(current, name));
+            operation.apply(current, name);
+        } catch (IOException e) {
+            failure = e;
+            throw e;
+        } finally {
+            IOException closeFailure = closeOpened(opened);
+            if (closeFailure != null) {
+                if (failure != null) {
+                    failure.addSuppressed(closeFailure);
+                } else {
+                    throw closeFailure;
+                }
+            }
+        }
+    }
+
+    private IOException closeOpened(Deque<SecureDirectoryStream<Path>> opened) {
+        IOException failure = null;
+        while (!opened.isEmpty()) {
+            try {
+                opened.removeLast().close();
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        return failure;
     }
 
     private void validateIdentity(EntryIdentity expected, BasicFileAttributes actual) throws IOException {
@@ -409,8 +478,12 @@ public class MappingsService {
 
     private void closeRemaining(Deque<SecureTraversalFrame> directories) {
         while (!directories.isEmpty()) {
+            SecureTraversalFrame frame = directories.removeLast();
+            if (!frame.closeOnComplete()) {
+                continue;
+            }
             try {
-                directories.removeLast().stream().close();
+                frame.stream().close();
             } catch (IOException ignored) {
                 // Preserve the traversal failure that caused cleanup.
             }
@@ -561,7 +634,38 @@ public class MappingsService {
     }
 
     private record SecureTraversalFrame(TraversalEntry directory, SecureDirectoryStream<Path> stream,
-                                        Iterator<Path> children) {
+                                        Iterator<Path> children, boolean closeOnComplete) {
+    }
+
+    private record SecureTraversalSession(TraversalEntry rootEntry, SecureDirectoryStream<Path> parent,
+                                          SecureDirectoryStream<Path> root) implements AutoCloseable {
+
+        @Override
+        public void close() throws IOException {
+            IOException failure = null;
+            try {
+                root.close();
+            } catch (IOException e) {
+                failure = e;
+            }
+            try {
+                parent.close();
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface SecureEntryOperation {
+        void apply(SecureDirectoryStream<Path> parent, Path name) throws IOException;
     }
 
     private record EntryIdentity(boolean directory, boolean regularFile, Object fileKey, long size,

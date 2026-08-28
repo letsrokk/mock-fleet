@@ -7,22 +7,35 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.MockedStatic;
 
 import java.io.IOException;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.AccessDeniedException;
+import java.nio.file.ClosedDirectoryStreamException;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NotDirectoryException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.SecureDirectoryStream;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.FileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -214,6 +227,66 @@ class MappingsServiceTest {
     }
 
     @Test
+    void doesNotOpenMockRootByFollowDefaultPath() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Files.writeString(root.resolve("mapping.json"), "{}");
+        AtomicBoolean unsafeOpenObserved = new AtomicBoolean();
+        MappingsService service = service(true);
+
+        MappingsService.FileNode tree;
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.newDirectoryStream(root)).thenAnswer(invocation -> {
+                unsafeOpenObserved.set(true);
+                return root.getFileSystem().provider().newDirectoryStream(root, ignored -> true);
+            });
+
+            tree = service.tree("demo");
+        }
+
+        assertEquals(List.of("mapping.json"),
+                tree.children().stream().map(MappingsService.FileNode::name).toList());
+        assertFalse(unsafeOpenObserved.get());
+    }
+
+    @Test
+    void rejectsProviderWithoutSecureDirectoryHandlesBeforeEnumeration() throws IOException {
+        Files.createDirectories(mappingsRoot.resolve("demo"));
+        AtomicBoolean enumerationObserved = new AtomicBoolean();
+        DirectoryStream<Path> unsupportedParent = directoryStreamThatFailsOnEnumeration(enumerationObserved);
+        MappingsService service = service(true, 32, 10_000, ignored -> unsupportedParent);
+
+        ApiException exception;
+        exception = assertThrows(ApiException.class, () -> service.tree("demo"));
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true,
+                Map.of("mockId", "demo", "path", ""));
+        assertFalse(enumerationObserved.get());
+    }
+
+    @Test
+    void doesNotValidateDescendantsThroughPathResolution() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo/nested"));
+        Path file = Files.writeString(root.resolve("mapping.json"), "{}");
+        AtomicBoolean unsafeAttributeReadObserved = new AtomicBoolean();
+        MappingsService service = service(true);
+
+        MappingsService.FileNode tree;
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS))
+                    .thenAnswer(invocation -> {
+                        unsafeAttributeReadObserved.set(true);
+                        return file.getFileSystem().provider().readAttributes(file, BasicFileAttributes.class,
+                                LinkOption.NOFOLLOW_LINKS);
+                    });
+
+            tree = service.tree("demo");
+        }
+
+        assertEquals("nested/mapping.json", tree.children().getFirst().children().getFirst().path());
+        assertFalse(unsafeAttributeReadObserved.get());
+    }
+
+    @Test
     void resolvesAndDeletesFiles() throws IOException {
         Files.createDirectories(mappingsRoot.resolve("demo"));
         Path file = mappingsRoot.resolve("demo/mapping.json");
@@ -280,24 +353,20 @@ class MappingsServiceTest {
         Path target = Files.createDirectories(mappingsRoot.resolve("target"));
         Path targetFile = Files.writeString(target.resolve("target.json"), "{}");
         Path moved = root.resolve("moved");
-        DirectoryStream<Path> delegate = root.getFileSystem().provider()
-                .newDirectoryStream(root, ignored -> true);
-        DirectoryStream<Path> replacingStream = replaceAfterEnumeration(delegate, () -> {
-            try {
-                root.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
-                root.getFileSystem().provider().createSymbolicLink(nested, target);
-            } catch (IOException e) {
-                throw new DirectoryIteratorException(e);
+        AtomicBoolean replaced = new AtomicBoolean();
+        SecureStreamObserver observer = new SecureStreamObserver() {
+            @Override
+            public void beforeDirectoryOpen(Path parent, Path name) throws IOException {
+                if (parent.equals(root) && name.equals(nested.getFileName()) && replaced.compareAndSet(false, true)) {
+                    parent.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
+                    parent.getFileSystem().provider().createSymbolicLink(nested, target);
+                }
             }
-        });
-        MappingsService service = service(true);
+        };
+        MappingsService service = service(true, 32, 10_000,
+                directory -> new TestSecureDirectoryStream(directory, observer));
 
-        ApiException exception;
-        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
-            files.when(() -> Files.newDirectoryStream(root)).thenReturn(replacingStream);
-
-            exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
-        }
+        ApiException exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
 
         assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true, Map.of("mockId", "demo"));
         assertTrue(Files.exists(targetFile));
@@ -311,26 +380,21 @@ class MappingsServiceTest {
         Files.writeString(nested.resolve("original.json"), "{}");
         Path target = Files.createDirectories(mappingsRoot.resolve("target"));
         Path moved = root.resolve("moved");
-        DirectoryStream<Path> rootStream = replaceAfterEnumeration(
-                root.getFileSystem().provider().newDirectoryStream(root, ignored -> true), () -> { });
-        DirectoryStream<Path> nestedStream = replaceAfterEnumeration(
-                nested.getFileSystem().provider().newDirectoryStream(nested, ignored -> true), () -> {
-                    try {
-                        root.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
-                        root.getFileSystem().provider().createSymbolicLink(nested, target);
-                    } catch (IOException e) {
-                        throw new DirectoryIteratorException(e);
-                    }
-                });
-        MappingsService service = service(true);
+        AtomicInteger nestedAttributeReads = new AtomicInteger();
+        SecureStreamObserver observer = new SecureStreamObserver() {
+            @Override
+            public void beforeAttributeRead(Path parent, Path name) throws IOException {
+                if (parent.equals(root) && name.equals(nested.getFileName())
+                        && nestedAttributeReads.incrementAndGet() == 2) {
+                    parent.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
+                    parent.getFileSystem().provider().createSymbolicLink(nested, target);
+                }
+            }
+        };
+        MappingsService service = service(true, 32, 10_000,
+                directory -> new TestSecureDirectoryStream(directory, observer));
 
-        ApiException exception;
-        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
-            files.when(() -> Files.newDirectoryStream(root)).thenReturn(rootStream);
-            files.when(() -> Files.newDirectoryStream(nested)).thenReturn(nestedStream);
-
-            exception = assertThrows(ApiException.class, () -> service.tree("demo"));
-        }
+        ApiException exception = assertThrows(ApiException.class, () -> service.tree("demo"));
 
         assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true,
                 Map.of("mockId", "demo", "path", ""));
@@ -379,12 +443,52 @@ class MappingsServiceTest {
     }
 
     @Test
+    void deletesDiscoveredEntriesThroughSecureParentHandles() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo/nested"));
+        Path file = Files.writeString(root.resolve("mapping.json"), "{}");
+        AtomicBoolean unsafeDeleteObserved = new AtomicBoolean();
+        MappingsService service = service(true);
+
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.delete(any(Path.class))).thenAnswer(invocation -> {
+                unsafeDeleteObserved.set(true);
+                Path deleted = invocation.getArgument(0);
+                deleted.getFileSystem().provider().delete(deleted);
+                return null;
+            });
+
+            service.deleteFolder("demo");
+        }
+
+        assertFalse(Files.exists(mappingsRoot.resolve("demo")));
+        assertFalse(unsafeDeleteObserved.get());
+    }
+
+    @Test
     void deletingMissingMappingFolderIsNoop() {
         MappingsService service = service(true);
 
         service.deleteFolder("missing");
 
         assertFalse(Files.exists(mappingsRoot.resolve("missing")));
+    }
+
+    @Test
+    void reportsRootAttributeFailureBeforeDeleteDiscovery() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        MappingsService service = service(true);
+
+        ApiException exception;
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.exists(root, LinkOption.NOFOLLOW_LINKS)).thenReturn(false);
+            files.when(() -> Files.readAttributes(root, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS))
+                    .thenThrow(new AccessDeniedException(root.toString()));
+
+            exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
+        }
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true, false, Map.of("mockId", "demo"));
+        assertTrue(Files.exists(root));
     }
 
     @Test
@@ -479,34 +583,16 @@ class MappingsServiceTest {
         }
     }
 
-    private DirectoryStream<Path> replaceAfterEnumeration(DirectoryStream<Path> delegate, Runnable replacement) {
+    private DirectoryStream<Path> directoryStreamThatFailsOnEnumeration(AtomicBoolean enumerationObserved) {
         return new DirectoryStream<>() {
             @Override
             public Iterator<Path> iterator() {
-                Iterator<Path> iterator = delegate.iterator();
-                return new Iterator<>() {
-                    private boolean replaced;
-
-                    @Override
-                    public boolean hasNext() {
-                        boolean hasNext = iterator.hasNext();
-                        if (!hasNext && !replaced) {
-                            replaced = true;
-                            replacement.run();
-                        }
-                        return hasNext;
-                    }
-
-                    @Override
-                    public Path next() {
-                        return iterator.next();
-                    }
-                };
+                enumerationObserved.set(true);
+                throw new AssertionError("An unsupported directory stream must not be enumerated.");
             }
 
             @Override
-            public void close() throws IOException {
-                delegate.close();
+            public void close() {
             }
         };
     }
@@ -516,6 +602,11 @@ class MappingsServiceTest {
     }
 
     private MappingsService service(boolean persistent, int maxDepth, int maxEntries) {
+        return service(persistent, maxDepth, maxEntries, TestSecureDirectoryStream::new);
+    }
+
+    private MappingsService service(boolean persistent, int maxDepth, int maxEntries,
+                                    TrustedDirectoryFactory trustedDirectoryFactory) {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storage = mock(MockFleetConfig.StorageConfig.class);
         MockFleetConfig.MappingsConfig mappings = mock(MockFleetConfig.MappingsConfig.class);
@@ -532,8 +623,144 @@ class MappingsServiceTest {
         when(mappings.maxDepth()).thenReturn(maxDepth);
         when(mappings.maxEntries()).thenReturn(maxEntries);
 
-        MappingsService service = new MappingsService();
+        MappingsService service = new MappingsService() {
+            @Override
+            DirectoryStream<Path> openTrustedDirectory(Path directory) throws IOException {
+                return trustedDirectoryFactory.open(directory);
+            }
+        };
         service.config = config;
         return service;
+    }
+
+    @FunctionalInterface
+    private interface TrustedDirectoryFactory {
+        DirectoryStream<Path> open(Path directory) throws IOException;
+    }
+
+    private interface SecureStreamObserver {
+        default void beforeDirectoryOpen(Path parent, Path name) throws IOException {
+        }
+
+        default void beforeAttributeRead(Path parent, Path name) throws IOException {
+        }
+    }
+
+    private static final class TestSecureDirectoryStream implements SecureDirectoryStream<Path> {
+
+        private static final SecureStreamObserver NOOP_OBSERVER = new SecureStreamObserver() { };
+
+        private final Path directory;
+        private final SecureStreamObserver observer;
+        private DirectoryStream<Path> iteratorStream;
+        private boolean closed;
+
+        private TestSecureDirectoryStream(Path directory) {
+            this(directory, NOOP_OBSERVER);
+        }
+
+        private TestSecureDirectoryStream(Path directory, SecureStreamObserver observer) {
+            this.directory = directory;
+            this.observer = observer;
+        }
+
+        @Override
+        public SecureDirectoryStream<Path> newDirectoryStream(Path path, LinkOption... options) throws IOException {
+            ensureOpen();
+            observer.beforeDirectoryOpen(directory, path);
+            Path child = directory.resolve(path);
+            BasicFileAttributes attributes = child.getFileSystem().provider()
+                    .readAttributes(child, BasicFileAttributes.class, options);
+            if (!attributes.isDirectory()) {
+                throw new NotDirectoryException(child.toString());
+            }
+            return new TestSecureDirectoryStream(child, observer);
+        }
+
+        @Override
+        public SeekableByteChannel newByteChannel(Path path, Set<? extends OpenOption> options,
+                                                  FileAttribute<?>... attrs) throws IOException {
+            ensureOpen();
+            Path child = directory.resolve(path);
+            return child.getFileSystem().provider().newByteChannel(child, options, attrs);
+        }
+
+        @Override
+        public void deleteFile(Path path) throws IOException {
+            ensureOpen();
+            Path child = directory.resolve(path);
+            child.getFileSystem().provider().delete(child);
+        }
+
+        @Override
+        public void deleteDirectory(Path path) throws IOException {
+            deleteFile(path);
+        }
+
+        @Override
+        public void move(Path sourcePath, SecureDirectoryStream<Path> targetDirectory, Path targetPath)
+                throws IOException {
+            ensureOpen();
+            if (!(targetDirectory instanceof TestSecureDirectoryStream target)) {
+                throw new IOException("Test secure stream cannot move to an unknown provider.");
+            }
+            Path source = directory.resolve(sourcePath);
+            Path destination = target.directory.resolve(targetPath);
+            source.getFileSystem().provider().move(source, destination);
+        }
+
+        @Override
+        public <V extends FileAttributeView> V getFileAttributeView(Path path, Class<V> type,
+                                                                    LinkOption... options) {
+            ensureOpenUnchecked();
+            try {
+                observer.beforeAttributeRead(directory, path);
+            } catch (IOException e) {
+                throw new DirectoryIteratorException(e);
+            }
+            Path child = directory.resolve(path);
+            return child.getFileSystem().provider().getFileAttributeView(child, type, options);
+        }
+
+        @Override
+        public <V extends FileAttributeView> V getFileAttributeView(Class<V> type) {
+            ensureOpenUnchecked();
+            return directory.getFileSystem().provider().getFileAttributeView(directory, type);
+        }
+
+        @Override
+        public Iterator<Path> iterator() {
+            ensureOpenUnchecked();
+            if (iteratorStream != null) {
+                throw new IllegalStateException("Iterator has already been obtained.");
+            }
+            try {
+                iteratorStream = directory.getFileSystem().provider()
+                        .newDirectoryStream(directory, ignored -> true);
+                return iteratorStream.iterator();
+            } catch (IOException e) {
+                throw new DirectoryIteratorException(e);
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            if (iteratorStream != null) {
+                iteratorStream.close();
+            }
+        }
+
+        private void ensureOpen() throws ClosedDirectoryStreamException {
+            if (closed) {
+                throw new ClosedDirectoryStreamException();
+            }
+        }
+
+        private void ensureOpenUnchecked() {
+            if (closed) {
+                throw new ClosedDirectoryStreamException();
+            }
+        }
     }
 }
