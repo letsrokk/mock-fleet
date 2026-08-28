@@ -99,12 +99,10 @@ public class PodState {
                     ? current
                     : MockPodLifecycle.running(
                             current == null ? null : current.attemptId(), pod.podName());
-            Long previousLastAccessEpochMillis = pod == null
-                    ? null
-                    : lastAccessTimeMap.get(pod.podName());
+            Long previousLastAccessEpochMillis = null;
             if (pod != null) {
                 podMap.remove(mockId);
-                lastAccessTimeMap.remove(pod.podName());
+                previousLastAccessEpochMillis = lastAccessTimeMap.remove(pod.podName());
             }
             String attemptId = UUID.randomUUID().toString();
             MockPodLifecycle replacement = MockPodLifecycle.starting(

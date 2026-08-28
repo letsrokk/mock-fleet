@@ -15,6 +15,9 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -252,7 +255,7 @@ class PodStateTest {
                 "attempt-old", previousPod.podName());
         when(podMap.get("demo")).thenReturn(previousPod);
         when(lifecycleMap.get("demo")).thenReturn(previousLifecycle);
-        when(lastAccessMap.get(previousPod.podName())).thenReturn(1_234L);
+        when(lastAccessMap.remove(previousPod.podName())).thenReturn(1_234L);
 
         PodState.RestartClaim replacement = podState.claimRestart("demo");
         when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
@@ -262,6 +265,51 @@ class PodStateTest {
         verify(lastAccessMap).merge(eq(previousPod.podName()), eq(1_234L), any());
         verify(lifecycleMap).put("demo", previousLifecycle);
         verify(capacity).release("demo", replacement.lifecycle().attemptId());
+    }
+
+    @Test
+    void restartClaimAtomicallyCapturesAnAccessRefreshAtTheOldReadRemoveBoundary() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        @SuppressWarnings("unchecked")
+        IMap<String, Long> lastAccessMap = mock(IMap.class);
+        PodState podState = podStateWithMaps(
+                podMap, lifecycleMap, lastAccessMap, mock(MockCapacity.class));
+        MockPodRef previousPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        MockPodLifecycle previousLifecycle = MockPodLifecycle.running(
+                "attempt-old", previousPod.podName());
+        AtomicReference<Long> access = new AtomicReference<>(1_234L);
+        AtomicBoolean separateReadObserved = new AtomicBoolean();
+        when(podMap.get("demo")).thenReturn(previousPod);
+        when(lifecycleMap.get("demo")).thenReturn(previousLifecycle);
+        when(lastAccessMap.get(previousPod.podName())).thenAnswer(invocation -> {
+            separateReadObserved.set(true);
+            Long snapshot = access.get();
+            access.set(2_000L);
+            return snapshot;
+        });
+        when(lastAccessMap.remove(previousPod.podName())).thenAnswer(invocation -> {
+            if (!separateReadObserved.get()) {
+                access.set(2_000L);
+            }
+            return access.getAndSet(null);
+        });
+        when(lastAccessMap.merge(eq(previousPod.podName()), anyLong(), any()))
+                .thenAnswer(invocation -> {
+                    Long saved = invocation.getArgument(1);
+                    BiFunction<Long, Long, Long> merge = invocation.getArgument(2);
+                    return access.updateAndGet(current -> current == null
+                            ? saved
+                            : merge.apply(current, saved));
+                });
+
+        PodState.RestartClaim replacement = podState.claimRestart("demo");
+        when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
+        boolean rolledBack = podState.rollbackRejectedRestart("demo", replacement);
+
+        assertEquals(true, rolledBack);
+        assertEquals(2_000L, replacement.previousLastAccessEpochMillis());
+        assertEquals(2_000L, access.get());
     }
 
     @Test
