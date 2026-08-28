@@ -137,10 +137,8 @@ public class PodState {
             if (!isCurrentStartingAttempt(current, attemptId)) {
                 return;
             }
-            podLifecycleMap.put(mockId,
-                    MockPodLifecycle.failed(attemptId, current.podName(), conciseFailureReason(exception)),
-                    FAILED_STARTUP_RETENTION_SECONDS,
-                    TimeUnit.SECONDS);
+            putFailedLifecycle(mockId,
+                    MockPodLifecycle.failed(attemptId, current.podName(), conciseFailureReason(exception)));
         } finally {
             podLifecycleMap.unlock(mockId);
         }
@@ -225,12 +223,17 @@ public class PodState {
     void markStartupFailed(String mockId, RuntimeException exception) {
         MockPodLifecycle current = podLifecycleMap.get(mockId);
         String podName = current == null ? null : current.podName();
-        podLifecycleMap.put(
-                mockId,
+        putFailedLifecycle(mockId,
                 MockPodLifecycle.failed(current == null ? null : current.attemptId(), podName,
-                        conciseFailureReason(exception)),
-                FAILED_STARTUP_RETENTION_SECONDS,
-                TimeUnit.SECONDS);
+                        conciseFailureReason(exception)));
+    }
+
+    private void putFailedLifecycle(String mockId, MockPodLifecycle failed) {
+        if (failed.podName() == null || failed.podName().isBlank()) {
+            podLifecycleMap.put(mockId, failed, FAILED_STARTUP_RETENTION_SECONDS, TimeUnit.SECONDS);
+            return;
+        }
+        podLifecycleMap.put(mockId, failed);
     }
 
     public Multi<Long> podChanges() {

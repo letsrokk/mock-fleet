@@ -26,7 +26,7 @@ import org.mockito.ArgumentCaptor;
 class PodStateTest {
 
     @Test
-    void failedLifecyclePreservesCreatedPodNameAndUsesConciseReason() {
+    void failedLifecycleWithCleanupTargetDoesNotExpire() {
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap(), lifecycleMap);
         when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.starting("mock-fleet-demo-1"));
@@ -35,7 +35,19 @@ class PodStateTest {
 
         verify(lifecycleMap).put(
                 "demo",
-                MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"),
+                MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"));
+    }
+
+    @Test
+    void namelessFailedLifecycleExpiresAfterRetentionWindow() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
+
+        podState.markStartupFailed("demo", new RuntimeException("image pull failed"));
+
+        verify(lifecycleMap).put(
+                "demo",
+                MockPodLifecycle.failed(null, "image pull failed"),
                 30,
                 TimeUnit.SECONDS);
     }
@@ -192,6 +204,7 @@ class PodStateTest {
 
         MockPodLifecycle failed = MockPodLifecycle.failed(
                 restart.lifecycle().attemptId(), previousPod.podName(), "deletion timed out");
+        verify(lifecycleMap).put("demo", failed);
         when(podMap.get("demo")).thenReturn(null);
         when(lifecycleMap.get("demo")).thenReturn(failed);
 
