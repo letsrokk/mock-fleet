@@ -450,16 +450,32 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content. Persistent S3 storage remounts the mock after the write.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse putBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName,
             @ToolArg(description = "Encoded file content") Map<String, Object> body) {
         return wireMock("put_body_file", mockId, () -> coordinator.serialized(mockId, () -> {
             byte[] content = decodeBody(body, true);
             wireMock.putBodyFile(mockId, fileName, content);
+            if (config.storageEnabled()) {
+                remountPersistentBodyFile(mockId, fileName);
+            }
             return McpToolExecutor.ToolResult.of("Stored body file " + fileName + ".",
                     Map.of("mockId", mockId, "fileName", fileName, "sizeBytes", content.length));
         }));
+    }
+
+    private void remountPersistentBodyFile(String mockId, String fileName) {
+        try {
+            requireStopLifecycleResponse(mockId);
+            requireLifecycleResponse(mockId);
+        } catch (McpOperationException failure) {
+            Map<String, Object> details = new LinkedHashMap<>(failure.details());
+            details.put("mockId", mockId);
+            details.put("fileName", fileName);
+            details.put("bodyFileStored", true);
+            throw new McpOperationException(failure.code(), failure.getMessage(), failure.retryable(), true, details);
+        }
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)

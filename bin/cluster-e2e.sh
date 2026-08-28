@@ -658,11 +658,11 @@ run_contracts() {
   log "Checking body files and encoded byte contracts."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5}}')
   mcp_success put_body_file "${body_args}" >/dev/null
-  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
   assert_jq "${result}" '.body == {encoding:"utf8",data:"hello",sizeBytes:5}' "UTF-8 body file did not round-trip"
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2}}')
   mcp_success put_body_file "${body_args}" >/dev/null
-  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
   assert_jq "${result}" '.body == {encoding:"base64",data:"AAE=",sizeBytes:2}' "Binary body file did not round-trip"
   result=$(mcp_success list_body_files "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
   assert_jq "${result}" '.files | length == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
