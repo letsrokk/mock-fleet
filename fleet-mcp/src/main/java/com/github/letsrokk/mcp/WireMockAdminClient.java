@@ -548,7 +548,8 @@ public final class WireMockAdminClient {
             details.put("cleanupFailedIds", List.copyOf(cleanupFailedIds));
         }
         if (recoveryFailure != null) {
-            details.put("discoveryError", failureDetails(recoveryFailure));
+            String errorField = "candidate-discovery".equals(stage) ? "discoveryError" : "observationError";
+            details.put(errorField, failureDetails(recoveryFailure));
         }
         McpOperationException cleanupFailure = new McpOperationException("RECORDER_CLEANUP_FAILED",
                 "Recorder candidate cleanup could not be verified", true, true, details);

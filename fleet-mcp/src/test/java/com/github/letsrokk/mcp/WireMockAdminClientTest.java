@@ -1018,6 +1018,71 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void recorderFinalizationLabelsObservationInterruption() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 1, 1));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+
+        McpOperationException error;
+        try {
+            Thread.currentThread().interrupt();
+            error = assertThrows(McpOperationException.class, () -> polling.stopRecording("orders"));
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-observation", error.details().get("stage"));
+        assertTrue(error.details().containsKey("observationError"));
+        assertFalse(error.details().containsKey("discoveryError"));
+    }
+
+    @Test
+    void recorderFinalizationReportsAmbiguousCandidateCleanupFailure() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, """
+                {"mappings":[{"id":"recorded-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(500, "delete failed");
+        transport.respond(200, "{\"id\":\"recorded-id\"}");
+        transport.respond(500, "update failed");
+        transport.respond(200, "{\"id\":\"recorded-id\"}");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-cleanup", error.details().get("stage"));
+        assertEquals(List.of("recorded-id"), error.details().get("cleanupFailedIds"));
+    }
+
+    @Test
+    void recorderFinalizationReportsUnstableFinalCandidateScan() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 2, 0));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, """
+                {"mappings":[{"id":"late-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> polling.stopRecording("orders"));
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-stabilization", error.details().get("stage"));
+        assertEquals(List.of("late-id"), error.details().get("candidateIds"));
+    }
+
+    @Test
     void recorderStopPreservesAuthoritativeClientRejectionWithoutCleanup() {
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.respond(400, "not recording");
