@@ -40,6 +40,15 @@ public interface FleetMcpConfig {
     @WithDefault("262144")
     int includedBodyBytes();
 
+    @WithDefault("1S")
+    Duration dependencyHealthTimeout();
+
+    @WithDefault("67108864")
+    long maxCollectionScanBytes();
+
+    @WithDefault("100000")
+    int maxCollectionScanItems();
+
     @WithDefault("Authorization,Proxy-Authorization,Cookie,Set-Cookie,X-API-Key")
     List<String> sensitiveHeaders();
 

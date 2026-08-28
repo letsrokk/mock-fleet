@@ -36,6 +36,25 @@ Every successful tool result has a tool-specific object in `structuredContent`. 
 
 Each published `outputSchema` is `oneOf` its strict success object and this error object. Native WireMock inputs such as `mapping`, `requestPattern`, `recording`, and `snapshot` are JSON objects, not JSON strings and not `{ "map": ... }` wrappers. Enum-like tool arguments such as `applyMode` are strings in JSON-RPC and are parsed by the executor.
 
+Every closed tool-input object rejects unknown properties. Native WireMock mapping and request-pattern objects stay open because WireMock owns those schemas. Missing arguments, wrong scalar or nested types, unknown closed-object properties, and Java binding failures all return the same structured `INVALID_ARGUMENT` envelope. Rejected argument values are never copied into an error.
+
+## Collection pagination
+
+`list_mocks`, `list_mock_configs`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
+
+Every collection returns `page` with the same metadata:
+
+```json
+{
+  "limit": 50,
+  "returned": 50,
+  "hasMore": true,
+  "nextCursor": "eyJ2ZXJzaW9uIjoxLC4uLn0"
+}
+```
+
+`nextCursor` is a string only when `hasMore` is true and is otherwise null. Continue with that cursor until `hasMore` is false. WireMock collections do not provide snapshot isolation, so concurrent mutations between calls can cause duplicates or omissions. The MCP server streams large upstream collections, keeps only the requested page plus one item, and returns `RESULT_TOO_LARGE` if a configured byte or item scan budget is exhausted. `get_near_misses` returns `{mockId,nearMisses,page}`.
+
 ## Lifecycle
 
 `start_mock` returns all lifecycle fields, including nullable fields:
@@ -70,7 +89,7 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 
 ## Encoded bodies
 
-`send_request` and `put_body_file` accept bytes only through an encoded body object. `sizeBytes` describes the decoded byte length.
+`send_request` and `put_body_file` accept bytes only through an encoded body object. `sizeBytes` describes the decoded byte length. Body files have no stored media-type metadata; set the serving media type in the response headers of the stub that references the file.
 
 ```json
 {
@@ -83,6 +102,8 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 ```
 
 Responses and `get_body_file` use `{body:{encoding,data,sizeBytes}}`. The server emits `utf8` only for strictly decoded printable UTF-8; otherwise it emits base64. `send_request` wraps traffic as `{mockId,response:{status,headers,contentType,body}}`. Sensitive response and journal headers are replaced with `[REDACTED]`.
+
+`delete_body_file` returns `{mockId,fileName,deleted,forced}`. The default reference check stops at the first mapping that uses the file and returns `BODY_FILE_REFERENCED` with its `stubId`. `force=true` skips the reference scan and deletes immediately.
 
 ## Persistence, recording, and analysis
 
@@ -100,3 +121,9 @@ Persistent stub mutations use recoverable transactions. A persistent update reco
 ```
 
 A zero-match operation returns an empty ID array, `candidateCount: 0`, and `matchedRequests: false`. Use `find_requests`, `count_requests`, `list_unmatched_requests`, `list_unmatched_stubs`, and `get_near_misses` for matched/missed analysis. `send_request` rejects every WireMock Admin path, including encoded or ambiguous variants. Recorder, proxy, webhook, and mapping targets reject private, loopback, link-local, multicast, metadata, and special-use destinations unless both the hostname exception and connection-time CIDR policy allow them.
+
+## Health and provenance
+
+`/__fleet/mcp/health/live` and `/started` report only the MCP process. `/__fleet/mcp/health/ready` also requires the Fleet API and Fleet Proxy readiness endpoints to return HTTP 200 with `status: UP`; each dependency check uses `dependencyHealthTimeout` independently. A dependency outage removes MCP from service without causing Kubernetes to restart it.
+
+`GET /__fleet/mcp/version` returns `{component,version,revision,buildTime}`. `revision` is the full Git commit ID and `buildTime` is an ISO-8601 timestamp embedded in the artifact. Packaging fails if the revision metadata is absent or malformed.

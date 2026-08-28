@@ -46,6 +46,11 @@ public final class McpToolExecutor {
         return new ToolResponse(true, List.of(new TextContent(message)), new ErrorEnvelope(error), Map.of());
     }
 
+    static ToolResponse invalidArgument(String message) {
+        ErrorContent error = new ErrorContent("INVALID_ARGUMENT", message, false, false, Map.of());
+        return new ToolResponse(true, List.of(new TextContent(message)), new ErrorEnvelope(error), Map.of());
+    }
+
     public record ToolResult(String summary, Object structuredContent) {
         public static ToolResult of(String summary, Object structuredContent) {
             return new ToolResult(summary, structuredContent);

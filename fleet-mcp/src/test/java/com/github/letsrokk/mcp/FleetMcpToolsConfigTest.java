@@ -67,17 +67,23 @@ class FleetMcpToolsConfigTest {
 
     @Test
     void listsOnlySavedMockIdsWithStablePaginationMetadata() throws Exception {
-        var response = tools.listMockConfigs(2, 1);
+        var firstResponse = tools.listMockConfigs(2, null);
+
+        assertFalse(firstResponse.isError());
+        ObjectNode first = (ObjectNode) firstResponse.structuredContent();
+        String cursor = first.path("page").path("nextCursor").asText();
+        var response = tools.listMockConfigs(2, cursor);
 
         assertFalse(response.isError());
         ObjectNode result = (ObjectNode) response.structuredContent();
         assertEquals("42", result.path("resourceVersion").asText());
-        assertEquals(mapper.readTree("[\"beta\",\"zeta\"]"), result.path("mockIds"));
-        assertEquals(3, result.path("page").path("total").asInt());
+        assertEquals(mapper.readTree("[\"zeta\"]"), result.path("mockIds"));
         assertEquals(2, result.path("page").path("limit").asInt());
-        assertEquals(1, result.path("page").path("offset").asInt());
+        assertEquals(1, result.path("page").path("returned").asInt());
+        assertFalse(result.path("page").path("hasMore").asBoolean());
+        assertTrue(result.path("page").path("nextCursor").isNull());
         assertFalse(result.has("mocks"));
-        assertEquals(List.of("GET /__fleet/api/config"), requests);
+        assertEquals(List.of("GET /__fleet/api/config", "GET /__fleet/api/config"), requests);
     }
 
     @Test
@@ -91,9 +97,10 @@ class FleetMcpToolsConfigTest {
         assertFalse(response.isError());
         ObjectNode result = (ObjectNode) response.structuredContent();
         assertEquals(mapper.readTree("[]"), result.path("mockIds"));
-        assertEquals(0, result.path("page").path("total").asInt());
         assertEquals(50, result.path("page").path("limit").asInt());
-        assertEquals(0, result.path("page").path("offset").asInt());
+        assertEquals(0, result.path("page").path("returned").asInt());
+        assertFalse(result.path("page").path("hasMore").asBoolean());
+        assertTrue(result.path("page").path("nextCursor").isNull());
     }
 
     @Test
@@ -155,6 +162,9 @@ class FleetMcpToolsConfigTest {
             @Override public int maxPageSize() { return 200; }
             @Override public int maxPayloadBytes() { return 4096; }
             @Override public int includedBodyBytes() { return 4096; }
+            @Override public Duration dependencyHealthTimeout() { return Duration.ofSeconds(1); }
+            @Override public long maxCollectionScanBytes() { return 64 * 1024 * 1024; }
+            @Override public int maxCollectionScanItems() { return 100_000; }
             @Override public List<String> sensitiveHeaders() { return List.of("Authorization"); }
             @Override public Optional<List<String>> outboundExceptions() { return Optional.empty(); }
             @Override public Optional<List<String>> outboundAllowedListeners() { return Optional.empty(); }

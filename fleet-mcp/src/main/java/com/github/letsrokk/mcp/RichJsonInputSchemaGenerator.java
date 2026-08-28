@@ -25,7 +25,10 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
                 addPagination(properties);
             }
             case "count_requests" -> addRequestPattern(properties, required, false);
-            case "get_near_misses" -> addRequestPattern(properties, required, true);
+            case "get_near_misses" -> {
+                addRequestPattern(properties, required, true);
+                addPagination(properties);
+            }
             case "start_recording" -> {
                 properties.put("recording", jsonObject("Native WireMock recorder JSON", new JsonArray()
                         .add(new JsonObject().put("targetBaseUrl", "https://api.example.test")
@@ -66,7 +69,7 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
 
     private void addPagination(JsonObject properties) {
         properties.put("limit", new JsonObject().put("type", "integer").put("minimum", 1));
-        properties.put("offset", new JsonObject().put("type", "integer").put("minimum", 0));
+        properties.put("cursor", new JsonObject().put("type", "string"));
     }
 
     private JsonObject jsonObject(String description, JsonArray examples) {

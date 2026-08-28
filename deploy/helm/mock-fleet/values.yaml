@@ -189,6 +189,9 @@ fleet:
     maxPageSize: 200
     maxPayloadBytes: 1048576
     includedBodyBytes: 262144
+    dependencyHealthTimeout: 1S
+    maxCollectionScanBytes: 67108864
+    maxCollectionScanItems: 100000
     service:
       type: ClusterIP
       ports:

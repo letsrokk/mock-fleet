@@ -27,6 +27,15 @@ class WireMockAdminClientTest {
             transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"));
 
     @Test
+    void uploadsBodyFilesAsOpaqueBytes() {
+        transport.respond(201, "");
+
+        client.putBodyFile("orders", "payload.bin", new byte[] {0, 1});
+
+        assertEquals(List.of("application/octet-stream"), transport.last().headers().get("content-type"));
+    }
+
+    @Test
     void createStubDropsServerManagedFieldsAndAlwaysCreatesTemporaryMapping() throws Exception {
         transport.respond(201, "{\"id\":\"server-id\",\"persistent\":false}");
         ObjectNode input = (ObjectNode) mapper.readTree("""
@@ -576,15 +585,22 @@ class WireMockAdminClientTest {
         transport.respond(200, """
                 {"mappings":[{"id":"second-id","request":{"url":"/second"}}],"meta":{"total":3}}
                 """);
+        transport.respond(200, """
+                {"mappings":[{"id":"second-id","request":{"url":"/second"}}],"meta":{"total":3}}
+                """);
 
-        JsonNode page = client.listStubs("orders", 1, 1);
+        JsonNode firstPage = client.listStubs("orders", 1, 0);
+        JsonNode secondPage = client.listStubs("orders", 1,
+                firstPage.path("meta").path("nextPosition").asInt());
 
-        assertEquals("second-id", page.path("mappings").get(0).path("id").asText());
-        assertEquals(2, page.path("meta").path("total").asInt());
-        assertEquals(1, page.path("meta").path("limit").asInt());
-        assertEquals(1, page.path("meta").path("offset").asInt());
-        assertEquals("/__admin/mappings?limit=200&offset=0", transport.requestAt(0).target());
-        assertEquals("/__admin/mappings?limit=200&offset=2", transport.last().target());
+        assertEquals("first-id", firstPage.path("mappings").get(0).path("id").asText());
+        assertTrue(firstPage.path("meta").path("hasMore").asBoolean());
+        assertEquals(2, firstPage.path("meta").path("nextPosition").asInt());
+        assertEquals("second-id", secondPage.path("mappings").get(0).path("id").asText());
+        assertFalse(secondPage.path("meta").path("hasMore").asBoolean());
+        assertEquals("/__admin/mappings?limit=2&offset=0", transport.requestAt(0).target());
+        assertEquals("/__admin/mappings?limit=2&offset=2", transport.requestAt(1).target());
+        assertEquals("/__admin/mappings?limit=2&offset=2", transport.last().target());
     }
 
     @Test
@@ -605,6 +621,29 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void unmatchedStubPagesKeepRawPositionsAcrossHiddenRecoveryMappings() {
+        String response = """
+                {"mappings":[
+                  {"id":"first-id"},
+                  {"id":"recovery-id","metadata":{"_mockFleetMcpRecovery":{"operation":"update"}}},
+                  {"id":"second-id"}
+                ]}
+                """;
+        transport.respond(200, response);
+        transport.respond(200, response);
+
+        JsonNode first = client.listUnmatchedStubsPage("orders", 1, 0, 1024 * 1024, 100);
+        JsonNode second = client.listUnmatchedStubsPage("orders", 1,
+                first.path("meta").path("nextPosition").asLong(), 1024 * 1024, 100);
+
+        assertEquals("first-id", first.path("mappings").get(0).path("id").asText());
+        assertTrue(first.path("meta").path("hasMore").asBoolean());
+        assertEquals(2, first.path("meta").path("nextPosition").asLong());
+        assertEquals("second-id", second.path("mappings").get(0).path("id").asText());
+        assertFalse(second.path("meta").path("hasMore").asBoolean());
+    }
+
+    @Test
     void listStubsReducesTheRawPageSizeWhenAResponseExceedsThePayloadLimit() {
         String oversized = "{\"mappings\":[],\"padding\":\"" + "x".repeat(1024 * 1024) + "\",\"meta\":{\"total\":0}}";
         transport.respond(200, oversized);
@@ -615,8 +654,8 @@ class WireMockAdminClientTest {
         JsonNode page = client.listStubs("orders", 1, 0);
 
         assertEquals("visible-id", page.path("mappings").get(0).path("id").asText());
-        assertEquals("/__admin/mappings?limit=200&offset=0", transport.requestAt(0).target());
-        assertEquals("/__admin/mappings?limit=100&offset=0", transport.requestAt(1).target());
+        assertEquals("/__admin/mappings?limit=2&offset=0", transport.requestAt(0).target());
+        assertEquals("/__admin/mappings?limit=1&offset=0", transport.requestAt(1).target());
     }
 
     @Test
@@ -635,6 +674,22 @@ class WireMockAdminClientTest {
         assertEquals("/__admin/recordings/start", transport.requestAt(0).target());
         assertEquals("/__admin/recordings/status", transport.last().target());
         assertEquals("Recording", status.path("status").asText());
+    }
+
+    @Test
+    void recorderBaselineHonorsTheMappingScanItemBudget() {
+        WireMockAdminClient limited = new WireMockAdminClient(transport, mapper, 1024 * 1024,
+                Set.of("cookie"), null, null, 1024 * 1024, 1);
+        transport.respond(200, """
+                {"mappings":[{"id":"first"},{"id":"second"}],"meta":{"total":2}}
+                """);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.stopRecording("orders"));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertEquals(1, error.details().get("limitItems"));
+        assertEquals(1, transport.requestCount());
     }
 
     @Test

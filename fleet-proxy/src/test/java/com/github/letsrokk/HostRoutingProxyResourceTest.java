@@ -55,7 +55,7 @@ class HostRoutingProxyResourceTest {
                             body.getBytes()));
 
                     UpstreamResponse response = nextResponse.get();
-                    response.headers().forEach((name, values) -> values.forEach(value -> request.response().putHeader(name, value)));
+                    response.headers().forEach((name, values) -> values.forEach(value -> request.response().headers().add(name, value)));
                     request.response()
                             .setStatusCode(response.statusCode())
                             .end(response.body());
@@ -414,6 +414,27 @@ class HostRoutingProxyResourceTest {
         CapturedRequest request = capturedRequest.get();
         assertNotNull(request);
         assertEquals("/local-debug", request.uri());
+    }
+
+    @Test
+    void preservesDuplicateRequestAndResponseHeaders() {
+        mockUpstream("demo");
+        nextResponse.set(new UpstreamResponse(200, "ok", Map.of(
+                "X-Repeat", List.of("alpha", "beta"),
+                "Set-Cookie", List.of("one=1; Path=/", "two=2; Path=/"))));
+
+        var response = given()
+                .header("Host", "demo.mock-fleet.localhost")
+                .header("X-Repeat", "one", "two")
+        .when()
+                .get("/duplicate-headers")
+        .then()
+                .statusCode(200)
+                .extract().response();
+
+        assertEquals(List.of("one", "two"), capturedRequest.get().headers().getAll("X-Repeat"));
+        assertEquals(List.of("alpha", "beta"), response.getHeaders().getValues("X-Repeat"));
+        assertEquals(List.of("one=1; Path=/", "two=2; Path=/"), response.getHeaders().getValues("Set-Cookie"));
     }
 
     @Test

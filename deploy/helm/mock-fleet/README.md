@@ -204,6 +204,9 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.maxPageSize` | `200` | Maximum collection page size. |
 | `fleet.mcp.maxPayloadBytes` | `1048576` | Maximum complete structured result size. |
 | `fleet.mcp.includedBodyBytes` | `262144` | Maximum body content included in a result. |
+| `fleet.mcp.dependencyHealthTimeout` | `1S` | Timeout for each Fleet API and Fleet Proxy readiness check. |
+| `fleet.mcp.maxCollectionScanBytes` | `67108864` | Maximum upstream bytes scanned while producing one collection page or checking references and recovery state. |
+| `fleet.mcp.maxCollectionScanItems` | `100000` | Maximum upstream items scanned while producing one collection page or checking references and recovery state. |
 | `fleet.mcp.service.type` | `ClusterIP` | MCP service type. |
 | `fleet.mcp.service.ports.http` | `80` | MCP service HTTP port. |
 | `fleet.mcp.service.ports.targetHttp` | `8080` | MCP container HTTP port. |

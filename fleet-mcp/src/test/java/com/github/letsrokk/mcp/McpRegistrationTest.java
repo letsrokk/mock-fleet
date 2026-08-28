@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkiverse.mcp.server.ToolManager;
 import io.quarkus.test.junit.QuarkusTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -17,6 +18,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import java.util.stream.Stream;
 
 @QuarkusTest
 class McpRegistrationTest {
@@ -32,6 +37,9 @@ class McpRegistrationTest {
 
     @Inject
     ToolManager toolManager;
+
+    @Inject
+    MeterRegistry meterRegistry;
 
     @Test
     void registersOnlyTheV1ToolSurface() {
@@ -59,6 +67,10 @@ class McpRegistrationTest {
 
         JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
         JsonNode updateConfig = tool(tools, "update_mock_config").path("inputSchema");
+        for (JsonNode registeredTool : tools) {
+            assertFalse(registeredTool.path("inputSchema").path("additionalProperties").asBoolean(true),
+                    registeredTool.path("name").asText());
+        }
         JsonNode resources = updateConfig.path("properties").path("resources");
         assertTrue(resources.path("properties").has("requests"), updateConfig.toPrettyString());
         assertTrue(resources.path("properties").has("limits"));
@@ -67,6 +79,7 @@ class McpRegistrationTest {
                 .path("additionalProperties").path("type").asText());
         assertEquals("string", resources.path("properties").path("limits")
                 .path("additionalProperties").path("type").asText());
+        assertFalse(resources.path("additionalProperties").asBoolean(true));
         assertFalse(resources.toString().contains("$ref"));
         assertFalse(resources.path("properties").has("map"));
         assertFalse(textValues(updateConfig.path("required")).contains("resources"));
@@ -102,6 +115,44 @@ class McpRegistrationTest {
             assertFalse(tool(tools, toolName).path("inputSchema").path("properties").has("bodyBase64"));
             assertFalse(tool(tools, toolName).path("inputSchema").path("properties").has("contentBase64"));
         }
+        assertFalse(tool(tools, "put_body_file").path("inputSchema").path("properties").has("contentType"));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidToolCalls")
+    void returnsStructuredInvalidArgumentForSchemaAndBindingFailures(String description, String toolName,
+            String arguments) throws Exception {
+        JsonNode response = callTool(toolName, arguments);
+
+        assertTrue(response.path("result").path("isError").asBoolean(), response.toPrettyString());
+        JsonNode error = response.path("result").path("structuredContent").path("error");
+        assertEquals("INVALID_ARGUMENT", error.path("code").asText(), response.toPrettyString());
+        assertFalse(error.path("message").asText().isBlank(), response.toPrettyString());
+        assertFalse(error.path("retryable").asBoolean(true), response.toPrettyString());
+        assertFalse(error.path("stateMayHaveChanged").asBoolean(true), response.toPrettyString());
+        assertTrue(error.path("details").isObject(), response.toPrettyString());
+    }
+
+    @Test
+    void acceptsUnknownPropertiesInsideNativeWireMockObjects() throws Exception {
+        JsonNode response = callTool("create_stub", """
+                {"mockId":"orders","mapping":{"request":{"method":"GET","vendorExtension":42},
+                "response":{"status":200},"anotherNativeField":{"enabled":true}}}
+                """);
+
+        assertFalse("INVALID_ARGUMENT".equals(response.path("result").path("structuredContent")
+                .path("error").path("code").asText()), response.toPrettyString());
+    }
+
+    @Test
+    void countsEachBindingFailureOnce() throws Exception {
+        double before = meterRegistry.counter("mock_fleet_mcp_errors", "tool", "get_mock_config", "kind", "binding")
+                .count();
+
+        callTool("get_mock_config", "{}");
+
+        assertEquals(before + 1,
+                meterRegistry.counter("mock_fleet_mcp_errors", "tool", "get_mock_config", "kind", "binding").count());
     }
 
     @Test
@@ -174,10 +225,37 @@ class McpRegistrationTest {
     void listMockConfigsIsReadOnlyWithOptionalPaginationArguments() {
         var tool = toolManager.getTool("list_mock_configs");
 
-        assertEquals(List.of("limit", "offset"), tool.arguments().stream().map(argument -> argument.name()).toList());
+        assertEquals(List.of("limit", "cursor"), tool.arguments().stream().map(argument -> argument.name()).toList());
         assertTrue(tool.arguments().stream().noneMatch(argument -> argument.required()));
         assertTrue(tool.annotations().orElseThrow().readOnlyHint());
         assertFalse(tool.annotations().orElseThrow().destructiveHint());
+    }
+
+    @Test
+    void collectionToolsPublishCursorArgumentsAndStandardPageSchema() throws Exception {
+        String sessionId = initializeSession();
+        initializeClient(sessionId);
+        String response = given()
+                .header("Mcp-Session-Id", sessionId)
+                .header("Mcp-Protocol-Version", "2025-11-25")
+                .contentType("application/json")
+                .accept("application/json, text/event-stream")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")
+        .when().post("/__fleet/mcp").then().statusCode(200).extract().asString();
+        JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
+
+        for (String name : List.of("list_mocks", "list_mock_configs", "list_stubs", "list_unmatched_stubs",
+                "find_requests", "list_unmatched_requests", "get_near_misses", "list_body_files", "list_scenarios")) {
+            JsonNode input = tool(tools, name).path("inputSchema").path("properties");
+            assertTrue(input.has("cursor"), name);
+            assertFalse(input.has("offset"), name);
+            JsonNode page = tool(tools, name).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("page");
+            assertEquals(Set.of("limit", "returned", "hasMore", "nextCursor"),
+                    Set.copyOf(textValues(page.path("required"))), name);
+            assertFalse(page.path("properties").has("total"), name);
+            assertFalse(page.path("properties").has("offset"), name);
+        }
     }
 
     @Test
@@ -270,6 +348,48 @@ class McpRegistrationTest {
         .then()
                 .statusCode(200)
                 .extract().header("Mcp-Session-Id");
+    }
+
+    private JsonNode callTool(String toolName, String arguments) throws Exception {
+        String sessionId = initializeSession();
+        initializeClient(sessionId);
+        String response = given()
+                .header("Mcp-Session-Id", sessionId)
+                .header("Mcp-Protocol-Version", "2025-11-25")
+                .contentType("application/json")
+                .accept("application/json, text/event-stream")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\""
+                        + toolName + "\",\"arguments\":" + arguments + "}}")
+        .when()
+                .post("/__fleet/mcp")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+        return new ObjectMapper().readTree(response);
+    }
+
+    private static Stream<Arguments> invalidToolCalls() {
+        return Stream.of(
+                Arguments.of("missing required argument", "get_mock_config", "{}"),
+                Arguments.of("wrong scalar type", "get_mock_config", "{\"mockId\":42}"),
+                Arguments.of("unknown root property", "get_mock_config",
+                        "{\"mockId\":\"orders\",\"unexpected\":true}"),
+                Arguments.of("wrong nested type", "update_mock_config", """
+                        {"mockId":"orders","resourceVersion":"1","options":[],
+                        "resources":{"requests":[],"limits":{}},"applyMode":"futureOnly"}
+                        """),
+                Arguments.of("unknown closed nested property", "update_mock_config", """
+                        {"mockId":"orders","resourceVersion":"1","options":[],
+                        "resources":{"requests":{},"limits":{},"unexpected":true},"applyMode":"futureOnly"}
+                        """),
+                Arguments.of("wrong nested header value", "send_request", """
+                        {"mockId":"orders","method":"GET","path":"/orders",
+                        "headers":{"X-Test":{"value":"bad"}}}
+                        """),
+                Arguments.of("removed body-file media type", "put_body_file", """
+                        {"mockId":"orders","fileName":"payload.bin","body":{
+                        "encoding":"base64","data":"AAE=","sizeBytes":2},"contentType":"text/plain"}
+                        """));
     }
 
     private void initializeClient(String sessionId) {

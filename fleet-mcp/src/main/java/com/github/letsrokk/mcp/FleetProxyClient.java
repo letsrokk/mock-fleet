@@ -5,6 +5,7 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.ext.web.client.HttpRequest;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -45,6 +46,13 @@ public final class FleetProxyClient implements FleetProxyTransport {
         return metrics.internalCall("proxy", () -> executeInternal(mockId, request));
     }
 
+    @Override
+    public CollectionScan scanCollection(String mockId, TransportRequest request, ObjectMapper mapper,
+            String collectionField, long position, int limit, long maxBytes, int maxItems) {
+        return metrics.internalCall("proxy", () -> scanCollectionInternal(mockId, request, mapper, collectionField,
+                position, limit, maxBytes, maxItems));
+    }
+
     private TransportResponse executeInternal(String mockId, TransportRequest request) {
         if (request.body().length > maxPayloadBytes) {
             throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
@@ -59,6 +67,24 @@ public final class FleetProxyClient implements FleetProxyTransport {
             outbound.putHeader("Host", resolved.hostHeader());
         }
         return HttpTransportSupport.await(outbound, request.body(), maxPayloadBytes);
+    }
+
+    private CollectionScan scanCollectionInternal(String mockId, TransportRequest request, ObjectMapper mapper,
+            String collectionField, long position, int limit, long maxBytes, int maxItems) {
+        if (request.body().length > maxPayloadBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
+                    java.util.Map.of("limitBytes", maxPayloadBytes));
+        }
+        FleetProxyRequestFactory.ProxyRequest resolved = requestFactory.create(mockId, request.target());
+        HttpRequest<Buffer> outbound = client.requestAbs(request.method(), resolved.uri().toString())
+                .timeout(timeoutMillis)
+                .followRedirects(false);
+        HttpTransportSupport.applyHeaders(outbound, request.headers());
+        if (resolved.hostHeader() != null) {
+            outbound.putHeader("Host", resolved.hostHeader());
+        }
+        return HttpTransportSupport.awaitCollection(outbound, request.body(), mapper, collectionField, position,
+                limit, maxBytes, maxItems);
     }
 
     @PreDestroy

@@ -31,6 +31,8 @@ public final class WireMockAdminClient {
     private final int maxPayloadBytes;
     private final JsonSanitizer sanitizer;
     private final WireMockVersion configuredVersion;
+    private final long maxCollectionScanBytes;
+    private final int maxCollectionScanItems;
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders) {
@@ -44,11 +46,20 @@ public final class WireMockAdminClient {
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion) {
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
+                67_108_864L, 100_000);
+    }
+
+    public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
+            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
+            long maxCollectionScanBytes, int maxCollectionScanItems) {
         this.transport = transport;
         this.mapper = mapper;
         this.maxPayloadBytes = maxPayloadBytes;
         this.sanitizer = new JsonSanitizer(mapper, sensitiveHeaders, metrics);
         this.configuredVersion = configuredVersion;
+        this.maxCollectionScanBytes = maxCollectionScanBytes;
+        this.maxCollectionScanItems = maxCollectionScanItems;
     }
 
     public WireMockVersion version(String mockId) {
@@ -70,29 +81,58 @@ public final class WireMockAdminClient {
         }
     }
 
-    public JsonNode listStubs(String mockId, int limit, int offset) {
+    public JsonNode listStubs(String mockId, int limit, int rawOffset) {
         ArrayNode page = mapper.createArrayNode();
-        int[] visibleTotal = { 0 };
-        scanMappings(mockId, mapping -> {
-            if (isRecoveryMapping(mapping)) {
-                return;
+        int position = rawOffset;
+        int nextPosition = rawOffset;
+        boolean hasMore = false;
+        while (true) {
+            MappingPage rawPage = mappingPage(mockId, position, Math.min(MAPPING_SCAN_PAGE_SIZE, limit + 1));
+            JsonNode mappings = rawPage.response().path("mappings");
+            if (!mappings.isArray()) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "WireMock mapping page did not contain mappings", false, Map.of("position", position));
             }
-            int visibleIndex = visibleTotal[0]++;
-            if (visibleIndex >= offset && page.size() < limit) {
+            for (JsonNode mapping : mappings) {
+                int itemPosition = position++;
+                if (isRecoveryMapping(mapping)) {
+                    nextPosition = position;
+                    continue;
+                }
+                if (page.size() == limit) {
+                    hasMore = true;
+                    nextPosition = itemPosition;
+                    break;
+                }
                 page.add(mapping);
+                nextPosition = position;
             }
-        });
+            if (hasMore) {
+                break;
+            }
+            int total = rawPage.response().path("meta").path("total").asInt(position);
+            if (mappings.isEmpty() || position >= total) {
+                break;
+            }
+        }
         ObjectNode response = mapper.createObjectNode();
         response.set("mappings", page);
         ObjectNode meta = response.putObject("meta");
-        meta.put("total", visibleTotal[0]);
         meta.put("limit", limit);
-        meta.put("offset", offset);
+        meta.put("returned", page.size());
+        meta.put("hasMore", hasMore);
+        meta.put("nextPosition", nextPosition);
         return response;
     }
 
     public JsonNode listUnmatchedStubs(String mockId) {
         return withoutRecoveryMappings(getJson(mockId, "/__admin/mappings/unmatched"));
+    }
+
+    public JsonNode listUnmatchedStubsPage(String mockId, int limit, long position, long maxBytes, int maxItems) {
+        return visibleCollectionPage(mockId,
+                new TransportRequest(HttpMethod.GET, "/__admin/mappings/unmatched", JSON_HEADERS, new byte[0]),
+                "mappings", limit, position, maxBytes, maxItems, true);
     }
 
     public JsonNode getStub(String mockId, String stubId) {
@@ -177,12 +217,24 @@ public final class WireMockAdminClient {
         return sanitizer.redactHeaders(sendJson(mockId, HttpMethod.POST, "/__admin/requests/find", requestPattern));
     }
 
+    public JsonNode findRequestsPage(String mockId, JsonNode requestPattern, int limit, long position,
+            long maxBytes, int maxItems) {
+        return sanitizedCollectionPage(mockId, collectionRequest(HttpMethod.POST, "/__admin/requests/find", requestPattern),
+                "requests", limit, position, maxBytes, maxItems);
+    }
+
     public JsonNode countRequests(String mockId, JsonNode requestPattern) {
         return sendJson(mockId, HttpMethod.POST, "/__admin/requests/count", requestPattern);
     }
 
     public JsonNode listUnmatchedRequests(String mockId) {
         return sanitizer.redactHeaders(getJson(mockId, "/__admin/requests/unmatched"));
+    }
+
+    public JsonNode listUnmatchedRequestsPage(String mockId, int limit, long position, long maxBytes, int maxItems) {
+        return sanitizedCollectionPage(mockId,
+                new TransportRequest(HttpMethod.GET, "/__admin/requests/unmatched", JSON_HEADERS, new byte[0]),
+                "requests", limit, position, maxBytes, maxItems);
     }
 
     public JsonNode getNearMisses(String mockId, JsonNode requestPattern) {
@@ -193,6 +245,14 @@ public final class WireMockAdminClient {
                 ? getJson(mockId, endpoint)
                 : sendJson(mockId, HttpMethod.POST, endpoint, requestPattern);
         return sanitizer.redactHeaders(response);
+    }
+
+    public JsonNode getNearMissesPage(String mockId, JsonNode requestPattern, int limit, long position,
+            long maxBytes, int maxItems) {
+        TransportRequest request = requestPattern == null || requestPattern.isNull()
+                ? new TransportRequest(HttpMethod.GET, "/__admin/requests/unmatched/near-misses", JSON_HEADERS, new byte[0])
+                : collectionRequest(HttpMethod.POST, "/__admin/near-misses/request-pattern", requestPattern);
+        return sanitizedCollectionPage(mockId, request, "nearMisses", limit, position, maxBytes, maxItems);
     }
 
     public void resetRequestJournal(String mockId) {
@@ -235,14 +295,18 @@ public final class WireMockAdminClient {
         return getJson(mockId, "/__admin/files");
     }
 
+    public JsonNode listBodyFilesPage(String mockId, int limit, long position, long maxBytes, int maxItems) {
+        return collectionPage(mockId, new TransportRequest(HttpMethod.GET, "/__admin/files", JSON_HEADERS, new byte[0]),
+                "files", limit, position, maxBytes, maxItems);
+    }
+
     public TransportResponse getBodyFile(String mockId, String fileName) {
         return send(mockId, new TransportRequest(HttpMethod.GET,
                 "/__admin/files/" + BodyFileName.toUrlPath(fileName), Map.of(), new byte[0]));
     }
 
-    public void putBodyFile(String mockId, String fileName, byte[] content, String contentType) {
-        Map<String, List<String>> headers = Map.of("content-type", List.of(
-                contentType == null || contentType.isBlank() ? "application/octet-stream" : contentType));
+    public void putBodyFile(String mockId, String fileName, byte[] content) {
+        Map<String, List<String>> headers = Map.of("content-type", List.of("application/octet-stream"));
         send(mockId, new TransportRequest(HttpMethod.PUT,
                 "/__admin/files/" + BodyFileName.toUrlPath(fileName), headers, content));
     }
@@ -254,6 +318,12 @@ public final class WireMockAdminClient {
 
     public JsonNode listScenarios(String mockId) {
         return getJson(mockId, "/__admin/scenarios");
+    }
+
+    public JsonNode listScenariosPage(String mockId, int limit, long position, long maxBytes, int maxItems) {
+        return collectionPage(mockId,
+                new TransportRequest(HttpMethod.GET, "/__admin/scenarios", JSON_HEADERS, new byte[0]),
+                "scenarios", limit, position, maxBytes, maxItems);
     }
 
     public void resetScenarios(String mockId) {
@@ -421,6 +491,8 @@ public final class WireMockAdminClient {
     private void scanMappings(String mockId, Consumer<JsonNode> visitor) {
         int rawOffset = 0;
         int pageSize = MAPPING_SCAN_PAGE_SIZE;
+        long scannedBytes = 0;
+        int scannedItems = 0;
         while (true) {
             MappingPage page = mappingPage(mockId, rawOffset, pageSize);
             pageSize = page.limit();
@@ -429,6 +501,13 @@ public final class WireMockAdminClient {
                 throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
                         "WireMock mapping page did not contain mappings", false, Map.of("offset", rawOffset));
             }
+            try {
+                scannedBytes += mapper.writeValueAsBytes(page.response()).length;
+            } catch (JsonProcessingException failure) {
+                throw new IllegalStateException("Unable to measure WireMock mapping page", failure);
+            }
+            scannedItems += mappings.size();
+            enforceMappingScanBudget(scannedBytes, scannedItems, rawOffset);
             mappings.forEach(visitor);
             int returned = mappings.size();
             rawOffset += returned;
@@ -441,6 +520,17 @@ public final class WireMockAdminClient {
                         "WireMock mapping pagination made no progress", false,
                         Map.of("offset", rawOffset, "total", rawTotal));
             }
+        }
+    }
+
+    private void enforceMappingScanBudget(long bytes, int items, int position) {
+        if (bytes > maxCollectionScanBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Mapping scan byte limit exceeded", false,
+                    Map.of("limitBytes", maxCollectionScanBytes, "position", position));
+        }
+        if (items > maxCollectionScanItems) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Mapping scan item limit exceeded", false,
+                    Map.of("limitItems", maxCollectionScanItems, "position", position));
         }
     }
 
@@ -460,6 +550,74 @@ public final class WireMockAdminClient {
     }
 
     private record MappingPage(JsonNode response, int limit) {
+    }
+
+    private JsonNode sanitizedCollectionPage(String mockId, TransportRequest request, String field, int limit,
+            long position, long maxBytes, int maxItems) {
+        return sanitizer.redactHeaders(collectionPage(mockId, request, field, limit, position, maxBytes, maxItems));
+    }
+
+    private ObjectNode collectionPage(String mockId, TransportRequest request, String field, int limit,
+            long position, long maxBytes, int maxItems) {
+        CollectionScan scan = transport.scanCollection(mockId, request, mapper, field, position, limit,
+                maxBytes, maxItems);
+        return collectionPage(field, limit, scan.items(), scan.nextPosition(), scan.hasMore());
+    }
+
+    private ObjectNode visibleCollectionPage(String mockId, TransportRequest request, String field, int limit,
+            long position, long maxBytes, int maxItems, boolean hideRecoveryMappings) {
+        ArrayNode visible = mapper.createArrayNode();
+        long nextPosition = position;
+        boolean hasMore = false;
+        long remainingBytes = maxBytes;
+        int remainingItems = maxItems;
+        while (visible.size() <= limit) {
+            int batchSize = Math.min(MAPPING_SCAN_PAGE_SIZE, Math.max(limit + 1, 16));
+            CollectionScan scan = transport.scanCollection(mockId, request, mapper, field, nextPosition, batchSize,
+                    remainingBytes, remainingItems);
+            remainingBytes -= scan.scannedBytes();
+            remainingItems -= scan.scannedItems();
+            for (JsonNode item : scan.items()) {
+                long itemPosition = nextPosition++;
+                if (hideRecoveryMappings && isRecoveryMapping(item)) {
+                    continue;
+                }
+                if (visible.size() == limit) {
+                    hasMore = true;
+                    nextPosition = itemPosition;
+                    break;
+                }
+                visible.add(item);
+            }
+            if (hasMore) {
+                break;
+            }
+            nextPosition = scan.nextPosition();
+            if (!scan.hasMore()) {
+                break;
+            }
+        }
+        return collectionPage(field, limit, visible, nextPosition, hasMore);
+    }
+
+    private ObjectNode collectionPage(String field, int limit, ArrayNode items, long nextPosition, boolean hasMore) {
+        ObjectNode result = mapper.createObjectNode();
+        result.set(field, items);
+        ObjectNode meta = result.putObject("meta");
+        meta.put("limit", limit);
+        meta.put("returned", items.size());
+        meta.put("hasMore", hasMore);
+        meta.put("nextPosition", nextPosition);
+        return result;
+    }
+
+    private TransportRequest collectionRequest(HttpMethod method, String target, JsonNode body) {
+        try {
+            return new TransportRequest(method, target, JSON_HEADERS,
+                    body == null ? new byte[0] : mapper.writeValueAsBytes(body));
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Unable to serialize collection request");
+        }
     }
 
     private TransportResponse send(String mockId, TransportRequest request) {

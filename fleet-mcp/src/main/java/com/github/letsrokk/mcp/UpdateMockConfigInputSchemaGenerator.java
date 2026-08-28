@@ -21,7 +21,8 @@ public final class UpdateMockConfigInputSchemaGenerator
                 .put("properties", new JsonObject()
                         .put("requests", stringMap.copy())
                         .put("limits", stringMap.copy()))
-                .put("required", new JsonArray().add("requests").add("limits"));
+                .put("required", new JsonArray().add("requests").add("limits"))
+                .put("additionalProperties", false);
         JsonObject schema = new JsonObject()
                 .put("type", "object")
                 .put("properties", new JsonObject()
@@ -38,7 +39,8 @@ public final class UpdateMockConfigInputSchemaGenerator
                         .add("mockId")
                         .add("resourceVersion")
                         .add("options")
-                        .add("applyMode"));
+                        .add("applyMode"))
+                .put("additionalProperties", false);
         return schema;
     }
 

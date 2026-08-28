@@ -32,6 +32,8 @@ s3_secret_key=${MOCK_FLEET_E2E_S3_SECRET_KEY:-}
 s3_admin_image=${MOCK_FLEET_E2E_S3_ADMIN_IMAGE:-amazon/aws-cli:2.17.57}
 wiremock_image=${MOCK_FLEET_E2E_WIREMOCK_IMAGE:-wiremock/wiremock:3.13.2-2}
 image_tag=${MOCK_FLEET_E2E_IMAGE_TAG:-latest}
+routing_mode=${MOCK_FLEET_E2E_ROUTING_MODE:-PATH}
+routing_mode=$(printf '%s' "${routing_mode}" | tr '[:lower:]' '[:upper:]')
 proxy_image=${MOCK_FLEET_E2E_PROXY_IMAGE:-ghcr.io/letsrokk/mock-fleet/proxy}
 api_image=${MOCK_FLEET_E2E_API_IMAGE:-ghcr.io/letsrokk/mock-fleet/api}
 mcp_image=${MOCK_FLEET_E2E_MCP_IMAGE:-ghcr.io/letsrokk/mock-fleet/mcp}
@@ -212,7 +214,7 @@ helm_deploy() {
     --set fullnameOverride="${release}" \
     --set fleet.api.replicas=2 \
     --set fleet.proxy.replicas=1 \
-    --set fleet.proxy.routing.mode=PATH \
+    --set fleet.proxy.routing.mode="${routing_mode}" \
     --set fleet.mcp.enabled=true \
     --set fleet.mcp.replicas=1 \
     --set "fleet.mcp.outbound.exceptions[0]=${target_host}" \
@@ -432,6 +434,7 @@ api_replicas_have_cpu_request() {
 run_contracts() {
   local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args
   local main_mock="m-${run_id:0:18}"
+  local config_mock="cfg-${run_id:0:16}"
   local cold_mock="cold-${run_id:0:16}"
   local cleanup_mock="stop-${run_id:0:16}"
   local failed_mock="fail-${run_id:0:16}"
@@ -441,6 +444,39 @@ run_contracts() {
   assert_jq "${result}" '.result.tools | length == 32' "MCP did not publish 32 tools"
   assert_jq "${result}" '[.result.tools[].name] | index("start_mock") != null and index("get_recording_status") != null and index("recording_status") == null' \
     "MCP lifecycle/recording tool names are incorrect"
+
+  result=$(curl --silent --fail "http://127.0.0.1:${mcp_port}/__fleet/mcp/version")
+  assert_jq "${result}" '.component == "mcp" and (.revision | test("^[0-9a-fA-F]{40}$")) and (.buildTime | fromdateiso8601 > 0)' \
+    "MCP version endpoint omitted build provenance"
+  result=$(curl --silent --fail "http://127.0.0.1:${mcp_port}/__fleet/mcp/health/ready")
+  assert_jq "${result}" '.status == "UP" and ([.checks[].name] | index("fleet-api") != null and index("fleet-proxy") != null)' \
+    "MCP readiness did not include healthy Fleet dependencies"
+
+  mcp_expect_error get_mock_config '{}' INVALID_ARGUMENT >/dev/null
+  mcp_expect_error get_mock_config '{"mockId":"orders","unexpected":true}' INVALID_ARGUMENT >/dev/null
+  mcp_expect_error put_body_file '{"mockId":"orders","fileName":"bad","body":{"encoding":"utf8","data":"x","sizeBytes":1},"contentType":"text/plain"}' INVALID_ARGUMENT >/dev/null
+
+  result=$(mcp_success list_mocks '{"limit":1}')
+  assert_jq "${result}" '.page | has("limit") and has("returned") and has("hasMore") and has("nextCursor")' \
+    "MCP collection metadata is incomplete"
+  result=$(mcp_success list_option_definitions '{}')
+  assert_jq "${result}" '.optionDefinitions | type == "array"' "MCP option definitions were unavailable"
+
+  api_request GET /__fleet/api/config
+  rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+  result=$(mcp_success update_mock_config "$(jq -cn --arg id "${config_mock}" --arg rv "${rv}" \
+    '{mockId:$id,resourceVersion:$rv,options:[],applyMode:"futureOnly"}')")
+  rv=$(jq -r '.resourceVersion' <<<"${result}")
+  mcp_success get_mock_config "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
+  result=$(mcp_success list_mock_configs '{"limit":200}')
+  assert_jq "${result}" ".mockIds | index(\"${config_mock}\") != null" "Saved MCP config was not listed"
+  mcp_success start_mock "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
+  poll_mcp_success list_stubs "$(jq -cn --arg id "${config_mock}" '{mockId:$id,limit:1}')" >/dev/null
+  result=$(mcp_success delete_mock_config "$(jq -cn --arg id "${config_mock}" --arg rv "${rv}" \
+    '{mockId:$id,resourceVersion:$rv,applyMode:"restartActive"}')")
+  assert_jq "${result}" ".mockId == \"${config_mock}\" and .deleted == true" \
+    "Active saved-config deletion rejected the retained effective mock row"
+  mcp_success stop_mock "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
 
   log "Checking config replication, server validation, and conflict details."
   api_request GET /__fleet/api/config
@@ -498,7 +534,7 @@ run_contracts() {
   poll_until "cold-start delay config on both API replicas" \
     api_replicas_have_cpu_request "${cold_mock}" 1000000
 
-  result=$(mcp_tool_raw list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10,offset:0}')")
+  result=$(mcp_tool_raw list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10}')")
   assert_mock_starting_contract "${result}" "${cold_mock}"
 
   api_request GET /__fleet/api/config
@@ -507,7 +543,7 @@ run_contracts() {
   api_request PUT "/__fleet/api/config/${cold_mock}" "${mutation}"
   [[ "${api_status}" == 200 ]] || fail "Cold-start delay release returned ${api_status}: ${api_body}"
   assert_jq "${api_body}" '.apply.lifecycle == "STARTING"' "Cold mock was not restarted with schedulable resources"
-  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10,offset:0}')")
+  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10}')")
   assert_jq "${result}" ".mockId == \"${cold_mock}\" and (.stubs | type == \"array\")" "Cold mock never became usable"
 
   api_request POST "/__fleet/api/mocks/${cleanup_mock}/start"
@@ -528,6 +564,8 @@ run_contracts() {
   result=$(mcp_success update_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" --argjson mapping "${config}" '{mockId:$id,stubId:$stub,mapping:$mapping}')")
   assert_jq "${result}" '.stub.persistent == true and .stub.response.body == "persisted-v2"' \
     "Persistent update did not preserve persistence and replacement"
+  mcp_success unpersist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
+  mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
 
   config=$(cat "${fixture_dir}/persistent-stub-deleted.json")
   result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
@@ -538,7 +576,7 @@ run_contracts() {
   mcp_success delete_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${deleted_stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
 
   mcp_success stop_mock "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
-  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:200,offset:0}')")
+  result=$(poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:200}')")
   assert_persistent_restart_state "${result}" "${stub_id}" "${deleted_stub_id}"
   poll_mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/persistent"}')" >"${work_dir}/persistent-response"
   result=$(cat "${work_dir}/persistent-response")
@@ -546,14 +584,17 @@ run_contracts() {
     "Persistent update did not survive restart"
 
   log "Checking body files and encoded byte contracts."
-  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5},contentType:"text/plain"}')
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5}}')
   mcp_success put_body_file "${body_args}" >/dev/null
   result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
   assert_jq "${result}" '.body == {encoding:"utf8",data:"hello",sizeBytes:5}' "UTF-8 body file did not round-trip"
-  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2},contentType:"application/octet-stream"}')
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2}}')
   mcp_success put_body_file "${body_args}" >/dev/null
   result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
   assert_jq "${result}" '.body == {encoding:"base64",data:"AAE=",sizeBytes:2}' "Binary body file did not round-trip"
+  result=$(mcp_success list_body_files "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
+  assert_jq "${result}" '.files | length == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
+    "Body-file cursor page was incomplete"
 
   log "Checking matched/missed analysis, redaction, and Admin-path guards."
   config='{"request":{"method":"GET","urlPath":"/matched"},"response":{"status":204}}'
@@ -561,20 +602,40 @@ run_contracts() {
   config='{"request":{"method":"GET","urlPath":"/never-hit"},"response":{"status":204}}'
   result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
   unmatched_stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
-  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/matched",headers:{Authorization:"Bearer secret"}}')" >/dev/null
-  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/missed",headers:{Authorization:"Bearer secret"}}')" >/dev/null
+  config='{"request":{"method":"GET","urlPath":"/multi-header"},"response":{"status":200,"headers":{"Set-Cookie":["first=one","second=two"]}}}'
+  mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')" >/dev/null
+  result=$(mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/multi-header",headers:{"X-Duplicate":["one","two"]}}')")
+  assert_jq "${result}" '.response.headers | to_entries | map(select((.key | ascii_downcase) == "set-cookie"))[0].value == ["first=one","second=two"]' \
+    "Fleet Proxy replaced duplicate Set-Cookie response headers"
+  result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/multi-header"},limit:10}')")
+  assert_jq "${result}" '.requests[0].request.headers."X-Duplicate" == ["one","two"] or .requests[0].headers."X-Duplicate" == ["one","two"]' \
+    "Fleet Proxy replaced duplicate request headers"
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/matched",headers:{Authorization:"Bearer secret",Cookie:"session=secret-cookie"}}')" >/dev/null
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/missed",headers:{Authorization:"Bearer secret",Cookie:"session=secret-cookie"}}')" >/dev/null
   result=$(mcp_success count_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/matched"}}')")
   assert_jq "${result}" '.count >= 1' "Matched request count was empty"
-  result=$(mcp_success list_unmatched_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50,offset:0}')")
+  result=$(mcp_success list_unmatched_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50}')")
   assert_jq "${result}" '[.requests[] | select(.request.url == "/missed" or .url == "/missed")] | length >= 1' \
     "Missed request was absent from unmatched analysis"
-  result=$(mcp_success list_unmatched_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50,offset:0}')")
+  result=$(mcp_success list_unmatched_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50}')")
   assert_jq "${result}" ".stubs | any((.id // .uuid) == \"${unmatched_stub_id}\")" \
     "Never-hit stub was absent from unmatched-stub analysis"
-  result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPathPattern:"/(matched|missed)"},limit:50,offset:0}')")
+  result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPathPattern:"/(matched|missed)"},limit:50}')")
   assert_jq "${result}" '.. | objects | to_entries[]? | select((.key | ascii_downcase) == "authorization") | .value | if type == "array" then index("[REDACTED]") != null else . == "[REDACTED]" end' \
     "Sensitive journal headers were not redacted"
-  mcp_success get_near_misses "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/almost-matched"}}')" >/dev/null
+  [[ "${result}" != *secret-cookie* ]] || fail "Parsed cookies leaked from request search results"
+  result=$(mcp_success get_near_misses "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/almost-matched"},limit:50}')")
+  [[ "${result}" != *secret-cookie* ]] || fail "Parsed cookies leaked from near-miss results"
+
+  result=$(mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
+  assert_jq "${result}" '.page.hasMore == true and (.page.nextCursor | type == "string")' \
+    "Stub cursor did not expose a continuation"
+  local first_stub_cursor first_stub_page_id second_stub_page_id
+  first_stub_cursor=$(jq -r '.page.nextCursor' <<<"${result}")
+  first_stub_page_id=$(jq -r '.stubs[0].id // .stubs[0].uuid' <<<"${result}")
+  result=$(mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" --arg cursor "${first_stub_cursor}" '{mockId:$id,limit:1,cursor:$cursor}')")
+  second_stub_page_id=$(jq -r '.stubs[0].id // .stubs[0].uuid' <<<"${result}")
+  [[ "${first_stub_page_id}" != "${second_stub_page_id}" ]] || fail "Stub cursor repeated the previous mapping"
   for path in '/__admin' '/%5f%5fadmin/mappings' '/x/../__admin/requests'; do
     mcp_expect_error send_request "$(jq -cn --arg id "${main_mock}" --arg path "${path}" '{mockId:$id,method:"GET",path:$path}')" INVALID_ARGUMENT >/dev/null
   done
@@ -585,7 +646,8 @@ run_contracts() {
   result=$(mcp_success start_recording "$(jq -cn --arg id "${main_mock}" --arg target "${recording_target}" '{mockId:$id,recording:{targetBaseUrl:$target}}')")
   assert_jq "${result}" '.status.status == "Recording" or .status.status == "recording" or .status.recording == true' \
     "Recorder did not report active status"
-  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/record-me",headers:{Authorization:"Bearer secret"}}')" >/dev/null
+  mcp_success get_recording_status "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
+  mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/record-me",headers:{Authorization:"Bearer secret",Cookie:"session=secret-cookie"}}')" >/dev/null
   result=$(mcp_success stop_recording "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')")
   assert_jq "${result}" '.candidateCount >= 1 and .matchedRequests == true and (.candidateIds | length) == .candidateCount' \
     "Recording stop omitted candidate results"
@@ -597,6 +659,12 @@ run_contracts() {
   assert_jq "${result}" '.candidateIds == [] and .candidateCount == 0 and .matchedRequests == false' \
     "Zero-match snapshot was not explicit"
 
+  mcp_success reset_request_journal "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
+  mcp_success list_scenarios "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50}')" >/dev/null
+  mcp_success reset_scenarios "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
+  mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",force:true}')" >/dev/null
+  mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",force:true}')" >/dev/null
+
   log "Checking eager restart lifecycle."
   api_request GET /__fleet/api/config
   rv=$(jq -r '.resourceVersion' <<<"${api_body}")
@@ -604,7 +672,7 @@ run_contracts() {
   api_request PUT "/__fleet/api/config/${main_mock}" "${mutation}"
   [[ "${api_status}" == 200 ]] || fail "restartActive config update failed: ${api_body}"
   assert_jq "${api_body}" '.apply.lifecycle == "STARTING"' "Active config restart did not return STARTING"
-  poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:10,offset:0}')" >/dev/null
+  poll_mcp_success list_stubs "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:10}')" >/dev/null
 
   log "Checking terminal startup failure and FAILED cleanup."
   kubectl set env deployment/"${release}-api" --namespace "${namespace}" \
@@ -687,6 +755,7 @@ S3 bucket:    ${bucket}
 S3 endpoint:  ${s3_endpoint}
 CSI driver:   ${s3_provisioner}
 StorageClass: ${storage_class}
+Routing mode: ${routing_mode}
 MCP URL:      http://127.0.0.1:${mcp_port}/__fleet/mcp
 API URL:      http://127.0.0.1:${api_port}/__fleet/api
 No cluster changes were made.
@@ -703,6 +772,9 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+[[ "${routing_mode}" == PATH || "${routing_mode}" == HOST ]] \
+  || fail "MOCK_FLEET_E2E_ROUTING_MODE must be PATH or HOST."
 
 case "${mode}" in
   self-test) self_test; exit 0 ;;
