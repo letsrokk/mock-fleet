@@ -59,6 +59,26 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-api-ingress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.wiremockAdmissionPolicyName" -}}
+{{- $scope := printf "%s-%s" .Release.Name (include "mock-fleet.namespace" .) -}}
+{{- $name := printf "%s-wiremock" $scope -}}
+{{- if gt (len $name) 63 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") ($scope | sha256sum | trunc 8) -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockAdmissionPolicyBindingName" -}}
+{{- $scope := printf "%s-%s" .Release.Name (include "mock-fleet.namespace" .) -}}
+{{- $name := printf "%s-wiremock-binding" $scope -}}
+{{- if gt (len $name) 63 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") ($scope | sha256sum | trunc 8) -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mock-fleet.apiServiceUrl" -}}
 {{- $host := printf "%s.%s.svc.%s" (include "mock-fleet.apiFullname" .) (include "mock-fleet.namespace" .) (required "clusterDomain is required" .Values.clusterDomain) -}}
 {{- $port := int .Values.fleet.api.service.ports.http -}}
@@ -273,6 +293,9 @@ app.kubernetes.io/component: mcp
 {{- end -}}
 
 {{- define "mock-fleet.validateSecurityBoundaries" -}}
+{{- if and .Values.wiremock.admissionPolicy.enabled (not (include "mock-fleet.wiremockServiceAccountName" .)) -}}
+{{- fail "wiremock.serviceAccount must select a dedicated service account when wiremock.admissionPolicy.enabled=true" -}}
+{{- end -}}
 {{- if gt (int .Values.fleet.api.maxConcurrentStarts) (int .Values.fleet.api.maxActiveMocks) -}}
 {{- fail "fleet.api.maxConcurrentStarts must not exceed fleet.api.maxActiveMocks" -}}
 {{- end -}}

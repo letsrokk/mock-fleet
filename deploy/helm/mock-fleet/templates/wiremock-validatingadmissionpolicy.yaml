@@ -1,0 +1,224 @@
+{{- include "mock-fleet.validateSecurityBoundaries" . }}
+{{- if .Values.wiremock.admissionPolicy.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "mock-fleet.wiremockAdmissionPolicyName" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+  matchConditions:
+    - name: exact-api-service-account
+      expression: >-
+        request.userInfo.username == {{ printf "system:serviceaccount:%s:%s" (include "mock-fleet.namespace" .) (include "mock-fleet.serviceAccountName" .) | quote }}
+  variables:
+    - name: wiremock
+      expression: object.spec.containers[0]
+    - name: volumes
+      expression: >-
+        has(object.spec.volumes) ? object.spec.volumes : []
+    - name: identityVolumes
+      expression: variables.volumes.filter(volume, has(volume.projected))
+    - name: identityVolumeNames
+      expression: variables.identityVolumes.map(volume, volume.name)
+    - name: allowedIdentityEnvNames
+      expression: >-
+        ['AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_STS_REGIONAL_ENDPOINTS',
+         'AWS_DEFAULT_REGION', 'AWS_REGION', 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE',
+         'AWS_CONTAINER_CREDENTIALS_FULL_URI']
+  validations:
+    - expression: >-
+        object.metadata.labels.size() == 3 &&
+        object.metadata.labels['app.kubernetes.io/name'] == 'mock-fleet-wiremock' &&
+        object.metadata.labels['app.kubernetes.io/managed-by'] == 'mock-fleet' &&
+        object.metadata.labels['mock-fleet/mock-id'].matches('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+      message: Managed WireMock pods require the exact stable ownership labels.
+    - expression: >-
+        (has(object.metadata.generateName) &&
+          object.metadata.generateName == {{ printf "%s-" .Values.wiremock.podNamePrefix | quote }} + object.metadata.labels['mock-fleet/mock-id'] + '-') ||
+        (has(object.metadata.name) &&
+          object.metadata.name.startsWith({{ printf "%s-" .Values.wiremock.podNamePrefix | quote }} + object.metadata.labels['mock-fleet/mock-id'] + '-'))
+      message: Managed WireMock pod names must be derived from their mock ID.
+    - expression: >-
+        object.spec.serviceAccountName == {{ include "mock-fleet.wiremockServiceAccountName" . | quote }} &&
+        object.spec.automountServiceAccountToken == false
+      message: Managed WireMock pods require the dedicated tokenless service account.
+    - expression: >-
+        object.spec.restartPolicy == 'Never' &&
+        object.spec.terminationGracePeriodSeconds == {{ .Values.wiremock.terminationGracePeriodSeconds }} &&
+        (!has(object.spec.hostNetwork) || object.spec.hostNetwork == false) &&
+        (!has(object.spec.hostPID) || object.spec.hostPID == false) &&
+        (!has(object.spec.hostIPC) || object.spec.hostIPC == false) &&
+        (!has(object.spec.shareProcessNamespace) || object.spec.shareProcessNamespace == false) &&
+        (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0) &&
+        (!has(object.spec.hostAliases) || object.spec.hostAliases.size() == 0) &&
+        (!has(object.spec.nodeName) || object.spec.nodeName == '') &&
+        (!has(object.spec.runtimeClassName) || object.spec.runtimeClassName == '') &&
+        (!has(object.spec.dnsConfig))
+      message: Managed WireMock pods cannot select host namespaces or alternate execution paths.
+    - expression: >-
+        has(object.spec.securityContext) && object.spec.securityContext.runAsNonRoot == true &&
+        (!has(object.spec.securityContext.runAsUser) || object.spec.securityContext.runAsUser != 0) &&
+        has(object.spec.securityContext.seccompProfile) &&
+        object.spec.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        (!has(object.spec.securityContext.sysctls) || object.spec.securityContext.sysctls.size() == 0)
+      message: Managed WireMock pods require the restricted pod security context.
+    - expression: object.spec.containers.size() == 1
+      message: Managed WireMock pods can contain only the WireMock container.
+    - expression: >-
+        variables.wiremock.name == {{ .Values.wiremock.containerName | quote }} &&
+        variables.wiremock.image == {{ .Values.wiremock.containerImage | quote }} &&
+        variables.wiremock.imagePullPolicy == {{ .Values.wiremock.containerImagePullPolicy | quote }} &&
+        (!has(variables.wiremock.command) || variables.wiremock.command.size() == 0) &&
+        (!has(variables.wiremock.lifecycle)) &&
+        (!has(variables.wiremock.envFrom) || variables.wiremock.envFrom.size() == 0) &&
+        (!has(variables.wiremock.volumeDevices) || variables.wiremock.volumeDevices.size() == 0) &&
+        (!has(variables.wiremock.stdin) || variables.wiremock.stdin == false) &&
+        (!has(variables.wiremock.tty) || variables.wiremock.tty == false)
+      message: Managed WireMock containers must use the configured image and generated execution shape.
+    - expression: >-
+        has(variables.wiremock.securityContext) &&
+        variables.wiremock.securityContext.runAsNonRoot == true &&
+        (!has(variables.wiremock.securityContext.runAsUser) || variables.wiremock.securityContext.runAsUser != 0) &&
+        variables.wiremock.securityContext.allowPrivilegeEscalation == false &&
+        (!has(variables.wiremock.securityContext.privileged) || variables.wiremock.securityContext.privileged == false) &&
+        has(variables.wiremock.securityContext.capabilities) &&
+        variables.wiremock.securityContext.capabilities.drop == ['ALL'] &&
+        (!has(variables.wiremock.securityContext.capabilities.add) || variables.wiremock.securityContext.capabilities.add.size() == 0) &&
+        has(variables.wiremock.securityContext.seccompProfile) &&
+        variables.wiremock.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        (!has(variables.wiremock.securityContext.procMount) || variables.wiremock.securityContext.procMount == 'Default')
+      message: Managed WireMock containers require the restricted security context.
+    - expression: >-
+        has(variables.wiremock.resources) &&
+        has(variables.wiremock.resources.requests) && variables.wiremock.resources.requests.size() == 2 &&
+        'cpu' in variables.wiremock.resources.requests && 'memory' in variables.wiremock.resources.requests &&
+        has(variables.wiremock.resources.limits) && variables.wiremock.resources.limits.size() == 2 &&
+        'cpu' in variables.wiremock.resources.limits && 'memory' in variables.wiremock.resources.limits &&
+        !quantity(variables.wiremock.resources.requests['cpu']).isLessThan(quantity({{ .Values.wiremock.resourcePolicy.requestFloor.cpu | quote }})) &&
+        !quantity(variables.wiremock.resources.requests['memory']).isLessThan(quantity({{ .Values.wiremock.resourcePolicy.requestFloor.memory | quote }})) &&
+        !quantity(variables.wiremock.resources.limits['cpu']).isGreaterThan(quantity({{ .Values.wiremock.resourcePolicy.limitCeiling.cpu | quote }})) &&
+        !quantity(variables.wiremock.resources.limits['memory']).isGreaterThan(quantity({{ .Values.wiremock.resourcePolicy.limitCeiling.memory | quote }})) &&
+        !quantity(variables.wiremock.resources.requests['cpu']).isGreaterThan(quantity(variables.wiremock.resources.limits['cpu'])) &&
+        !quantity(variables.wiremock.resources.requests['memory']).isGreaterThan(quantity(variables.wiremock.resources.limits['memory']))
+      message: Managed WireMock resources must remain inside the configured request floor and limit ceiling.
+    - expression: >-
+        variables.wiremock.ports.size() == 1 &&
+        variables.wiremock.ports[0].containerPort == 8080 &&
+        (!has(variables.wiremock.ports[0].hostPort) || variables.wiremock.ports[0].hostPort == 0) &&
+        (!has(variables.wiremock.ports[0].hostIP) || variables.wiremock.ports[0].hostIP == '')
+      message: Managed WireMock containers cannot expose host ports.
+    - expression: >-
+        has(variables.wiremock.startupProbe) && has(variables.wiremock.startupProbe.httpGet) &&
+        variables.wiremock.startupProbe.httpGet.path == '/__admin/health' && variables.wiremock.startupProbe.httpGet.port == 8080 &&
+        variables.wiremock.startupProbe.httpGet.scheme == 'HTTP' &&
+        (!has(variables.wiremock.startupProbe.httpGet.host) || variables.wiremock.startupProbe.httpGet.host == '') &&
+        (!has(variables.wiremock.startupProbe.httpGet.httpHeaders) || variables.wiremock.startupProbe.httpGet.httpHeaders.size() == 0) &&
+        !has(variables.wiremock.startupProbe.exec) && !has(variables.wiremock.startupProbe.tcpSocket) && !has(variables.wiremock.startupProbe.grpc) &&
+        has(variables.wiremock.readinessProbe) && has(variables.wiremock.readinessProbe.httpGet) &&
+        variables.wiremock.readinessProbe.httpGet.path == '/__admin/health' && variables.wiremock.readinessProbe.httpGet.port == 8080 &&
+        variables.wiremock.readinessProbe.httpGet.scheme == 'HTTP' &&
+        (!has(variables.wiremock.readinessProbe.httpGet.host) || variables.wiremock.readinessProbe.httpGet.host == '') &&
+        (!has(variables.wiremock.readinessProbe.httpGet.httpHeaders) || variables.wiremock.readinessProbe.httpGet.httpHeaders.size() == 0) &&
+        !has(variables.wiremock.readinessProbe.exec) && !has(variables.wiremock.readinessProbe.tcpSocket) && !has(variables.wiremock.readinessProbe.grpc) &&
+        has(variables.wiremock.livenessProbe) && has(variables.wiremock.livenessProbe.httpGet) &&
+        variables.wiremock.livenessProbe.httpGet.path == '/__admin/health' && variables.wiremock.livenessProbe.httpGet.port == 8080 &&
+        variables.wiremock.livenessProbe.httpGet.scheme == 'HTTP' &&
+        (!has(variables.wiremock.livenessProbe.httpGet.host) || variables.wiremock.livenessProbe.httpGet.host == '') &&
+        (!has(variables.wiremock.livenessProbe.httpGet.httpHeaders) || variables.wiremock.livenessProbe.httpGet.httpHeaders.size() == 0) &&
+        !has(variables.wiremock.livenessProbe.exec) && !has(variables.wiremock.livenessProbe.tcpSocket) && !has(variables.wiremock.livenessProbe.grpc)
+      message: Managed WireMock health probes cannot add executable commands or alternate endpoints.
+    - expression: >-
+        !has(variables.wiremock.env) || variables.wiremock.env.all(env,
+          env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom))
+      message: Only AWS workload-identity environment mutations are allowed.
+    - expression: >-
+        variables.identityVolumes.all(volume,
+          volume.projected.sources.size() == 1 &&
+          has(volume.projected.sources[0].serviceAccountToken) &&
+          !has(volume.projected.sources[0].secret) &&
+          !has(volume.projected.sources[0].configMap) &&
+          !has(volume.projected.sources[0].downwardAPI) &&
+          volume.projected.sources[0].serviceAccountToken.audience in {{ toJson .Values.wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences }} &&
+          volume.projected.sources[0].serviceAccountToken.path != '' &&
+          has(volume.projected.sources[0].serviceAccountToken.expirationSeconds) &&
+          volume.projected.sources[0].serviceAccountToken.expirationSeconds >= 600 &&
+          volume.projected.sources[0].serviceAccountToken.expirationSeconds <= 86400)
+      message: Only audience-bound IRSA or EKS Pod Identity token projections are allowed.
+    - expression: >-
+        (!has(variables.wiremock.volumeMounts) && variables.identityVolumeNames.size() == 0 &&
+          {{ ternary 1 0 .Values.storage.persistent }} == 0) ||
+        (has(variables.wiremock.volumeMounts) &&
+          variables.wiremock.volumeMounts.all(mount,
+            (mount.name in variables.identityVolumeNames && mount.readOnly == true &&
+              mount.mountPath in ['/var/run/secrets/eks.amazonaws.com/serviceaccount', '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount'] &&
+              (!has(mount.subPath) || mount.subPath == '') && (!has(mount.subPathExpr) || mount.subPathExpr == '')) ||
+            ({{ .Values.storage.persistent }} && mount.name == 'wiremock-mappings' &&
+              mount.mountPath == '/home/wiremock' && mount.subPath == object.metadata.labels['mock-fleet/mock-id'])) &&
+          variables.identityVolumeNames.all(name, variables.wiremock.volumeMounts.exists(mount, mount.name == name)) &&
+          variables.wiremock.volumeMounts.filter(mount, mount.name == 'wiremock-mappings').size() == {{ ternary 1 0 .Values.storage.persistent }})
+      message: Volume mounts are limited to mappings storage and matching workload-identity projections.
+    {{- if .Values.storage.persistent }}
+    - expression: >-
+        variables.volumes.size() == variables.identityVolumes.size() + 1 &&
+        variables.volumes.exists(volume,
+          volume.name == 'wiremock-mappings' && has(volume.persistentVolumeClaim) &&
+          volume.persistentVolumeClaim.claimName == {{ printf "%s-pvc" (include "mock-fleet.fullname" .) | quote }})
+      message: Persistent managed pods require only the release mappings PVC and identity projections.
+    - expression: >-
+        has(object.spec.initContainers) && object.spec.initContainers.size() == 1 &&
+        object.spec.initContainers[0].name == 'prepare-wiremock-mappings' &&
+        object.spec.initContainers[0].image == 'busybox:1.36' &&
+        object.spec.initContainers[0].command == ['mkdir', '-p', {{ printf "%s/" .Values.storage.s3.path | quote }} + object.metadata.labels['mock-fleet/mock-id']] &&
+        (!has(object.spec.initContainers[0].args) || object.spec.initContainers[0].args.size() == 0) &&
+        (!has(object.spec.initContainers[0].lifecycle)) &&
+        (!has(object.spec.initContainers[0].ports) || object.spec.initContainers[0].ports.size() == 0) &&
+        (!has(object.spec.initContainers[0].startupProbe)) &&
+        (!has(object.spec.initContainers[0].readinessProbe)) &&
+        (!has(object.spec.initContainers[0].livenessProbe)) &&
+        (!has(object.spec.initContainers[0].envFrom) || object.spec.initContainers[0].envFrom.size() == 0) &&
+        (!has(object.spec.initContainers[0].volumeDevices) || object.spec.initContainers[0].volumeDevices.size() == 0) &&
+        (!has(object.spec.initContainers[0].stdin) || object.spec.initContainers[0].stdin == false) &&
+        (!has(object.spec.initContainers[0].tty) || object.spec.initContainers[0].tty == false) &&
+        (!has(object.spec.initContainers[0].resources) ||
+          ((!has(object.spec.initContainers[0].resources.requests) || object.spec.initContainers[0].resources.requests.size() == 0) &&
+           (!has(object.spec.initContainers[0].resources.limits) || object.spec.initContainers[0].resources.limits.size() == 0))) &&
+        (!has(object.spec.initContainers[0].env) || object.spec.initContainers[0].env.all(env,
+          env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom))) &&
+        has(object.spec.initContainers[0].securityContext) &&
+        object.spec.initContainers[0].securityContext.runAsNonRoot == true &&
+        object.spec.initContainers[0].securityContext.runAsUser == 1000 &&
+        object.spec.initContainers[0].securityContext.allowPrivilegeEscalation == false &&
+        (!has(object.spec.initContainers[0].securityContext.privileged) || object.spec.initContainers[0].securityContext.privileged == false) &&
+        object.spec.initContainers[0].securityContext.capabilities.drop == ['ALL'] &&
+        (!has(object.spec.initContainers[0].securityContext.capabilities.add) || object.spec.initContainers[0].securityContext.capabilities.add.size() == 0) &&
+        object.spec.initContainers[0].securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        object.spec.initContainers[0].volumeMounts.filter(mount,
+          mount.name == 'wiremock-mappings' && mount.mountPath == {{ .Values.storage.s3.path | quote }} &&
+          (!has(mount.subPath) || mount.subPath == '') && (!has(mount.subPathExpr) || mount.subPathExpr == '')).size() == 1 &&
+        object.spec.initContainers[0].volumeMounts.all(mount,
+          (mount.name == 'wiremock-mappings' && mount.mountPath == {{ .Values.storage.s3.path | quote }} &&
+            (!has(mount.subPath) || mount.subPath == '') && (!has(mount.subPathExpr) || mount.subPathExpr == '')) ||
+          (mount.name in variables.identityVolumeNames && mount.readOnly == true &&
+            mount.mountPath in ['/var/run/secrets/eks.amazonaws.com/serviceaccount', '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount'] &&
+            (!has(mount.subPath) || mount.subPath == '') && (!has(mount.subPathExpr) || mount.subPathExpr == '')))
+      message: Persistent managed pods require the exact restricted mappings initializer.
+    {{- else }}
+    - expression: >-
+        variables.volumes.size() == variables.identityVolumes.size() &&
+        (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0)
+      message: Non-persistent managed pods allow only workload-identity projections and no init containers.
+    {{- end }}
+{{- end }}

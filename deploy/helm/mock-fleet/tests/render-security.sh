@@ -1,6 +1,159 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+admission_fixture() {
+  local variant=$1
+  local namespace=${2:-testing}
+  local pod_prefix=${3:-custom-fleet}
+  local service_account=${4:-custom-fleet-wiremock}
+  local image=${5:-wiremock/wiremock:3.13.2-2}
+  local persistent=${6:-false}
+  local pvc_name=${7:-custom-fleet-pvc}
+  local storage_path=${8:-/mock-fleet}
+  local fixture
+
+  fixture=$(jq -cn \
+    --arg namespace "${namespace}" \
+    --arg pod_prefix "${pod_prefix}" \
+    --arg service_account "${service_account}" \
+    --arg image "${image}" \
+    '{
+      apiVersion:"v1",
+      kind:"Pod",
+      metadata:{
+        name:($pod_prefix + "-demo-fixture"),
+        namespace:$namespace,
+        labels:{
+          "app.kubernetes.io/name":"mock-fleet-wiremock",
+          "app.kubernetes.io/managed-by":"mock-fleet",
+          "mock-fleet/mock-id":"demo"
+        }
+      },
+      spec:{
+        serviceAccountName:$service_account,
+        automountServiceAccountToken:false,
+        restartPolicy:"Never",
+        terminationGracePeriodSeconds:5,
+        securityContext:{runAsNonRoot:true,seccompProfile:{type:"RuntimeDefault"}},
+        containers:[{
+          name:"wiremock",
+          image:$image,
+          imagePullPolicy:"IfNotPresent",
+          securityContext:{
+            runAsNonRoot:true,
+            allowPrivilegeEscalation:false,
+            capabilities:{drop:["ALL"]},
+            seccompProfile:{type:"RuntimeDefault"}
+          },
+          ports:[{containerPort:8080}],
+          startupProbe:{httpGet:{path:"/__admin/health",port:8080},initialDelaySeconds:1,periodSeconds:1,timeoutSeconds:1,failureThreshold:60},
+          readinessProbe:{httpGet:{path:"/__admin/health",port:8080},initialDelaySeconds:1,periodSeconds:1,timeoutSeconds:1,failureThreshold:30},
+          livenessProbe:{httpGet:{path:"/__admin/health",port:8080},initialDelaySeconds:10,periodSeconds:10,timeoutSeconds:1,failureThreshold:3},
+          resources:{requests:{cpu:"500m",memory:"512Mi"},limits:{cpu:"1",memory:"1Gi"}}
+        }]
+      }
+    }')
+
+  if [[ "${persistent}" == true ]]; then
+    fixture=$(jq -c --arg pvc_name "${pvc_name}" --arg storage_path "${storage_path}" '
+      .metadata.labels["mock-fleet/mock-id"] as $mock_id
+      | .spec.volumes = [{name:"wiremock-mappings",persistentVolumeClaim:{claimName:$pvc_name}}]
+      | .spec.containers[0].volumeMounts = [{name:"wiremock-mappings",mountPath:"/home/wiremock",subPath:$mock_id}]
+      | .spec.initContainers = [{
+          name:"prepare-wiremock-mappings",
+          image:"busybox:1.36",
+          command:["mkdir","-p",($storage_path + "/" + $mock_id)],
+          securityContext:{
+            runAsNonRoot:true,
+            runAsUser:1000,
+            allowPrivilegeEscalation:false,
+            capabilities:{drop:["ALL"]},
+            seccompProfile:{type:"RuntimeDefault"}
+          },
+          volumeMounts:[{name:"wiremock-mappings",mountPath:$storage_path}]
+        }]
+    ' <<<"${fixture}")
+  fi
+
+  case "${variant}" in
+    accepted) ;;
+    accepted-workload-identity|identity-alternate-mount|identity-init-subpath)
+      fixture=$(jq -c '
+        .spec.volumes += [{
+          name:"aws-iam-token",
+          projected:{sources:[{serviceAccountToken:{audience:"sts.amazonaws.com",expirationSeconds:86400,path:"token"}}]}
+        }]
+        | .spec.containers[0].volumeMounts += [{name:"aws-iam-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+        | .spec.containers[0].env = [
+            {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+            {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+          ]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts += [{name:"aws-iam-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+            | .spec.initContainers[0].env = [
+                {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+                {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+              ]
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    accepted-eks-pod-identity)
+      fixture=$(jq -c '
+        .spec.volumes += [{
+          name:"eks-pod-identity-token",
+          projected:{sources:[{serviceAccountToken:{audience:"pods.eks.amazonaws.com",expirationSeconds:86400,path:"eks-pod-identity-token"}}]}
+        }]
+        | .spec.containers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
+        | .spec.containers[0].env = [
+            {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
+            {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+          ]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
+            | .spec.initContainers[0].env = [
+                {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
+                {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+              ]
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    privileged) fixture=$(jq -c '.spec.containers[0].securityContext.privileged = true' <<<"${fixture}") ;;
+    hostpath) fixture=$(jq -c '.spec.volumes += [{name:"host",hostPath:{path:"/"}}]' <<<"${fixture}") ;;
+    wrong-image) fixture=$(jq -c '.spec.containers[0].image = "attacker.example/shell:latest"' <<<"${fixture}") ;;
+    wrong-service-account) fixture=$(jq -c '.spec.serviceAccountName = "default"' <<<"${fixture}") ;;
+    label-spoofing) fixture=$(jq -c '.metadata.labels["app.kubernetes.io/managed-by"] = "attacker"' <<<"${fixture}") ;;
+    missing-limits) fixture=$(jq -c 'del(.spec.containers[0].resources.limits)' <<<"${fixture}") ;;
+    excessive-limits) fixture=$(jq -c '.spec.containers[0].resources.limits.cpu = "5"' <<<"${fixture}") ;;
+    alternate-sidecar)
+      fixture=$(jq -c '.spec.containers += [{name:"shell",image:"busybox:1.36",command:["sh"]}]' <<<"${fixture}")
+      ;;
+    *) printf 'Unknown admission fixture: %s\n' "${variant}" >&2; return 1 ;;
+  esac
+
+  case "${variant}" in
+    identity-alternate-mount)
+      fixture=$(jq -c '.spec.containers[0].volumeMounts[-1].mountPath = "/var/run/secrets/alternate"' <<<"${fixture}")
+      ;;
+    identity-init-subpath)
+      fixture=$(jq -c '
+        if (.spec | has("initContainers")) then
+          .spec.initContainers[0].volumeMounts[-1].subPath = "token"
+        else
+          .spec.containers[0].volumeMounts[-1].subPath = "token"
+        end
+      ' <<<"${fixture}")
+      ;;
+  esac
+
+  jq . <<<"${fixture}"
+}
+
+if [[ "${1:-}" == --admission-fixture ]]; then
+  shift
+  admission_fixture "$@"
+  exit 0
+fi
+
 chart_dir="${1:-deploy/helm/mock-fleet}"
 
 fail() {
@@ -26,6 +179,82 @@ expect_render_failure() {
 default_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet)"
+
+admission_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/wiremock-validatingadmissionpolicy.yaml)"
+admission_binding_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/wiremock-validatingadmissionpolicybinding.yaml)"
+
+for fragment in \
+  'apiVersion: admissionregistration.k8s.io/v1' \
+  'kind: ValidatingAdmissionPolicy' \
+  'name: unusual-release-testing-wiremock' \
+  'failurePolicy: Fail' \
+  'request.userInfo.username' \
+  'system:serviceaccount:testing:custom-fleet-pod-manager' \
+  'app.kubernetes.io/name' \
+  'mock-fleet-wiremock' \
+  'app.kubernetes.io/managed-by' \
+  'mock-fleet/mock-id' \
+  'custom-fleet-wiremock' \
+  'wiremock/wiremock:3.13.2-2' \
+  'automountServiceAccountToken' \
+  'quantity(' \
+  'sts.amazonaws.com' \
+  'pods.eks.amazonaws.com'; do
+  grep -Fq -- "${fragment}" <<<"${admission_render}" \
+    || fail "WireMock admission policy is missing: ${fragment}"
+done
+
+for fragment in \
+  'kind: ValidatingAdmissionPolicyBinding' \
+  'name: unusual-release-testing-wiremock' \
+  'policyName: unusual-release-testing-wiremock' \
+  'validationActions:' \
+  '- Deny' \
+  'kubernetes.io/metadata.name: "testing"' \
+  'operations:' \
+  '- CREATE' \
+  'resources:' \
+  '- pods'; do
+  grep -Fq -- "${fragment}" <<<"${admission_binding_render}" \
+    || fail "WireMock admission policy binding is missing: ${fragment}"
+done
+
+disabled_admission="$(helm template unusual-release "${chart_dir}" --namespace testing \
+  --set wiremock.admissionPolicy.enabled=false)"
+if grep -Fq 'kind: ValidatingAdmissionPolicy' <<<"${disabled_admission}"; then
+  fail "WireMock admission resources must render only when wiremock.admissionPolicy.enabled=true"
+fi
+
+for accepted_fixture in accepted accepted-workload-identity accepted-eks-pod-identity; do
+  fixture=$(admission_fixture "${accepted_fixture}")
+  jq -e '.kind == "Pod" and .spec.automountServiceAccountToken == false' >/dev/null <<<"${fixture}" \
+    || fail "Accepted admission fixture is malformed: ${accepted_fixture}"
+done
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath; do
+  fixture=$(admission_fixture "${rejected_fixture}")
+  jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
+    || fail "Rejected admission fixture is malformed: ${rejected_fixture}"
+done
+
+long_release=release-with-a-long-name-for-admission-policy-scope
+long_name_a=$(helm template "${long_release}" "${chart_dir}" --namespace namespace-a-with-a-long-distinguishing-suffix \
+  --show-only templates/wiremock-validatingadmissionpolicy.yaml \
+  | awk '$1 == "name:" {print $2; exit}')
+long_name_b=$(helm template "${long_release}" "${chart_dir}" --namespace namespace-b-with-a-long-distinguishing-suffix \
+  --show-only templates/wiremock-validatingadmissionpolicy.yaml \
+  | awk '$1 == "name:" {print $2; exit}')
+[[ "${long_name_a}" != "${long_name_b}" && ${#long_name_a} -le 63 && ${#long_name_b} -le 63 ]] \
+  || fail "Cluster-scoped admission policy names must remain unique for long release namespace scopes"
+
+expect_render_failure 'admission without dedicated WireMock service account' \
+  'wiremock.serviceAccount must select a dedicated service account when wiremock.admissionPolicy.enabled=true' \
+  --set wiremock.serviceAccount.create=false --set wiremock.serviceAccount.name=
 
 egress_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \

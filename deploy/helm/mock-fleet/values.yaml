@@ -246,6 +246,12 @@ wiremock:
     create: true
     name: ""
     annotations: {}
+  admissionPolicy:
+    enabled: true
+    workloadIdentity:
+      allowedTokenAudiences:
+        - sts.amazonaws.com
+        - pods.eks.amazonaws.com
   resourcePolicy:
     requestFloor:
       cpu: "100m"
