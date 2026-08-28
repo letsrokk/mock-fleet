@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
@@ -444,7 +445,7 @@ class PodManagerTest {
         when(kubernetesClient.pods()).thenReturn(podOperations);
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName(oldPod.podName())).thenReturn(podResource);
-        when(kubernetesClient.raw(eq("DELETE"), any(), any(DeleteOptions.class))).thenAnswer(invocation -> {
+        when(kubernetesClient.raw(anyString(), eq("DELETE"), any(DeleteOptions.class))).thenAnswer(invocation -> {
             deletionCalled.set(true);
             return "{}";
         });
@@ -788,9 +789,43 @@ class PodManagerTest {
 
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
         verify(podState).stop("demo");
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(kubernetesClient, never()).services();
+    }
+
+    @Test
+    void deleteMockSendsThePodUriBeforeTheDeleteMethodWithTheFetchedUid() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        Pod fetchedPod = managedPod(pod.podName(), "demo");
+        fetchedPod.getMetadata().setUid("uid-fetched");
+        when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
+        when(podResource.get()).thenReturn(fetchedPod).thenReturn(null);
+        when(kubernetesClient.raw(anyString(), anyString(), any(DeleteOptions.class)))
+                .thenAnswer(invocation -> {
+                    assertEquals("/api/v1/namespaces/test/pods/mock-fleet-demo-1", invocation.getArgument(0));
+                    assertEquals("DELETE", invocation.getArgument(1));
+                    DeleteOptions options = invocation.getArgument(2);
+                    assertEquals("uid-fetched", options.getPreconditions().getUid());
+                    return "{}";
+                });
+
+        assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
     }
 
     @Test
@@ -815,7 +850,7 @@ class PodManagerTest {
         when(podResource.get()).thenReturn(null);
 
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
-        verify(kubernetesClient, never()).raw(eq("DELETE"), any(), any(DeleteOptions.class));
+        verify(kubernetesClient, never()).raw(anyString(), eq("DELETE"), any(DeleteOptions.class));
         verify(podState).confirmStopped("demo", pod.podName());
     }
 
@@ -839,8 +874,8 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
         when(podResource.get()).thenReturn(managedPod(pod.podName(), "demo"));
-        when(kubernetesClient.raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class)))
+        when(kubernetesClient.raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class)))
                 .thenThrow(new KubernetesClientException("Pod no longer exists", 404, null));
 
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
@@ -889,8 +924,8 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
         when(podResource.get()).thenReturn(fetchedPod);
-        when(kubernetesClient.raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class)))
+        when(kubernetesClient.raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class)))
                 .thenAnswer(invocation -> {
                     DeleteOptions options = invocation.getArgument(2);
                     assertEquals("uid-original", options.getPreconditions().getUid());
@@ -903,8 +938,8 @@ class PodManagerTest {
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
         assertEquals("uid-replacement", livePod.get().getMetadata().getUid());
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
@@ -932,7 +967,7 @@ class PodManagerTest {
         when(podResource.get()).thenReturn(currentPod);
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
-        verify(kubernetesClient, never()).raw(eq("DELETE"), any(), any(DeleteOptions.class));
+        verify(kubernetesClient, never()).raw(anyString(), eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
@@ -957,7 +992,7 @@ class PodManagerTest {
         when(podResource.get()).thenReturn(currentPod);
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
-        verify(kubernetesClient, never()).raw(eq("DELETE"), any(), any(DeleteOptions.class));
+        verify(kubernetesClient, never()).raw(anyString(), eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
@@ -1013,8 +1048,8 @@ class PodManagerTest {
         when(podResource.get()).thenReturn(deleting);
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
@@ -1065,8 +1100,8 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName("mock-fleet-demo-1")).thenReturn(podResource);
         when(podResource.get()).thenReturn(managedPod(pod.podName(), "demo"));
-        when(kubernetesClient.raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"), any(DeleteOptions.class)))
+        when(kubernetesClient.raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class)))
                 .thenThrow(new KubernetesClientException("Kubernetes API unavailable", 500, null));
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
@@ -1137,8 +1172,8 @@ class PodManagerTest {
         podManager.cleanUpIdlePods();
 
         verify(podState).removePod("stale");
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/stale-pod"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/stale-pod"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(namespacedPods).withName("stale-pod");
         verify(namespacedPods, never()).withName("current-pod");
         verify(namespacedPods, never()).withName("unknown-pod");
@@ -1187,8 +1222,8 @@ class PodManagerTest {
         podManager.cleanUpOrphanedPods();
 
         verify(namespacedPods).withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE);
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/orphan-pod"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/orphan-pod"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(namespacedPods, never()).withName("owned-pod");
         verify(namespacedPods, never()).withName("starting-pod");
         verify(kubernetesClient, never()).services();
@@ -1322,8 +1357,8 @@ class PodManagerTest {
 
         assertThrows(PodCreationException.class, () -> podManager.spawnPod("demo", "attempt-1"));
 
-        verify(kubernetesClient).raw(eq("DELETE"),
-                eq("/api/v1/namespaces/test/pods/mock-fleet-demo-attempt-1"), any(DeleteOptions.class));
+        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-attempt-1"),
+                eq("DELETE"), any(DeleteOptions.class));
         verify(deleteHandle, times(2)).get();
     }
 

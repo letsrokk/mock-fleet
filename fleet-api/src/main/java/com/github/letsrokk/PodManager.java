@@ -678,7 +678,7 @@ public class PodManager {
                         .withUid(podUid)
                     .endPreconditions()
                     .build();
-            kubernetesClient.raw("DELETE", podDeletePath(namespace, podName), deleteOptions);
+            kubernetesClient.raw(podDeletePath(namespace, podName), "DELETE", deleteOptions);
             return waitForPodToBeDeleted(podName, podResource::get);
         } catch (KubernetesClientException failure) {
             if (failure.getCode() == 404) {
