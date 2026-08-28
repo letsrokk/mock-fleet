@@ -34,6 +34,7 @@ public final class WireMockAdminClient {
     private final WireMockVersion configuredVersion;
     private final long maxCollectionScanBytes;
     private final int maxCollectionScanItems;
+    private final RecorderCleanupPolicy recorderCleanupPolicy;
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders) {
@@ -54,6 +55,13 @@ public final class WireMockAdminClient {
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
             long maxCollectionScanBytes, int maxCollectionScanItems) {
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
+                maxCollectionScanBytes, maxCollectionScanItems, RecorderCleanupPolicy.production());
+    }
+
+    WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
+            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
+            long maxCollectionScanBytes, int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy) {
         this.transport = transport;
         this.mapper = mapper;
         this.maxPayloadBytes = maxPayloadBytes;
@@ -61,6 +69,7 @@ public final class WireMockAdminClient {
         this.configuredVersion = configuredVersion;
         this.maxCollectionScanBytes = maxCollectionScanBytes;
         this.maxCollectionScanItems = maxCollectionScanItems;
+        this.recorderCleanupPolicy = recorderCleanupPolicy;
     }
 
     public WireMockVersion version(String mockId) {
@@ -436,14 +445,42 @@ public final class WireMockAdminClient {
             return failure;
         }
         McpOperationException uncertain = mutationFailure(mockId, failure);
-        List<String> candidateIds;
-        try {
-            candidateIds = List.copyOf(candidatesCreatedSince(mockId, baseline));
-        } catch (RuntimeException discoveryFailure) {
-            uncertain.addSuppressed(discoveryFailure);
-            return uncertain;
+        Set<String> candidateIds = new LinkedHashSet<>();
+        int stableScans = 0;
+        for (int poll = 0; poll < recorderCleanupPolicy.polls(); poll++) {
+            Set<String> current;
+            try {
+                current = candidatesCreatedSince(mockId, baseline);
+            } catch (RuntimeException discoveryFailure) {
+                return recorderRecoveryFailure(mockId, "candidate-discovery", candidateIds, List.of(),
+                        discoveryFailure, uncertain);
+            }
+            candidateIds.addAll(current);
+            if (current.isEmpty()) {
+                stableScans++;
+            } else {
+                stableScans = 0;
+                List<String> cleanupFailedIds = cleanupRecorderCandidates(mockId, List.copyOf(current));
+                if (!cleanupFailedIds.isEmpty()) {
+                    return recorderRecoveryFailure(mockId, "candidate-cleanup", candidateIds, cleanupFailedIds,
+                            null, uncertain);
+                }
+            }
+            if (poll + 1 < recorderCleanupPolicy.polls() && recorderCleanupPolicy.intervalMillis() > 0) {
+                try {
+                    Thread.sleep(recorderCleanupPolicy.intervalMillis());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return recorderRecoveryFailure(mockId, "candidate-observation", candidateIds, List.of(),
+                            new RuntimeException("Recorder cleanup polling was interrupted", interrupted), uncertain);
+                }
+            }
         }
-        return recorderCleanupFailure(mockId, candidateIds, uncertain);
+        if (stableScans < recorderCleanupPolicy.requiredStableScans()) {
+            return recorderRecoveryFailure(mockId, "candidate-stabilization", candidateIds, List.of(), null,
+                    uncertain);
+        }
+        return uncertain;
     }
 
     private JsonNode sanitizeRecorderCandidates(String mockId, JsonNode result, Set<String> baseline) {
@@ -480,12 +517,7 @@ public final class WireMockAdminClient {
 
     private RuntimeException recorderCleanupFailure(String mockId, List<String> candidateIds,
             RuntimeException originalFailure) {
-        List<String> cleanupFailedIds = new ArrayList<>();
-        for (String id : candidateIds) {
-            if (!removeOrNeutralizeRecorderCandidate(mockId, id)) {
-                cleanupFailedIds.add(id);
-            }
-        }
+        List<String> cleanupFailedIds = cleanupRecorderCandidates(mockId, candidateIds);
         if (cleanupFailedIds.isEmpty()) {
             return mutationFailure(mockId, originalFailure);
         }
@@ -493,6 +525,37 @@ public final class WireMockAdminClient {
                 "Recorder candidates could not all be removed or neutralized", true, true,
                 Map.of("mockId", mockId, "candidateIds", candidateIds, "cleanupFailedIds", cleanupFailedIds));
         cleanupFailure.addSuppressed(originalFailure);
+        return cleanupFailure;
+    }
+
+    private List<String> cleanupRecorderCandidates(String mockId, List<String> candidateIds) {
+        List<String> cleanupFailedIds = new ArrayList<>();
+        for (String id : candidateIds) {
+            if (!removeOrNeutralizeRecorderCandidate(mockId, id)) {
+                cleanupFailedIds.add(id);
+            }
+        }
+        return List.copyOf(cleanupFailedIds);
+    }
+
+    private McpOperationException recorderRecoveryFailure(String mockId, String stage, Set<String> candidateIds,
+            List<String> cleanupFailedIds, RuntimeException recoveryFailure, RuntimeException originalFailure) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("mockId", mockId);
+        details.put("stage", stage);
+        details.put("candidateIds", List.copyOf(candidateIds));
+        if (!cleanupFailedIds.isEmpty()) {
+            details.put("cleanupFailedIds", List.copyOf(cleanupFailedIds));
+        }
+        if (recoveryFailure != null) {
+            details.put("discoveryError", failureDetails(recoveryFailure));
+        }
+        McpOperationException cleanupFailure = new McpOperationException("RECORDER_CLEANUP_FAILED",
+                "Recorder candidate cleanup could not be verified", true, true, details);
+        cleanupFailure.addSuppressed(originalFailure);
+        if (recoveryFailure != null) {
+            cleanupFailure.addSuppressed(recoveryFailure);
+        }
         return cleanupFailure;
     }
 
@@ -1139,5 +1202,17 @@ public final class WireMockAdminClient {
         return "WIREMOCK_ADMIN_ERROR".equals(error.code())
                 && Integer.valueOf(500).equals(error.details().get("status"))
                 && String.valueOf(error.details().get("body")).contains("Stale file handle");
+    }
+
+    record RecorderCleanupPolicy(int polls, int requiredStableScans, long intervalMillis) {
+        RecorderCleanupPolicy {
+            if (polls < 1 || requiredStableScans < 0 || requiredStableScans > polls || intervalMillis < 0) {
+                throw new IllegalArgumentException("Invalid recorder cleanup policy");
+            }
+        }
+
+        static RecorderCleanupPolicy production() {
+            return new RecorderCleanupPolicy(26, 3, 200);
+        }
     }
 }
