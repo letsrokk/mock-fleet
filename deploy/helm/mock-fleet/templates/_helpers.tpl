@@ -208,8 +208,11 @@ app.kubernetes.io/component: mcp
 {{- define "mock-fleet.quantityValue" -}}
 {{- $field := .field -}}
 {{- $raw := trim (toString .value) -}}
+{{- if hasSuffix "Ei" $raw -}}
+{{- fail (printf "%s does not support Ei because Fabric8 cannot compare it exactly" $field) -}}
+{{- end -}}
 {{- $numberPattern := "(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)" -}}
-{{- $quantityPattern := printf "^%s(?:[eE][+-]?[0-9]{1,2}|[EPTGMK]i|[numkMGTPE])?$" $numberPattern -}}
+{{- $quantityPattern := printf "^%s(?:[eE][+-]?[0-9]{1,2}|[PTGMK]i|[numkMGTPE])?$" $numberPattern -}}
 {{- if or (gt (len $raw) 128) (not (regexMatch $quantityPattern $raw)) -}}
 {{- fail (printf "%s must be a positive Kubernetes resource quantity" $field) -}}
 {{- end -}}
@@ -233,7 +236,7 @@ app.kubernetes.io/component: mcp
 {{- if hasKey $decimalExponents $suffix -}}
 {{- $exponent = add $exponent (get $decimalExponents $suffix | int) | int -}}
 {{- else -}}
-{{- $binaryPowers := dict "Ki" 1 "Mi" 2 "Gi" 3 "Ti" 4 "Pi" 5 "Ei" 6 -}}
+{{- $binaryPowers := dict "Ki" 1 "Mi" 2 "Gi" 3 "Ti" 4 "Pi" 5 -}}
 {{- $power := get $binaryPowers $suffix | int -}}
 {{- range $_ := until $power -}}
 {{- $coefficient = include "mock-fleet.decimalMultiply" (dict "digits" $coefficient "factor" 1024) -}}

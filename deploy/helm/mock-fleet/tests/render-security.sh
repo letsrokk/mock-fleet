@@ -196,6 +196,27 @@ expect_render_failure 'binary-equivalent limit just above ceiling' 'wiremock.con
   --set-string wiremock.config.default.resources.limits.memory=1073741825
 expect_render_failure 'unsupported uppercase decimal kilo suffix' '/wiremock/resourcePolicy/requestFloor/cpu' \
   --set-string wiremock.resourcePolicy.requestFloor.cpu=1K
+expect_render_failure 'Fabric8-inexact Ei resource quantity' '/wiremock/resourcePolicy/requestFloor/memory' \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Ei \
+  --set-string wiremock.config.default.resources.requests.memory=1152921504606846976 \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1Ei \
+  --set-string wiremock.config.default.resources.limits.memory=1152921504606846976
+expect_render_failure 'Fabric8-inexact Ei helper bypass' 'wiremock.resourcePolicy.requestFloor.memory does not support Ei because Fabric8 cannot compare it exactly' \
+  --skip-schema-validation \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Ei \
+  --set-string wiremock.config.default.resources.requests.memory=1152921504606846976 \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1Ei \
+  --set-string wiremock.config.default.resources.limits.memory=1152921504606846976
+expect_render_failure 'Pi-equivalent request just below floor' 'wiremock.config.default.resources.requests.memory must not be below wiremock.resourcePolicy.requestFloor.memory' \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Pi \
+  --set-string wiremock.config.default.resources.requests.memory=1125899906842623 \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1Pi \
+  --set-string wiremock.config.default.resources.limits.memory=1125899906842624
+expect_render_failure 'Pi-equivalent limit just above ceiling' 'wiremock.config.default.resources.limits.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory' \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Pi \
+  --set-string wiremock.config.default.resources.requests.memory=1125899906842624 \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1Pi \
+  --set-string wiremock.config.default.resources.limits.memory=1125899906842625
 
 helm template exact-equivalence "${chart_dir}" \
   --set-string wiremock.resourcePolicy.requestFloor.cpu=1e-3 \
@@ -213,6 +234,13 @@ helm template decimal-equivalence "${chart_dir}" \
   --set-string wiremock.config.default.resources.requests.cpu=1k \
   --set-string wiremock.resourcePolicy.limitCeiling.cpu=1000000m \
   --set-string wiremock.config.default.resources.limits.cpu=1000 \
+  --show-only templates/api-deployment.yaml >/dev/null
+
+helm template pi-equivalence "${chart_dir}" \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Pi \
+  --set-string wiremock.config.default.resources.requests.memory=1024Ti \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1048576Gi \
+  --set-string wiremock.config.default.resources.limits.memory=1125899906842624 \
   --show-only templates/api-deployment.yaml >/dev/null
 
 for invariant in \
