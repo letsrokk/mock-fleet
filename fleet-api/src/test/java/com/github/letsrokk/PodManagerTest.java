@@ -23,7 +23,13 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 
@@ -317,6 +323,144 @@ class PodManagerTest {
         verify(transitions).serialized(eq("demo"), any());
         assertEquals("attempt-new", replacement.attemptId());
         assertEquals(MockLifecycleStatus.STARTING, result.status());
+    }
+
+    @Test
+    void failedLatePodCleanupBlocksTheReplacementFromSpawning() throws Exception {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodFactory podFactory = mock(PodFactory.class);
+        PodState podState = mock(PodState.class);
+        PodTransitionCoordinator transitions = mock(PodTransitionCoordinator.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch firstCreateEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstCreate = new CountDownLatch(1);
+        AtomicInteger createCount = new AtomicInteger();
+        AtomicReference<Pod> requestedPod = new AtomicReference<>();
+        MockPodLifecycle firstAttempt = MockPodLifecycle.starting("attempt-old", null, 1_000L);
+        AtomicReference<MockPodLifecycle> lifecycle = new AtomicReference<>(firstAttempt);
+
+        PodManager podManager = new PodManager() {
+            @Override
+            boolean deletePod(Pod pod) {
+                return false;
+            }
+
+            @Override
+            boolean deletePod(String podName) {
+                return false;
+            }
+        };
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podFactory = podFactory;
+        podManager.podState = podState;
+        podManager.podTransitionCoordinator = transitions;
+        podManager.wireMockOptions = wireMockOptions;
+        podManager.config = config;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        podManager.startExecutor = executor;
+
+        Object transitionMonitor = new Object();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            synchronized (transitionMonitor) {
+                return ((Supplier<?>) invocation.getArgument(1)).get();
+            }
+        }).when(transitions).serialized(eq("demo"), any());
+        when(podState.claimStart(eq("demo"), anyLong(), eq(2_000L)))
+                .thenReturn(new PodState.StartClaim(true, firstAttempt, null));
+        when(podState.lifecycle("demo")).thenAnswer(invocation -> lifecycle.get());
+        when(podState.isCurrentStartingAttempt(eq("demo"), any())).thenAnswer(invocation -> {
+            MockPodLifecycle current = lifecycle.get();
+            return current.status() == MockLifecycleStatus.STARTING
+                    && current.attemptId().equals(invocation.getArgument(1));
+        });
+        when(podState.markStartupPodName(eq("demo"), any(), any())).thenAnswer(invocation -> {
+            String attemptId = invocation.getArgument(1);
+            String podName = invocation.getArgument(2);
+            MockPodLifecycle current = lifecycle.get();
+            if (current.status() != MockLifecycleStatus.STARTING
+                    || !current.attemptId().equals(attemptId)) {
+                return false;
+            }
+            lifecycle.set(MockPodLifecycle.starting(
+                    attemptId, podName, current.startedAtEpochMillis()));
+            return true;
+        });
+        when(podState.claimRestart("demo")).thenAnswer(invocation -> {
+            MockPodLifecycle current = lifecycle.get();
+            MockPodLifecycle replacement = MockPodLifecycle.starting(
+                    "attempt-new", current.podName(), 2_000L);
+            lifecycle.set(replacement);
+            return new PodState.RestartClaim(true, replacement, current.podName());
+        });
+        when(podState.completeStart(eq("demo"), any(), any())).thenAnswer(invocation -> {
+            String attemptId = invocation.getArgument(1);
+            MockPodRef pod = invocation.getArgument(2);
+            MockPodLifecycle current = lifecycle.get();
+            if (current.status() != MockLifecycleStatus.STARTING
+                    || !current.attemptId().equals(attemptId)) {
+                return false;
+            }
+            lifecycle.set(MockPodLifecycle.running(attemptId, pod.podName()));
+            return true;
+        });
+        org.mockito.Mockito.doAnswer(invocation -> {
+            String attemptId = invocation.getArgument(1);
+            RuntimeException failure = invocation.getArgument(2);
+            MockPodLifecycle current = lifecycle.get();
+            if (current.status() == MockLifecycleStatus.STARTING
+                    && current.attemptId().equals(attemptId)) {
+                lifecycle.set(MockPodLifecycle.failed(attemptId, current.podName(), failure.getMessage()));
+            }
+            return null;
+        }).when(podState).failStart(eq("demo"), any(), any());
+        when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
+        when(config.namespace()).thenReturn("mock-fleet");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null))
+                .thenAnswer(invocation -> podWithGenerateName("mock-fleet-demo-"));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.resource(any(Pod.class))).thenAnswer(invocation -> {
+            requestedPod.set(invocation.getArgument(0));
+            return podHandle;
+        });
+        when(podHandle.inNamespace("test")).thenReturn(podHandle);
+        when(podHandle.create()).thenAnswer(invocation -> {
+            int invocationNumber = createCount.incrementAndGet();
+            if (invocationNumber == 1) {
+                firstCreateEntered.countDown();
+                assertTrue(releaseFirstCreate.await(1, TimeUnit.SECONDS));
+            }
+            String requestedName = requestedPod.get().getMetadata().getName();
+            String createdName = requestedName == null
+                    ? "mock-fleet-demo-" + (invocationNumber == 1 ? "late" : "replacement")
+                    : requestedName;
+            return pod(createdName, "Running", true);
+        });
+        when(podHandle.get()).thenAnswer(invocation -> requestedPod.get());
+
+        try {
+            podManager.startMock("demo");
+            assertTrue(firstCreateEntered.await(1, TimeUnit.SECONDS));
+            podManager.restartActive("demo");
+            releaseFirstCreate.countDown();
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (lifecycle.get().status() == MockLifecycleStatus.STARTING
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+
+            assertEquals(1, createCount.get());
+            assertEquals(MockLifecycleStatus.FAILED, lifecycle.get().status());
+            assertTrue(lifecycle.get().podName() != null && !lifecycle.get().podName().isBlank());
+        } finally {
+            releaseFirstCreate.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -644,7 +788,7 @@ class PodManagerTest {
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
         Pod podSpec = podWithGenerateName("mock-fleet-demo-");
-        Pod createdPod = pod("mock-fleet-demo-1", "Pending", false);
+        Pod createdPod = pod("mock-fleet-demo-attempt-1", "Pending", false);
         when(config.namespace()).thenReturn("mock-fleet");
         when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
         when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
@@ -654,7 +798,8 @@ class PodManagerTest {
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
         when(kubernetesClient.resource(createdPod)).thenReturn(podHandle);
-        when(podState.markStartupPodName("demo", "attempt-1", "mock-fleet-demo-1")).thenReturn(false);
+        when(podState.markStartupPodName("demo", "attempt-1", "mock-fleet-demo-attempt-1")).thenReturn(true);
+        when(podState.isCurrentStartingAttempt("demo", "attempt-1")).thenReturn(false);
         when(podHandle.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
         when(podHandle.get()).thenReturn(createdPod).thenReturn(null);
 

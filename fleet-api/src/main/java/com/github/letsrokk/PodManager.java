@@ -153,7 +153,10 @@ public class PodManager {
             requireCurrentStartingAttempt(mockId, attemptId);
             MockPodRef pod = spawnPod(mockId, attemptId);
             if (!podState.completeStart(mockId, attemptId, pod)) {
-                deletePod(pod);
+                if (!deletePod(pod)) {
+                    throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
+                            + pod.podName() + "' could not be confirmed.");
+                }
                 throw new PodCreationException("Pod startup was superseded or stopped.");
             }
             return pod;
@@ -244,13 +247,25 @@ public class PodManager {
                 wireMockOptions.resourcesFor(mockId));
         String namespace = currentNamespace();
 
+        if (attemptId != null) {
+            String reservedPodName = podNamePrefix + attemptId;
+            if (!podState.markStartupPodName(mockId, attemptId, reservedPodName)) {
+                throw new PodCreationException("Pod startup was superseded or stopped.");
+            }
+            pod.getMetadata().setName(reservedPodName);
+            pod.getMetadata().setGenerateName(null);
+        }
+
         pod = kubernetesClient.resource(pod)
                 .inNamespace(namespace)
                 .create();
         if (attemptId == null) {
             podState.markStartupPodName(mockId, pod.getMetadata().getName());
-        } else if (!podState.markStartupPodName(mockId, attemptId, pod.getMetadata().getName())) {
-            deletePod(pod);
+        } else if (!podState.isCurrentStartingAttempt(mockId, attemptId)) {
+            if (!deletePod(pod)) {
+                throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
+                        + pod.getMetadata().getName() + "' could not be confirmed.");
+            }
             throw new PodCreationException("Pod startup was superseded or stopped.");
         }
 
