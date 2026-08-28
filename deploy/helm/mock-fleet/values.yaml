@@ -185,6 +185,7 @@ fleet:
       - Set-Cookie
       - X-API-Key
     timeout: 10S
+    lifecycleTimeout: 70S
     defaultPageSize: 50
     maxPageSize: 200
     maxPayloadBytes: 1048576

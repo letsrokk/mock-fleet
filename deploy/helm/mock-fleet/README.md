@@ -199,7 +199,8 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.outbound.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | Labels selecting the cluster DNS pods allowed by the WireMock egress policy. |
 | `fleet.mcp.outbound.networkPolicy.allowedCidrs` | `[]` | Private or special-use CIDRs explicitly allowed at connection time. Configure the corresponding host in `outbound.exceptions` too. |
 | `fleet.mcp.sensitiveHeaders` | common credential headers | Headers redacted from traffic, journal, and recorder results. |
-| `fleet.mcp.timeout` | `10S` | Internal Fleet API and Proxy request timeout. |
+| `fleet.mcp.timeout` | `10S` | Normal internal Fleet API and Proxy request timeout. |
+| `fleet.mcp.lifecycleTimeout` | `70S` | Timeout for pod deletion through `stop_mock`; keep this longer than `fleet.api.podCreationTimeout`. |
 | `fleet.mcp.defaultPageSize` | `50` | Default collection page size. |
 | `fleet.mcp.maxPageSize` | `200` | Maximum collection page size. |
 | `fleet.mcp.maxPayloadBytes` | `1048576` | Maximum complete structured result size. |

@@ -55,6 +55,8 @@ spec:
               value: {{ join "," .Values.fleet.mcp.sensitiveHeaders | quote }}
             - name: FLEET_MCP_TIMEOUT
               value: {{ .Values.fleet.mcp.timeout | quote }}
+            - name: FLEET_MCP_LIFECYCLE_TIMEOUT
+              value: {{ .Values.fleet.mcp.lifecycleTimeout | quote }}
             - name: FLEET_MCP_DEFAULT_PAGE_SIZE
               value: {{ .Values.fleet.mcp.defaultPageSize | int64 | quote }}
             - name: FLEET_MCP_MAX_PAGE_SIZE

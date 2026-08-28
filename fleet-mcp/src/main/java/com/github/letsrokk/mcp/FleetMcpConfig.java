@@ -28,6 +28,9 @@ public interface FleetMcpConfig {
     @WithDefault("10S")
     Duration timeout();
 
+    @WithDefault("70S")
+    Duration lifecycleTimeout();
+
     @WithDefault("50")
     int defaultPageSize();
 

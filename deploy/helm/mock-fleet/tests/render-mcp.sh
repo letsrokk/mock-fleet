@@ -132,13 +132,15 @@ override_render="$(helm template unusual-release "${chart_dir}" \
   --set fleet.mcp.apiBaseUrl=http://api.local:9000 \
   --set fleet.mcp.proxyBaseUrl=http://proxy.local:9001 \
   --set fleet.mcp.routing.mode=HOST \
-  --set fleet.mcp.routing.fleetHost=internal.example.test)"
+  --set fleet.mcp.routing.fleetHost=internal.example.test \
+  --set fleet.mcp.lifecycleTimeout=75S)"
 
 for fragment in \
   'value: "http://api.local:9000"' \
   'value: "http://proxy.local:9001"' \
   'value: "HOST"' \
-  'value: "internal.example.test"'; do
+  'value: "internal.example.test"' \
+  'value: "75S"'; do
   if ! grep -Fq "${fragment}" <<<"${override_render}"; then
     echo "Rendered MCP override is missing: ${fragment}" >&2
     exit 1

@@ -26,24 +26,33 @@ public final class FleetApiClient {
     private final ObjectMapper mapper;
     private final int maxPayloadBytes;
     private final long timeoutMillis;
+    private final long lifecycleTimeoutMillis;
     private final McpMetrics metrics;
 
     @Inject
     public FleetApiClient(Vertx vertx, FleetMcpConfig config, ObjectMapper mapper, McpMetrics metrics) {
-        this(vertx, config.apiBaseUrl(), config.timeout(), config.maxPayloadBytes(), mapper, metrics);
+        this(vertx, config.apiBaseUrl(), config.timeout(), config.lifecycleTimeout(), config.maxPayloadBytes(), mapper,
+                metrics);
     }
 
     FleetApiClient(Vertx vertx, URI apiBaseUrl, Duration timeout, int maxPayloadBytes, ObjectMapper mapper,
             McpMetrics metrics) {
+        this(vertx, apiBaseUrl, timeout, timeout, maxPayloadBytes, mapper, metrics);
+    }
+
+    FleetApiClient(Vertx vertx, URI apiBaseUrl, Duration timeout, Duration lifecycleTimeout, int maxPayloadBytes,
+            ObjectMapper mapper, McpMetrics metrics) {
         this.apiBaseUrl = normalize(apiBaseUrl);
         this.mapper = mapper;
         this.maxPayloadBytes = maxPayloadBytes;
         this.timeoutMillis = timeout.toMillis();
+        this.lifecycleTimeoutMillis = lifecycleTimeout.toMillis();
         this.metrics = metrics;
         this.client = WebClient.create(vertx, new WebClientOptions()
                 .setFollowRedirects(false)
-                .setConnectTimeout((int) Math.min(Integer.MAX_VALUE, timeoutMillis))
-                .setIdleTimeout((int) Math.max(1, timeout.toSeconds()))
+                .setConnectTimeout((int) Math.min(Integer.MAX_VALUE,
+                        Math.max(timeoutMillis, lifecycleTimeoutMillis)))
+                .setIdleTimeout((int) Math.max(1, Math.max(timeout.toSeconds(), lifecycleTimeout.toSeconds())))
                 .setIdleTimeoutUnit(TimeUnit.SECONDS));
     }
 
@@ -56,7 +65,8 @@ public final class FleetApiClient {
     }
 
     public JsonNode stopMock(String mockId) {
-        return json(HttpMethod.DELETE, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId), null);
+        return json(HttpMethod.DELETE, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId), null,
+                lifecycleTimeoutMillis);
     }
 
     public JsonNode getConfig() {
@@ -106,7 +116,11 @@ public final class FleetApiClient {
     }
 
     private JsonNode json(HttpMethod method, String path, JsonNode payload) {
-        TransportResponse response = raw(method, path, payload);
+        return json(method, path, payload, timeoutMillis);
+    }
+
+    private JsonNode json(HttpMethod method, String path, JsonNode payload, long requestTimeoutMillis) {
+        TransportResponse response = raw(method, path, payload, requestTimeoutMillis);
         if (response.body().length == 0) {
             return mapper.createObjectNode();
         }
@@ -118,15 +132,15 @@ public final class FleetApiClient {
         }
     }
 
-    private TransportResponse raw(HttpMethod method, String path, JsonNode payload) {
-        return metrics.internalCall("api", () -> rawInternal(method, path, payload));
+    private TransportResponse raw(HttpMethod method, String path, JsonNode payload, long requestTimeoutMillis) {
+        return metrics.internalCall("api", () -> rawInternal(method, path, payload, requestTimeoutMillis));
     }
 
-    private TransportResponse rawInternal(HttpMethod method, String path, JsonNode payload) {
+    private TransportResponse rawInternal(HttpMethod method, String path, JsonNode payload, long requestTimeoutMillis) {
         try {
             byte[] body = payload == null ? new byte[0] : mapper.writeValueAsBytes(payload);
             HttpRequest<Buffer> request = client.requestAbs(method, apiBaseUrl + path)
-                    .timeout(timeoutMillis)
+                    .timeout(requestTimeoutMillis)
                     .followRedirects(false)
                     .putHeader("Accept", "application/json");
             if (payload != null) {
@@ -134,17 +148,21 @@ public final class FleetApiClient {
             }
             TransportResponse response = HttpTransportSupport.await(request, body, maxPayloadBytes);
             if (response.status() < 200 || response.status() >= 300) {
-                throw apiError(response);
+                throw apiError(response, method != HttpMethod.GET);
             }
             return response;
         } catch (McpOperationException e) {
+            if (method != HttpMethod.GET && "UPSTREAM_UNAVAILABLE".equals(e.code())
+                    && !e.stateMayHaveChanged()) {
+                throw new McpOperationException(e.code(), e.getMessage(), e.retryable(), true, e.details());
+            }
             throw e;
         } catch (Exception e) {
             throw new McpOperationException("INVALID_JSON", "Unable to serialize Fleet API request", false, Map.of());
         }
     }
 
-    private McpOperationException apiError(TransportResponse response) {
+    private McpOperationException apiError(TransportResponse response, boolean stateMayHaveChanged) {
         try {
             JsonNode body = mapper.readTree(response.body());
             if (body != null && body.isObject() && body.path("code").isTextual()
@@ -159,7 +177,7 @@ public final class FleetApiClient {
             // Fall through to a stable transport-level error when the API did not return ApiError JSON.
         }
         return new McpOperationException("FLEET_API_ERROR", "Fleet API returned HTTP " + response.status(),
-                response.status() >= 500, false,
+                response.status() >= 500, stateMayHaveChanged,
                 Map.of("status", response.status(), "body", response.bodyAsString()));
     }
 

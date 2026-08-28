@@ -158,6 +158,7 @@ class FleetMcpToolsConfigTest {
             @Override public String wiremockImage() { return "wiremock/wiremock:3.13.2-2"; }
             @Override public boolean storageEnabled() { return false; }
             @Override public Duration timeout() { return Duration.ofSeconds(1); }
+            @Override public Duration lifecycleTimeout() { return Duration.ofSeconds(2); }
             @Override public int defaultPageSize() { return 50; }
             @Override public int maxPageSize() { return 200; }
             @Override public int maxPayloadBytes() { return 4096; }
