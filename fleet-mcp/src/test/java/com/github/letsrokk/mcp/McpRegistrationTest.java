@@ -259,6 +259,54 @@ class McpRegistrationTest {
     }
 
     @Test
+    void inputSchemasPublishDescriptionsAndRuntimeBounds() throws Exception {
+        String sessionId = initializeSession();
+        initializeClient(sessionId);
+        String response = given()
+                .header("Mcp-Session-Id", sessionId)
+                .header("Mcp-Protocol-Version", "2025-11-25")
+                .contentType("application/json")
+                .accept("application/json, text/event-stream")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")
+        .when().post("/__fleet/mcp").then().statusCode(200).extract().asString();
+        JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
+
+        for (JsonNode registeredTool : tools) {
+            JsonNode properties = registeredTool.path("inputSchema").path("properties");
+            properties.fields().forEachRemaining(property -> assertFalse(
+                    property.getValue().path("description").asText().isBlank(),
+                    registeredTool.path("name").asText() + "." + property.getKey()));
+            if (properties.has("mockId")) {
+                assertEquals("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+                        properties.path("mockId").path("pattern").asText(),
+                        registeredTool.path("name").asText());
+                assertEquals(63, properties.path("mockId").path("maxLength").asInt(),
+                        registeredTool.path("name").asText());
+            }
+        }
+
+        for (String name : List.of("list_mocks", "list_mock_configs", "list_stubs", "list_unmatched_stubs",
+                "find_requests", "list_unmatched_requests", "get_near_misses", "list_body_files",
+                "list_scenarios")) {
+            JsonNode limit = tool(tools, name).path("inputSchema").path("properties").path("limit");
+            assertEquals(1, limit.path("minimum").asInt(), name);
+            assertEquals(200, limit.path("maximum").asInt(), name);
+        }
+
+        assertEquals(List.of("futureOnly", "restartActive"), textValues(tool(tools, "delete_mock_config")
+                .path("inputSchema").path("properties").path("applyMode").path("enum")));
+        for (String name : List.of("send_request", "put_body_file")) {
+            JsonNode body = tool(tools, name).path("inputSchema").path("properties").path("body");
+            assertFalse(body.path("description").asText().isBlank(), name);
+            JsonNode size = body.path("properties").path("sizeBytes");
+            assertFalse(size.path("description").asText().isBlank(), name);
+            assertEquals(1_048_576, size.path("maximum").asInt(), name);
+        }
+        assertFalse(tool(tools, "send_request").path("inputSchema").path("properties")
+                .path("headers").path("description").asText().isBlank());
+    }
+
+    @Test
     void initializesStreamableHttpAtFleetPath() {
         given()
                 .contentType("application/json")

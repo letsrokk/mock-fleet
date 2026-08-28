@@ -21,6 +21,7 @@ public final class WireMockAdminClient {
     private static final String RECOVERY_METADATA_KEY = "_mockFleetMcpRecovery";
     private static final String RECORDER_DISCARD_METADATA_KEY = "_mockFleetMcpRecorderDiscarded";
     private static final int MAPPING_SCAN_PAGE_SIZE = 200;
+    private static final int BODY_FILE_STALE_HANDLE_ATTEMPTS = 3;
 
     private static final Map<String, List<String>> JSON_HEADERS = Map.of(
             "accept", List.of("application/json"),
@@ -301,8 +302,20 @@ public final class WireMockAdminClient {
     }
 
     public TransportResponse getBodyFile(String mockId, String fileName) {
-        return send(mockId, new TransportRequest(HttpMethod.GET,
-                "/__admin/files/" + BodyFileName.toUrlPath(fileName), Map.of(), new byte[0]));
+        TransportRequest request = new TransportRequest(HttpMethod.GET,
+                "/__admin/files/" + BodyFileName.toUrlPath(fileName), Map.of(), new byte[0]);
+        McpOperationException lastFailure = null;
+        for (int attempt = 0; attempt < BODY_FILE_STALE_HANDLE_ATTEMPTS; attempt++) {
+            try {
+                return send(mockId, request);
+            } catch (McpOperationException failure) {
+                if (!isStaleFileHandle(failure)) {
+                    throw failure;
+                }
+                lastFailure = failure;
+            }
+        }
+        throw lastFailure;
     }
 
     public void putBodyFile(String mockId, String fileName, byte[] content) {
@@ -989,5 +1002,11 @@ public final class WireMockAdminClient {
 
     private static boolean isNotFound(McpOperationException error) {
         return "WIREMOCK_ADMIN_ERROR".equals(error.code()) && Integer.valueOf(404).equals(error.details().get("status"));
+    }
+
+    private static boolean isStaleFileHandle(McpOperationException error) {
+        return "WIREMOCK_ADMIN_ERROR".equals(error.code())
+                && Integer.valueOf(500).equals(error.details().get("status"))
+                && String.valueOf(error.details().get("body")).contains("Stale file handle");
     }
 }

@@ -36,6 +36,44 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void retriesBodyFileReadAfterStaleS3FileHandle() {
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(200, "hello");
+
+        TransportResponse response = client.getBodyFile("orders", "payload.txt");
+
+        assertEquals("hello", response.bodyAsString());
+        assertEquals(2, transport.requestCount());
+        assertEquals("/__admin/files/payload.txt", transport.requestAt(0).target());
+        assertEquals("/__admin/files/payload.txt", transport.requestAt(1).target());
+    }
+
+    @Test
+    void doesNotRetryUnrelatedBodyFileServerErrors() {
+        transport.respond(500, "unexpected failure");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.getBodyFile("orders", "payload.txt"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertEquals(1, transport.requestCount());
+    }
+
+    @Test
+    void boundsStaleS3FileHandleRetries() {
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.getBodyFile("orders", "payload.txt"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.retryable());
+        assertEquals(3, transport.requestCount());
+    }
+
+    @Test
     void createStubDropsServerManagedFieldsAndAlwaysCreatesTemporaryMapping() throws Exception {
         transport.respond(201, "{\"id\":\"server-id\",\"persistent\":false}");
         ObjectNode input = (ObjectNode) mapper.readTree("""

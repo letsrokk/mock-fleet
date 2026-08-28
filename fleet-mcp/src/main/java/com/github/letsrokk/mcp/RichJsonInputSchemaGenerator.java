@@ -9,9 +9,15 @@ import jakarta.inject.Singleton;
 @Singleton
 public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<JsonObject> {
 
+    private final FleetMcpConfig config;
+
+    public RichJsonInputSchemaGenerator(FleetMcpConfig config) {
+        this.config = config;
+    }
+
     @Override
     public JsonObject generate(ToolManager.ToolInfo tool) {
-        JsonObject properties = new JsonObject().put("mockId", string("Mock ID"));
+        JsonObject properties = new JsonObject().put("mockId", mockId());
         JsonArray required = new JsonArray().add("mockId");
         switch (tool.name()) {
             case "create_stub" -> addMapping(properties, required, false);
@@ -68,8 +74,9 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
     }
 
     private void addPagination(JsonObject properties) {
-        properties.put("limit", new JsonObject().put("type", "integer").put("minimum", 1));
-        properties.put("cursor", new JsonObject().put("type", "string"));
+        properties.put("limit", new JsonObject().put("type", "integer")
+                .put("description", "Page size").put("minimum", 1).put("maximum", config.maxPageSize()));
+        properties.put("cursor", string("Opaque continuation cursor"));
     }
 
     private JsonObject jsonObject(String description, JsonArray examples) {
@@ -79,5 +86,10 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
 
     private JsonObject string(String description) {
         return new JsonObject().put("type", "string").put("description", description);
+    }
+
+    private JsonObject mockId() {
+        return string("Mock ID").put("pattern", MockIdValidator.pattern())
+                .put("maxLength", MockIdValidator.maxLength());
     }
 }

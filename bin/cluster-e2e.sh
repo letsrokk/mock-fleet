@@ -204,6 +204,16 @@ empty_bucket_probe_allows_ownership() {
   [[ $1 -eq 0 && "$2" == 0 ]]
 }
 
+write_bucket_ownership_marker() {
+  run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
+    --body /etc/hosts --metadata "ownershiptoken=${ownership_token}"
+}
+
+create_recording_target() {
+  kubectl create deployment recording-target --namespace "${namespace}" \
+    --image=hashicorp/http-echo:0.2.3 -- /http-echo --listen=:5678 --text=recorded
+}
+
 helm_deploy() {
   local selected_wiremock_image=$1
   local selected_pull_policy=$2
@@ -258,6 +268,10 @@ extract_mcp_json() {
   printf '%s\n' "${data}"
 }
 
+extract_mcp_session_id() {
+  awk 'tolower($1) == "mcp-session-id:" {gsub("\r", "", $2); print $2}' | tail -n 1
+}
+
 mcp_post() {
   local payload=$1
   local headers_file="${work_dir}/mcp-headers"
@@ -271,14 +285,29 @@ mcp_post() {
   extract_mcp_json "${body_file}"
 }
 
+mcp_notify() {
+  local payload=$1
+  local status
+  if ! status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+      -H "Mcp-Session-Id: ${mcp_session}" -H 'Mcp-Protocol-Version: 2025-11-25' \
+      --data "${payload}" "http://127.0.0.1:${mcp_port}/__fleet/mcp"); then
+    return 1
+  fi
+  if [[ "${status}" != 202 ]]; then
+    printf '[cluster-e2e] ERROR: MCP notification returned HTTP %s instead of 202.\n' "${status}" >&2
+    return 1
+  fi
+}
+
 initialize_mcp() {
   local payload response
   payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cluster-e2e","version":"1"}}}'
   response=$(mcp_post "${payload}")
   assert_jq "${response}" '.result.protocolVersion == "2025-11-25"' "MCP initialization failed"
-  mcp_session=$(awk 'BEGIN{IGNORECASE=1} /^Mcp-Session-Id:/{gsub("\r", "", $2); print $2}' "${work_dir}/mcp-headers" | tail -n 1)
+  mcp_session=$(extract_mcp_session_id <"${work_dir}/mcp-headers")
   [[ -n "${mcp_session}" ]] || fail "MCP initialization did not return Mcp-Session-Id."
-  mcp_post '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+  mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 }
 
 mcp_tool_raw() {
@@ -344,6 +373,10 @@ poll_mcp_success() {
   cat "${result_file}"
 }
 
+create_stub_when_ready() {
+  poll_mcp_success create_stub "$1"
+}
+
 poll_mcp_attempt() {
   local tool=$1
   local arguments=$2
@@ -385,6 +418,16 @@ start_api_port_forward() {
   api_pf_pid=$!
   poll_until "API port-forward" curl --silent --fail --output /dev/null \
     "http://127.0.0.1:${api_port}/__fleet/api/config"
+}
+
+restart_one_api_replica() {
+  local old_pod
+  old_pod=$(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
+  kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
+  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" \
+    --timeout="${timeout_seconds}s"
+  start_api_port_forward
 }
 
 api_mock_failed() {
@@ -510,10 +553,7 @@ run_contracts() {
     "Config conflict omitted reconciliation versions"
 
   log "Restarting one API replica and checking fresh-replica config."
-  local old_pod
-  old_pod=$(kubectl get pods --namespace "${namespace}" -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
-  kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
-  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
+  restart_one_api_replica
   verify_api_replicas "${main_mock}" --disable-banner
 
   log "Checking deterministic cold-start retry and STARTING cleanup."
@@ -556,7 +596,7 @@ run_contracts() {
 
   log "Checking recoverable persistent update and restart survival."
   config=$(cat "${fixture_dir}/persistent-stub.json")
-  result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
+  result=$(create_stub_when_ready "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
   stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
   [[ -n "${stub_id}" && "${stub_id}" != null ]] || fail "create_stub did not return a stub ID: ${result}"
   mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
@@ -699,6 +739,65 @@ self_test() {
   local dry_output
   dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
   grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."
+  local marker_command
+  marker_command=$(
+    run_s3_cli() { printf '%s\n' "$*"; }
+    write_bucket_ownership_marker
+  )
+  grep -Fq -- '--body /etc/hosts' <<<"${marker_command}" \
+    || fail "Ownership marker upload does not pass a regular file to AWS CLI."
+  log "Ownership marker upload contract passed."
+  local recording_command
+  recording_command=$(
+    kubectl() { printf '%s\n' "$*"; }
+    create_recording_target
+  )
+  grep -Fq -- '-- /http-echo --listen=:5678 --text=recorded' <<<"${recording_command}" \
+    || fail "Recording target does not invoke the image binary explicitly."
+  log "Recording target command contract passed."
+  local parsed_session
+  parsed_session=$(printf 'mcp-session-id: self-test-session\r\n' | extract_mcp_session_id)
+  [[ "${parsed_session}" == self-test-session ]] \
+    || fail "MCP session parsing is not portable across HTTP header casing."
+  log "MCP session header contract passed."
+  if ! (
+    curl() { printf '202'; }
+    mcp_session=self-test-session
+    mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  ); then
+    fail "MCP notification helper rejected the protocol's empty 202 response."
+  fi
+  if (
+    curl() { printf '200'; }
+    mcp_session=self-test-session
+    mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null 2>&1
+  ); then
+    fail "MCP notification helper accepted a non-202 response."
+  fi
+  log "MCP notification response contract passed."
+  local api_restart_commands
+  api_restart_commands=$(
+    kubectl() {
+      if [[ "$1 $2" == 'get pods' ]]; then
+        printf 'api-self-test-pod\n'
+      else
+        printf 'kubectl %s\n' "$*"
+      fi
+    }
+    start_api_port_forward() { printf 'api-port-forward-restarted\n'; }
+    restart_one_api_replica
+  )
+  grep -Fq 'api-port-forward-restarted' <<<"${api_restart_commands}" \
+    || fail "API replica restart contract left a stale pod-bound port-forward."
+  log "API replica transport restart contract passed."
+  local cold_start_create_command
+  cold_start_create_command=$(
+    poll_mcp_success() { printf '%s\n' "$*"; }
+    create_stub_when_ready '{"mockId":"self-test","mapping":{}}'
+  )
+  grep -Fq 'create_stub {"mockId":"self-test","mapping":{}}' <<<"${cold_start_create_command}" \
+    || fail "Cold-start stub creation does not use the retryable MCP polling path."
+  log "Cold-start mutation retry contract passed."
   local starting_result='{"isError":true,"structuredContent":{"error":{"code":"MOCK_STARTING","message":"Mock self-test is still starting","retryable":true,"stateMayHaveChanged":false,"details":{"mockId":"self-test","status":"STARTING","retryAfterMs":1000}}}}'
   assert_mock_starting_contract "${starting_result}" self-test
   if ( assert_mock_starting_contract '{"isError":false}' self-test >/dev/null 2>&1 ); then
@@ -825,14 +924,12 @@ else
 fi
 empty_bucket_probe_allows_ownership "${bucket_empty_probe_status}" "${bucket_object_count}" \
   || fail "Cannot claim ownership of ${bucket}; the new bucket is not provably empty."
-run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
-  --body /dev/null --metadata "ownershiptoken=${ownership_token}" >/dev/null 2>&1 \
+write_bucket_ownership_marker >/dev/null 2>&1 \
   || fail "Unable to write the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 bucket_ownership_marker_matches \
   || fail "Unable to verify the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 
-kubectl create deployment recording-target --namespace "${namespace}" \
-  --image=hashicorp/http-echo:0.2.3 -- --listen=:5678 --text=recorded >/dev/null
+create_recording_target >/dev/null
 kubectl expose deployment recording-target --namespace "${namespace}" --port=5678 --target-port=5678 >/dev/null
 kubectl rollout status deployment/recording-target --namespace "${namespace}" --timeout="${timeout_seconds}s"
 
