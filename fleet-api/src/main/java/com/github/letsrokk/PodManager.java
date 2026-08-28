@@ -209,14 +209,15 @@ public class PodManager {
     private MockPodRef startClaimedMockSerialized(String mockId, String attemptId, String previousPodName) {
         try {
             requireCurrentStartingAttempt(mockId, attemptId);
-            if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
+            if (previousPodName != null && !previousPodName.isBlank()
+                    && !deletePod(previousPodName, mockId)) {
                 throw new PodCreationException(
                         "Failed to delete stale startup pod '" + previousPodName + "' before retry.");
             }
             requireCurrentStartingAttempt(mockId, attemptId);
             MockPodRef pod = spawnPod(mockId, attemptId);
             if (!podState.completeStart(mockId, attemptId, pod, Instant.now().toEpochMilli())) {
-                if (!deletePod(pod)) {
+                if (!deletePod(pod, mockId)) {
                     throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
                             + pod.podName() + "' could not be confirmed.");
                 }
@@ -235,7 +236,7 @@ public class PodManager {
         if (podName == null || podName.isBlank()) {
             return failure;
         }
-        boolean deleted = deletePod(podName);
+        boolean deleted = deletePod(podName, mockId);
         try {
             podState.removeLastAccessTime(podName);
         } catch (RuntimeException cleanupFailure) {
@@ -366,7 +367,7 @@ public class PodManager {
         if (stopped.podName() == null || stopped.podName().isBlank()) {
             return DeleteMockResult.STOPPED;
         }
-        if (!deletePod(stopped.podName())) {
+        if (!deletePod(stopped.podName(), mockId)) {
             return DeleteMockResult.FAILED;
         }
 
@@ -408,7 +409,7 @@ public class PodManager {
         if (attemptId == null) {
             podState.markStartupPodName(mockId, pod.getMetadata().getName());
         } else if (!podState.isCurrentStartingAttempt(mockId, attemptId)) {
-            if (!deletePod(pod)) {
+            if (!deletePod(pod, mockId)) {
                 throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
                         + pod.getMetadata().getName() + "' could not be confirmed.");
             }
@@ -572,7 +573,7 @@ public class PodManager {
             long diff = now - lastAccess;
             if (diff > inactivityThreshold.toMillis()) {
 
-                boolean deleted = deletePod(pod);
+                boolean deleted = deletePod(pod, mockId);
 
                 if (deleted) {
                     LOG.infof("Pod '%s' deleted for mock id '%s' after %dms of inactivity.",
@@ -614,7 +615,10 @@ public class PodManager {
             String podName = p.getMetadata().getName();
             boolean isOrphaned = !ownedPods.contains(podName);
             if (isOrphaned) {
-                boolean deleted = deletePod(p);
+                String mockId = p.getMetadata().getLabels() == null
+                        ? null
+                        : p.getMetadata().getLabels().get(PodFactory.LABEL_MOCK_ID);
+                boolean deleted = deletePod(p, mockId);
                 if (deleted) {
                     LOG.infof("Orphaned pod '%s' deleted in namespace '%s'.", podName, namespace);
                 } else {
@@ -633,30 +637,31 @@ public class PodManager {
                 || nowEpochMillis - lifecycle.startedAtEpochMillis() < leaseMillis;
     }
 
-    boolean deletePod(Pod pod) {
-        String podName = pod.getMetadata().getName();
-        try {
-            var podResource = kubernetesClient.resource(pod);
-            List<StatusDetails> details = podResource.delete();
-            if (!wasDeleteSuccessful(details)) {
-                return podResource.get() == null;
-            }
-            return waitForPodToBeDeleted(podName, podResource::get);
-        } catch (RuntimeException failure) {
-            LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
+    boolean deletePod(Pod pod, String mockId) {
+        if (pod == null || pod.getMetadata() == null) {
             return false;
         }
+        return deletePod(pod.getMetadata().getName(), mockId);
     }
 
-    boolean deletePod(MockPodRef pod) {
-        return deletePod(pod.podName());
+    boolean deletePod(MockPodRef pod, String mockId) {
+        return deletePod(pod.podName(), mockId);
     }
 
-    boolean deletePod(String podName) {
+    boolean deletePod(String podName, String mockId) {
         try {
             var podResource = kubernetesClient.pods()
                     .inNamespace(currentNamespace())
                     .withName(podName);
+            Pod currentPod = podResource.get();
+            if (currentPod == null) {
+                return true;
+            }
+            if (!isOwnedManagedPod(currentPod, mockId)) {
+                LOG.warnf("Refusing to delete pod '%s' because it is not owned by mock id '%s'.",
+                        podName, mockId);
+                return false;
+            }
             List<StatusDetails> details = podResource.delete();
             if (!wasDeleteSuccessful(details)) {
                 return podResource.get() == null;
@@ -666,6 +671,18 @@ public class PodManager {
             LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
             return false;
         }
+    }
+
+    private boolean isOwnedManagedPod(Pod pod, String mockId) {
+        if (mockId == null || mockId.isBlank()
+                || pod == null || pod.getMetadata() == null
+                || pod.getMetadata().getLabels() == null) {
+            return false;
+        }
+        Map<String, String> labels = pod.getMetadata().getLabels();
+        return PodFactory.APP_NAME_VALUE.equals(labels.get(PodFactory.LABEL_APP_NAME))
+                && PodFactory.MANAGED_BY_VALUE.equals(labels.get(PodFactory.LABEL_MANAGED_BY))
+                && mockId.equals(labels.get(PodFactory.LABEL_MOCK_ID));
     }
 
     private boolean waitForPodToBeDeleted(String podName, Supplier<Pod> podLookup) {

@@ -4,8 +4,10 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -24,6 +26,7 @@ public class PodFactory {
     static final String WIREMOCK_ROOT_DIR = "/home/wiremock";
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
+    static final long INIT_CONTAINER_USER_ID = 1000L;
     static final String STORAGE_TYPE_S3 = "s3";
 
     private final MockFleetConfig config;
@@ -49,6 +52,7 @@ public class PodFactory {
                 .withImagePullPolicy(config.wiremockImagePullPolicy())
                 .withName(config.wiremockContainerName())
                 .withImage(config.wiremockImage())
+                .withSecurityContext(restrictedContainerSecurityContext(null))
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
@@ -101,6 +105,7 @@ public class PodFactory {
                     .withName(INIT_MAPPINGS_CONTAINER)
                     .withImage(INIT_CONTAINER_IMAGE)
                     .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
+                    .withSecurityContext(restrictedContainerSecurityContext(INIT_CONTAINER_USER_ID))
                     .addNewVolumeMount()
                         .withName(WIREMOCK_MAPPINGS_VOLUME)
                         .withMountPath(storageMountPath)
@@ -119,6 +124,13 @@ public class PodFactory {
 
         PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
                 .withContainers(container)
+                .withAutomountServiceAccountToken(false)
+                .withSecurityContext(new PodSecurityContextBuilder()
+                        .withRunAsNonRoot(true)
+                        .withNewSeccompProfile()
+                            .withType("RuntimeDefault")
+                        .endSeccompProfile()
+                        .build())
                 .withTerminationGracePeriodSeconds(config.wiremockTerminationGracePeriodSeconds())
                 .withRestartPolicy("Never");
 
@@ -146,5 +158,21 @@ public class PodFactory {
                 .endMetadata()
                 .withSpec(podSpecBuilder.build())
                 .build();
+    }
+
+    private io.fabric8.kubernetes.api.model.SecurityContext restrictedContainerSecurityContext(Long runAsUser) {
+        SecurityContextBuilder securityContext = new SecurityContextBuilder()
+                .withRunAsNonRoot(true)
+                .withAllowPrivilegeEscalation(false)
+                .withNewCapabilities()
+                    .withDrop("ALL")
+                .endCapabilities()
+                .withNewSeccompProfile()
+                    .withType("RuntimeDefault")
+                .endSeccompProfile();
+        if (runAsUser != null) {
+            securityContext.withRunAsUser(runAsUser);
+        }
+        return securityContext.build();
     }
 }

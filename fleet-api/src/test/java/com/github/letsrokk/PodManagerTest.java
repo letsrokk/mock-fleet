@@ -190,7 +190,7 @@ class PodManagerTest {
             }
 
             @Override
-            boolean deletePod(String podName) {
+            boolean deletePod(String podName, String mockId) {
                 deletionAttempted.set(true);
                 return true;
             }
@@ -229,7 +229,7 @@ class PodManagerTest {
             }
 
             @Override
-            boolean deletePod(String podName) {
+            boolean deletePod(String podName, String mockId) {
                 return false;
             }
         };
@@ -263,7 +263,7 @@ class PodManagerTest {
             }
 
             @Override
-            boolean deletePod(String podName) {
+            boolean deletePod(String podName, String mockId) {
                 return true;
             }
         };
@@ -512,7 +512,7 @@ class PodManagerTest {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager() {
             @Override
-            boolean deletePod(String podName) {
+            boolean deletePod(String podName, String mockId) {
                 return false;
             }
         };
@@ -582,7 +582,7 @@ class PodManagerTest {
             }
 
             @Override
-            boolean deletePod(MockPodRef pod) {
+            boolean deletePod(MockPodRef pod, String mockId) {
                 latePodDeleted.set(true);
                 return true;
             }
@@ -636,12 +636,12 @@ class PodManagerTest {
 
         PodManager podManager = new PodManager() {
             @Override
-            boolean deletePod(Pod pod) {
+            boolean deletePod(Pod pod, String mockId) {
                 return false;
             }
 
             @Override
-            boolean deletePod(String podName) {
+            boolean deletePod(String podName, String mockId) {
                 return false;
             }
         };
@@ -783,10 +783,80 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName("mock-fleet-demo-1")).thenReturn(podResource);
         when(podResource.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(podResource.get()).thenReturn(managedPod(pod.podName(), "demo")).thenReturn(null);
 
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
         verify(podState).stop("demo");
+        verify(podResource).delete();
         verify(kubernetesClient, never()).services();
+    }
+
+    @Test
+    void deleteMockTreatsAnAbsentOwnedPodAsIdempotentlyDeleted() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
+        when(podResource.get()).thenReturn(null);
+
+        assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
+        verify(podResource, never()).delete();
+        verify(podState).confirmStopped("demo", pod.podName());
+    }
+
+    @Test
+    void deleteMockRejectsAnUnrelatedPodWithoutDeletingIt() {
+        assertDeleteMockRejectsPod(new PodBuilder()
+                .withNewMetadata()
+                    .withName("mock-fleet-demo-1")
+                    .addToLabels(PodFactory.LABEL_APP_NAME, "unrelated")
+                    .addToLabels(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
+                    .addToLabels(PodFactory.LABEL_MOCK_ID, "demo")
+                .endMetadata()
+                .build());
+    }
+
+    @Test
+    void deleteMockRejectsAPodOwnedByAnotherMockWithoutDeletingIt() {
+        assertDeleteMockRejectsPod(managedPod("mock-fleet-demo-1", "another-mock"));
+    }
+
+    private void assertDeleteMockRejectsPod(Pod currentPod) {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+
+        MockPodRef pod = new MockPodRef(currentPod.getMetadata().getName(), "10.0.0.1");
+        when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
+        when(podResource.get()).thenReturn(currentPod);
+
+        assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
+        verify(podResource, never()).delete();
+        verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
     @Test
@@ -804,7 +874,7 @@ class PodManagerTest {
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
         MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
-        Pod deleting = new PodBuilder().withNewMetadata().withName(pod.podName()).endMetadata().build();
+        Pod deleting = managedPod(pod.podName(), "demo");
         when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
         when(kubernetesClient.getNamespace()).thenReturn("test");
         when(kubernetesClient.pods()).thenReturn(podOperations);
@@ -833,7 +903,7 @@ class PodManagerTest {
         podManager.podCreationTimeout = Duration.ZERO;
 
         MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
-        Pod deleting = new PodBuilder().withNewMetadata().withName(pod.podName()).endMetadata().build();
+        Pod deleting = managedPod(pod.podName(), "demo");
         when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
         when(kubernetesClient.getNamespace()).thenReturn("test");
         when(kubernetesClient.pods()).thenReturn(podOperations);
@@ -867,7 +937,8 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
         when(podResource.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
-        when(podResource.get()).thenThrow(new RuntimeException("Kubernetes API unavailable"));
+        when(podResource.get()).thenReturn(managedPod(pod.podName(), "demo"))
+                .thenThrow(new RuntimeException("Kubernetes API unavailable"));
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
         verify(podState, never()).confirmStopped("demo", pod.podName());
@@ -893,8 +964,7 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName("mock-fleet-demo-1")).thenReturn(podResource);
         when(podResource.delete()).thenReturn(List.of());
-        when(podResource.get()).thenReturn(new PodBuilder()
-                .withNewMetadata().withName("mock-fleet-demo-1").endMetadata().build());
+        when(podResource.get()).thenReturn(managedPod(pod.podName(), "demo"));
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
         verify(podState, never()).removePod("demo");
@@ -952,6 +1022,7 @@ class PodManagerTest {
         when(podState.getLastAccessTime("current-pod")).thenReturn(System.currentTimeMillis());
         when(podState.getLastAccessTime("unknown-pod")).thenReturn(null);
         when(stalePodResource.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(stalePodResource.get()).thenReturn(managedPod("stale-pod", "stale")).thenReturn(null);
         org.mockito.Mockito.doAnswer(invocation -> {
             @SuppressWarnings("unchecked")
             BiConsumer<String, MockPodRef> consumer = invocation.getArgument(0);
@@ -964,6 +1035,7 @@ class PodManagerTest {
         podManager.cleanUpIdlePods();
 
         verify(podState).removePod("stale");
+        verify(stalePodResource).delete();
         verify(namespacedPods).withName("stale-pod");
         verify(namespacedPods, never()).withName("current-pod");
         verify(namespacedPods, never()).withName("unknown-pod");
@@ -982,6 +1054,7 @@ class PodManagerTest {
         MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
         @SuppressWarnings("unchecked")
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource orphanPodResource = mock(PodResource.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
@@ -989,9 +1062,9 @@ class PodManagerTest {
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
-        Pod ownedPod = pod("owned-pod", "Running");
-        Pod startingPod = pod("starting-pod", "Pending", false);
-        Pod orphanPod = pod("orphan-pod", "Running");
+        Pod ownedPod = managedPod("owned-pod", "owned");
+        Pod startingPod = managedPod("starting-pod", "starting");
+        Pod orphanPod = managedPod("orphan-pod", "orphan");
         PodList podList = new PodList();
         podList.setItems(List.of(ownedPod, startingPod, orphanPod));
 
@@ -1005,14 +1078,17 @@ class PodManagerTest {
         when(pods.values()).thenReturn(List.of(new MockPodRef("owned-pod", "10.0.0.1")));
         when(lifecycles.values()).thenReturn(List.of(
                 MockPodLifecycle.starting("attempt-1", "starting-pod", Long.MAX_VALUE)));
-        when(kubernetesClient.resource(orphanPod).delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(namespacedPods.withName("orphan-pod")).thenReturn(orphanPodResource);
+        when(orphanPodResource.get()).thenReturn(orphanPod).thenReturn(null);
+        when(orphanPodResource.delete()).thenReturn(
+                List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
 
         podManager.cleanUpOrphanedPods();
 
         verify(namespacedPods).withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE);
-        verify(kubernetesClient.resource(orphanPod)).delete();
-        verify(kubernetesClient.resource(ownedPod), never()).delete();
-        verify(kubernetesClient.resource(startingPod), never()).delete();
+        verify(orphanPodResource).delete();
+        verify(namespacedPods, never()).withName("owned-pod");
+        verify(namespacedPods, never()).withName("starting-pod");
         verify(kubernetesClient, never()).services();
     }
 
@@ -1031,7 +1107,7 @@ class PodManagerTest {
         AtomicBoolean deleted = new AtomicBoolean();
         PodManager podManager = new PodManager() {
             @Override
-            boolean deletePod(Pod pod) {
+            boolean deletePod(Pod pod, String mockId) {
                 deleted.set(true);
                 return true;
             }
@@ -1111,6 +1187,11 @@ class PodManagerTest {
         MockFleetConfig config = mock(MockFleetConfig.class);
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource deleteHandle = mock(PodResource.class);
         PodManager podManager = new PodManager();
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
@@ -1120,7 +1201,8 @@ class PodManagerTest {
         podManager.podCreationTimeout = Duration.ofSeconds(1);
 
         Pod podSpec = podWithGenerateName("mock-fleet-demo-");
-        Pod createdPod = pod("mock-fleet-demo-attempt-1", "Pending", false);
+        Pod createdPod = managedPod("mock-fleet-demo-attempt-1", "demo");
+        createdPod.setStatus(pod("mock-fleet-demo-attempt-1", "Pending", false).getStatus());
         when(config.namespace()).thenReturn("mock-fleet");
         when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
         when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
@@ -1129,16 +1211,18 @@ class PodManagerTest {
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
-        when(kubernetesClient.resource(createdPod)).thenReturn(podHandle);
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName("mock-fleet-demo-attempt-1")).thenReturn(deleteHandle);
         when(podState.markStartupPodName("demo", "attempt-1", "mock-fleet-demo-attempt-1")).thenReturn(true);
         when(podState.isCurrentStartingAttempt("demo", "attempt-1")).thenReturn(false);
-        when(podHandle.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
-        when(podHandle.get()).thenReturn(createdPod).thenReturn(null);
+        when(deleteHandle.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(deleteHandle.get()).thenReturn(createdPod).thenReturn(null);
 
         assertThrows(PodCreationException.class, () -> podManager.spawnPod("demo", "attempt-1"));
 
-        verify(podHandle).delete();
-        verify(podHandle, times(2)).get();
+        verify(deleteHandle).delete();
+        verify(deleteHandle, times(2)).get();
     }
 
     @Test
@@ -1492,6 +1576,17 @@ class PodManagerTest {
     private Pod podWithGenerateName(String generateName) {
         return new PodBuilder()
                 .withMetadata(new ObjectMetaBuilder().withGenerateName(generateName).build())
+                .build();
+    }
+
+    private Pod managedPod(String name, String mockId) {
+        return new PodBuilder()
+                .withNewMetadata()
+                    .withName(name)
+                    .addToLabels(PodFactory.LABEL_APP_NAME, PodFactory.APP_NAME_VALUE)
+                    .addToLabels(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
+                    .addToLabels(PodFactory.LABEL_MOCK_ID, mockId)
+                .endMetadata()
                 .build();
     }
 
