@@ -1,10 +1,13 @@
 package com.github.letsrokk;
 
 import com.github.letsrokk.exceptions.PodCreationException;
+import io.fabric8.kubernetes.api.model.DeleteOptions;
+import io.fabric8.kubernetes.api.model.DeleteOptionsBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
-import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.utils.Utils;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.annotation.PreDestroy;
@@ -650,8 +653,9 @@ public class PodManager {
 
     boolean deletePod(String podName, String mockId) {
         try {
+            String namespace = currentNamespace();
             var podResource = kubernetesClient.pods()
-                    .inNamespace(currentNamespace())
+                    .inNamespace(namespace)
                     .withName(podName);
             Pod currentPod = podResource.get();
             if (currentPod == null) {
@@ -662,15 +666,35 @@ public class PodManager {
                         podName, mockId);
                 return false;
             }
-            List<StatusDetails> details = podResource.delete();
-            if (!wasDeleteSuccessful(details)) {
-                return podResource.get() == null;
+            String podUid = currentPod.getMetadata().getUid();
+            if (podUid == null || podUid.isBlank()) {
+                LOG.warnf("Refusing to delete pod '%s' because its UID is missing.", podName);
+                return false;
             }
+            DeleteOptions deleteOptions = new DeleteOptionsBuilder()
+                    .withApiVersion("v1")
+                    .withKind("DeleteOptions")
+                    .withNewPreconditions()
+                        .withUid(podUid)
+                    .endPreconditions()
+                    .build();
+            kubernetesClient.raw("DELETE", podDeletePath(namespace, podName), deleteOptions);
             return waitForPodToBeDeleted(podName, podResource::get);
+        } catch (KubernetesClientException failure) {
+            if (failure.getCode() == 404) {
+                return true;
+            }
+            LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
+            return false;
         } catch (RuntimeException failure) {
             LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
             return false;
         }
+    }
+
+    private String podDeletePath(String namespace, String podName) {
+        return "/api/v1/namespaces/" + Utils.toUrlEncoded(namespace)
+                + "/pods/" + Utils.toUrlEncoded(podName);
     }
 
     private boolean isOwnedManagedPod(Pod pod, String mockId) {
@@ -704,10 +728,6 @@ public class PodManager {
         }
         LOG.warnf("Pod '%s' was still present after the deletion timeout.", podName);
         return false;
-    }
-
-    boolean wasDeleteSuccessful(List<StatusDetails> details) {
-        return details != null && !details.isEmpty();
     }
 
     public record ActiveMockPod(String mockId, String podName) {

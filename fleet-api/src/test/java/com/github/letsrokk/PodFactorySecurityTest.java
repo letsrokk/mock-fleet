@@ -12,7 +12,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -51,8 +50,8 @@ class PodFactorySecurityTest {
         Container mappingsInit = pod.getSpec().getInitContainers().getFirst();
         assertRestricted(wireMock);
         assertRestricted(mappingsInit);
-        assertNotNull(mappingsInit.getSecurityContext().getRunAsUser(),
-                "the busybox init image needs an explicit non-root user");
+        assertEquals(1000L, mappingsInit.getSecurityContext().getRunAsUser(),
+                "the admission policy must mirror the exact init-container UID");
         assertEquals(resources, wireMock.getResources());
         assertEquals("mock-fleet-pvc",
                 pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
