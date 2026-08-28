@@ -33,12 +33,14 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 @ApplicationScoped
 public class PodManager {
 
     private static final Logger LOG = Logger.getLogger(PodManager.class);
+    private static final long START_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
     @Inject
     PodState podState;
@@ -117,26 +119,32 @@ public class PodManager {
             MockPodLifecycle lifecycle = claim.lifecycle();
             return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
         }
-        submitStart(mockId, claim.lifecycle().attemptId(), claim.previousPodName());
+        submitStart(mockId, claim.lifecycle().attemptId(), claim.previousPodName(), failure -> {
+            if (!podState.rollbackRejectedRestart(mockId, claim)) {
+                podState.failStart(mockId, claim.lifecycle().attemptId(), failure);
+            }
+        }, true);
         MockPodLifecycle lifecycle = claim.lifecycle();
         return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
     }
 
     private CompletionStage<MockPodRef> submitStart(String mockId, String attemptId, String previousPodName) {
+        return submitStart(mockId, attemptId, previousPodName,
+                failure -> podState.failStart(mockId, attemptId, failure), false);
+    }
+
+    private CompletionStage<MockPodRef> submitStart(String mockId, String attemptId, String previousPodName,
+                                                    Consumer<PodCreationException> cancelAttempt,
+                                                    boolean stateMayHaveChanged) {
         CompletableFuture<MockPodRef> completion = new CompletableFuture<>();
+        StartTask task = new StartTask(
+                mockId, attemptId, previousPodName, completion, cancelAttempt);
         try {
-            startExecutor.execute(() -> {
-                try {
-                    completion.complete(startClaimedMock(mockId, attemptId, previousPodName));
-                } catch (RuntimeException failure) {
-                    LOG.warnf(failure, "Failed to start pod for mock id '%s'.", mockId);
-                    completion.completeExceptionally(failure);
-                }
-            });
+            startExecutor.execute(task);
         } catch (RejectedExecutionException rejection) {
             PodCreationException failure = new PodCreationException("Mock start queue is full.");
-            podState.failStart(mockId, attemptId, failure);
-            throw new StartQueueFullException(mockId);
+            task.cancelBeforeStart(failure);
+            throw new StartQueueFullException(mockId, stateMayHaveChanged);
         }
         return completion;
     }
@@ -265,7 +273,67 @@ public class PodManager {
     @PreDestroy
     void closeStartExecutor() {
         if (startExecutor instanceof ExecutorService executorService) {
-            executorService.shutdownNow();
+            List<Runnable> abandoned = executorService.shutdownNow();
+            abandoned.forEach(task -> {
+                if (task instanceof StartTask startTask) {
+                    startTask.cancelBeforeStart(
+                            new PodCreationException("Mock start cancelled during shutdown."));
+                } else {
+                    LOG.warnf("Start executor abandoned an unowned task of type '%s'.",
+                            task.getClass().getName());
+                }
+            });
+            try {
+                if (!executorService.awaitTermination(
+                        START_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    LOG.errorf("Start executor did not terminate within %d seconds.",
+                            START_EXECUTOR_SHUTDOWN_TIMEOUT_SECONDS);
+                }
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                LOG.warn("Interrupted while waiting for the start executor to terminate.", error);
+            }
+        }
+    }
+
+    private final class StartTask implements Runnable {
+        private final String mockId;
+        private final String attemptId;
+        private final String previousPodName;
+        private final CompletableFuture<MockPodRef> completion;
+        private final Consumer<PodCreationException> cancelAttempt;
+
+        private StartTask(String mockId, String attemptId, String previousPodName,
+                          CompletableFuture<MockPodRef> completion,
+                          Consumer<PodCreationException> cancelAttempt) {
+            this.mockId = mockId;
+            this.attemptId = attemptId;
+            this.previousPodName = previousPodName;
+            this.completion = completion;
+            this.cancelAttempt = cancelAttempt;
+        }
+
+        @Override
+        public void run() {
+            try {
+                completion.complete(startClaimedMock(mockId, attemptId, previousPodName));
+            } catch (RuntimeException failure) {
+                LOG.warnf(failure, "Failed to start pod for mock id '%s'.", mockId);
+                completion.completeExceptionally(failure);
+            }
+        }
+
+        private void cancelBeforeStart(PodCreationException failure) {
+            try {
+                cancelAttempt.accept(failure);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+                LOG.warnf(cleanupFailure,
+                        "Failed to cancel queued start for mock id '%s', attempt '%s'.",
+                        mockId, attemptId);
+            } finally {
+                completion.completeExceptionally(failure);
+            }
         }
     }
 
@@ -640,13 +708,17 @@ public class PodManager {
 
     public static final class StartQueueFullException extends WebApplicationException {
         StartQueueFullException(String mockId) {
+            this(mockId, false);
+        }
+
+        StartQueueFullException(String mockId, boolean stateMayHaveChanged) {
             super("Mock start queue is full.", Response.status(Response.Status.SERVICE_UNAVAILABLE)
                     .type(MediaType.APPLICATION_JSON_TYPE)
                     .entity(new ApiError(
                             "MOCK_START_QUEUE_FULL",
                             "Mock start queue is full.",
                             true,
-                            false,
+                            stateMayHaveChanged,
                             Map.of("mockId", mockId)))
                     .build());
         }

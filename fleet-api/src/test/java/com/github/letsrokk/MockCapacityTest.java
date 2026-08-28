@@ -6,6 +6,8 @@ import com.hazelcast.core.HazelcastInstance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,9 +27,13 @@ import static org.mockito.Mockito.when;
 class MockCapacityTest {
 
     private HazelcastInstance hazelcast;
+    private HazelcastInstance secondHazelcast;
 
     @AfterEach
     void closeHazelcast() {
+        if (secondHazelcast != null) {
+            secondHazelcast.getLifecycleService().terminate();
+        }
         if (hazelcast != null) {
             hazelcast.getLifecycleService().terminate();
         }
@@ -35,9 +41,18 @@ class MockCapacityTest {
 
     @Test
     void concurrentClaimsAcrossCapacityInstancesCannotExceedTheActiveLimit() throws Exception {
-        hazelcast = newHazelcast();
+        String clusterName = "mock-capacity-joined-" + System.nanoTime();
+        int firstMemberPort = freePort();
+        int secondMemberPort = freePort();
+        List<String> members = List.of(
+                "127.0.0.1:" + firstMemberPort,
+                "127.0.0.1:" + secondMemberPort);
+        hazelcast = newJoinedHazelcast(clusterName, firstMemberPort, members);
+        secondHazelcast = newJoinedHazelcast(clusterName, secondMemberPort, members);
+        assertEquals(2, hazelcast.getCluster().getMembers().size());
+        assertEquals(2, secondHazelcast.getCluster().getMembers().size());
         MockCapacity firstReplica = new MockCapacity(hazelcast, config(2, 2, 2));
-        MockCapacity secondReplica = new MockCapacity(hazelcast, config(2, 2, 2));
+        MockCapacity secondReplica = new MockCapacity(secondHazelcast, config(2, 2, 2));
         CountDownLatch ready = new CountDownLatch(3);
         CountDownLatch claim = new CountDownLatch(1);
         AtomicInteger accepted = new AtomicInteger();
@@ -142,6 +157,33 @@ class MockCapacityTest {
     }
 
     @Test
+    void reconciledStaleAttemptCannotCompleteAfterAnotherMockTakesItsSlot() {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
+                HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        var pods = hazelcast.<String, MockPodRef>getMap(HazelcastMemberConfig.POD_MAP_NAME);
+        reservations.put("alpha", "attempt-alpha");
+        lifecycles.put("alpha", MockPodLifecycle.starting(
+                "attempt-alpha", "mock-fleet-alpha-attempt-alpha",
+                System.currentTimeMillis() - Duration.ofMinutes(3).toMillis()));
+
+        capacity.reconcile();
+        capacity.reserve("beta", "attempt-beta");
+        boolean completed = capacity.complete("alpha", "attempt-alpha", () -> {
+            pods.put("alpha", new MockPodRef("mock-fleet-alpha-attempt-alpha", "10.0.0.1"));
+            lifecycles.put("alpha", MockPodLifecycle.running(
+                    "attempt-alpha", "mock-fleet-alpha-attempt-alpha"));
+        });
+
+        assertEquals(false, completed);
+        assertEquals(null, pods.get("alpha"));
+        assertEquals(MockLifecycleStatus.STARTING, lifecycles.get("alpha").status());
+        assertEquals(1, capacity.activeCount());
+    }
+
+    @Test
     void reconciliationCannotObserveTheGapBetweenReservationAndStartingPublication() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
@@ -207,6 +249,29 @@ class MockCapacityTest {
         config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
         config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
         return Hazelcast.newHazelcastInstance(config);
+    }
+
+    private HazelcastInstance newJoinedHazelcast(String clusterName, int port, List<String> members) {
+        Config config = new Config();
+        config.setClusterName(clusterName);
+        config.setProperty("hazelcast.logging.type", "none");
+        config.setProperty("hazelcast.phone.home.enabled", "false");
+        config.getNetworkConfig().setPort(port).setPortAutoIncrement(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        var tcpIp = config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true);
+        for (String member : members) {
+            tcpIp.addMember(member);
+        }
+        return Hazelcast.newHazelcastInstance(config);
+    }
+
+    private int freePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot allocate a local test port.", error);
+        }
     }
 
     private MockFleetConfig config(int maxActive, int maxConcurrent, int queuedCapacity) {

@@ -86,6 +86,28 @@ public class MockCapacity {
         }
     }
 
+    public boolean complete(String mockId, String attemptId, Runnable publishRunning) {
+        Objects.requireNonNull(mockId, "mockId");
+        Objects.requireNonNull(attemptId, "attemptId");
+        Objects.requireNonNull(publishRunning, "publishRunning");
+        reservations.lock(CAPACITY_LOCK_KEY);
+        try {
+            if (!attemptId.equals(reservations.get(mockId))) {
+                return false;
+            }
+            try {
+                publishRunning.run();
+            } catch (RuntimeException failure) {
+                reservations.remove(mockId, attemptId);
+                throw failure;
+            }
+            reservations.remove(mockId, attemptId);
+            return true;
+        } finally {
+            reservations.unlock(CAPACITY_LOCK_KEY);
+        }
+    }
+
     public int activeCount() {
         reservations.lock(CAPACITY_LOCK_KEY);
         try {

@@ -1,6 +1,9 @@
 package com.github.letsrokk;
 
 import com.github.letsrokk.exceptions.PodCreationException;
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
@@ -110,6 +113,68 @@ class PodManagerTest {
             verify(podState, times(2)).completeStart(any(), any(), any(), any());
             podManager.closeStartExecutor();
             assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isShutdown());
+        }
+    }
+
+    @Test
+    void shutdownFailsRunningAndQueuedAttemptsWithoutLeavingCapacityOrStartingState() throws Exception {
+        Config hazelcastConfig = new Config();
+        hazelcastConfig.setClusterName("pod-manager-shutdown-" + System.nanoTime());
+        hazelcastConfig.setProperty("hazelcast.logging.type", "none");
+        hazelcastConfig.setProperty("hazelcast.phone.home.enabled", "false");
+        hazelcastConfig.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        hazelcastConfig.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(hazelcastConfig);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        when(config.maxActiveMocks()).thenReturn(2);
+        when(config.maxConcurrentStarts()).thenReturn(1);
+        when(config.queuedStartCapacity()).thenReturn(1);
+        when(config.podCreationTimeout()).thenReturn(Duration.ofSeconds(1));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        CountDownLatch runningEntered = new CountDownLatch(1);
+        AtomicBoolean runningInterrupted = new AtomicBoolean();
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                runningEntered.countDown();
+                try {
+                    new CountDownLatch(1).await();
+                    throw new AssertionError("shutdown did not interrupt the running start");
+                } catch (InterruptedException expected) {
+                    Thread.currentThread().interrupt();
+                    runningInterrupted.set(true);
+                    throw new PodCreationException("Mock start interrupted during shutdown.");
+                }
+            }
+        };
+        podManager.config = config;
+        podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        podManager.initializeStartExecutor();
+
+        try {
+            var running = podManager.getUpstreamBaseUrlAsync("running");
+            assertTrue(runningEntered.await(1, TimeUnit.SECONDS));
+            var queued = podManager.getUpstreamBaseUrlAsync("queued");
+            assertEquals(1, ((ThreadPoolExecutor) podManager.startExecutor).getQueue().size());
+
+            podManager.closeStartExecutor();
+
+            assertTrue(runningInterrupted.get());
+            assertTrue(running.toCompletableFuture().isCompletedExceptionally());
+            assertTrue(queued.toCompletableFuture().isCompletedExceptionally());
+            assertEquals(MockLifecycleStatus.FAILED, podState.lifecycle("running").status());
+            assertEquals(MockLifecycleStatus.FAILED, podState.lifecycle("queued").status());
+            assertEquals(0, capacity.activeCount());
+            assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isTerminated());
+        } finally {
+            podManager.closeStartExecutor();
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
         }
     }
 
@@ -387,6 +452,59 @@ class PodManagerTest {
         assertEquals(MockLifecycleStatus.STARTING, result.status());
         assertFalse(deletionCalled.get(), "Kubernetes deletion ran on the request thread");
         assertEquals(1, queued.size());
+    }
+
+    @Test
+    void rejectedRestartRestoresPriorRunningPodAndReportsPersistedStateChange() {
+        Config hazelcastConfig = new Config();
+        hazelcastConfig.setClusterName("pod-manager-restart-" + System.nanoTime());
+        hazelcastConfig.setProperty("hazelcast.logging.type", "none");
+        hazelcastConfig.setProperty("hazelcast.phone.home.enabled", "false");
+        hazelcastConfig.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        hazelcastConfig.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(hazelcastConfig);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        when(config.maxActiveMocks()).thenReturn(1);
+        when(config.maxConcurrentStarts()).thenReturn(1);
+        when(config.queuedStartCapacity()).thenReturn(1);
+        when(config.podCreationTimeout()).thenReturn(Duration.ofSeconds(1));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        MockPodRef priorPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        podState.getPods().put("demo", priorPod);
+        podState.getPodLifecycles().put("demo", MockPodLifecycle.running(
+                "attempt-old", priorPod.podName()));
+        podState.setLastAccessTime(priorPod.podName(), 1_234L);
+        PodManager podManager = new PodManager();
+        podManager.config = config;
+        podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        podManager.startExecutor = task -> {
+            throw new java.util.concurrent.RejectedExecutionException("saturated");
+        };
+
+        try {
+            PodManager.StartQueueFullException rejection = assertThrows(
+                    PodManager.StartQueueFullException.class,
+                    () -> podManager.restartActive("demo"));
+
+            ApiError error = (ApiError) rejection.getResponse().getEntity();
+            assertEquals(true, error.stateMayHaveChanged());
+            assertEquals(priorPod, podState.getPod("demo"));
+            assertEquals(MockLifecycleStatus.RUNNING, podState.lifecycle("demo").status());
+            assertEquals(1_234L, podState.getLastAccessTime(priorPod.podName()));
+            assertEquals(null, hazelcast.<String, String>getMap(
+                    MockCapacity.RESERVATION_MAP_NAME).get("demo"));
+            assertEquals(1, capacity.activeCount());
+            assertEquals("http://10.0.0.1:8080",
+                    podManager.getUpstreamBaseUrlAsync("demo").toCompletableFuture().join());
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
     }
 
     @Test
