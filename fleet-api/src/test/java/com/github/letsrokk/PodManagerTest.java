@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -321,6 +322,63 @@ class PodManagerTest {
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
         verify(podState).stop("demo");
         verify(kubernetesClient, never()).services();
+    }
+
+    @Test
+    void deleteMockWaitsForPodRemovalBeforeConfirmingStopped() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        Pod deleting = new PodBuilder().withNewMetadata().withName(pod.podName()).endMetadata().build();
+        when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
+        when(podResource.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(podResource.get()).thenReturn(deleting).thenReturn(null);
+
+        assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
+        verify(podResource, times(2)).get();
+        verify(podState).confirmStopped("demo", pod.podName());
+    }
+
+    @Test
+    void deleteMockFailsWhenAcceptedPodDeletionDoesNotFinishBeforeTimeout() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
+        PodResource podResource = mock(PodResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podState = podState;
+        podManager.podCreationTimeout = Duration.ZERO;
+
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        Pod deleting = new PodBuilder().withNewMetadata().withName(pod.podName()).endMetadata().build();
+        when(podState.stop("demo")).thenReturn(new PodState.StopClaim(pod, pod.podName()));
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withName(pod.podName())).thenReturn(podResource);
+        when(podResource.delete()).thenReturn(List.of(mock(io.fabric8.kubernetes.api.model.StatusDetails.class)));
+        when(podResource.get()).thenReturn(deleting);
+
+        assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
+        verify(podState, never()).confirmStopped("demo", pod.podName());
     }
 
     @Test
@@ -667,6 +725,7 @@ class PodManagerTest {
         assertEquals("wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("wiremock/wiremock:latest", pod.getSpec().getContainers().getFirst().getImage());
         assertEquals("Always", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
+        assertEquals(1L, pod.getSpec().getTerminationGracePeriodSeconds());
         assertTrue(pod.getSpec().getContainers().getFirst().getArgs() == null
                 || pod.getSpec().getContainers().getFirst().getArgs().isEmpty());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getStartupProbe().getHttpGet().getPath());

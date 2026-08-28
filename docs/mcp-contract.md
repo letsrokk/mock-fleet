@@ -69,7 +69,7 @@ Every collection returns `page` with the same metadata:
 }
 ```
 
-Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`, for running, starting, failed, already stopped, or absent pods. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
+Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and waits for an existing pod to be removed before it returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`. Already stopped or absent mocks return STOPPED directly. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
 
 ## Configuration
 

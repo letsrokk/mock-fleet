@@ -5,6 +5,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodList;
 import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.PodResource;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.annotation.PreDestroy;
@@ -460,7 +461,31 @@ public class PodManager {
                 .inNamespace(currentNamespace())
                 .withName(podName);
         List<StatusDetails> details = podResource.delete();
-        return wasDeleteSuccessful(details) || podResource.get() == null;
+        if (!wasDeleteSuccessful(details)) {
+            return podResource.get() == null;
+        }
+        return waitForPodToBeDeleted(podName, podResource);
+    }
+
+    private boolean waitForPodToBeDeleted(String podName, PodResource podResource) {
+        if (podResource.get() == null) {
+            return true;
+        }
+        long deadline = System.nanoTime() + podCreationTimeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.warnf("Interrupted while waiting for pod '%s' to be deleted.", podName);
+                return false;
+            }
+            if (podResource.get() == null) {
+                return true;
+            }
+        }
+        LOG.warnf("Pod '%s' was still present after the deletion timeout.", podName);
+        return false;
     }
 
     boolean wasDeleteSuccessful(List<StatusDetails> details) {

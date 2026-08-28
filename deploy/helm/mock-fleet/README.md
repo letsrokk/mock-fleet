@@ -57,7 +57,7 @@ Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary 
 
 `fleet-api` initializes its editable ConfigMap before it becomes ready, so either API replica can serve a fresh configuration view. Config rows contain `lifecycle` (`STOPPED`, `STARTING`, `RUNNING`, or `FAILED`) rather than a boolean active flag. Config PUT and DELETE responses are `{config,apply:{mockId,mode,lifecycle}}`. The `restartActive` mode restarts only a STARTING or RUNNING mock and normally returns STARTING while replacement continues.
 
-`POST /__fleet/api/mocks/{mockId}/start` is idempotent. It returns 200 for RUNNING or 202 for STARTING with `retryAfterMs: 1000`. Poll the same endpoint until RUNNING. DELETE is also idempotent and returns STOPPED for running, starting, failed, already stopped, and absent mocks. Lifecycle and config failures use `ApiError {code,message,retryable,stateMayHaveChanged,details}`. Optimistic config conflicts use `CONFIG_CONFLICT` and include `expectedVersion` and `currentVersion`.
+`POST /__fleet/api/mocks/{mockId}/start` is idempotent. It returns 200 for RUNNING or 202 for STARTING with `retryAfterMs: 1000`. Poll the same endpoint until RUNNING. DELETE is also idempotent. It waits for an existing pod to be removed before returning STOPPED and returns STOPPED directly for already stopped or absent mocks. Lifecycle and config failures use `ApiError {code,message,retryable,stateMayHaveChanged,details}`. Optimistic config conflicts use `CONFIG_CONFLICT` and include `expectedVersion` and `currentVersion`.
 
 The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/openapi.yaml` and is served by the running API at `/__fleet/api/openapi?format=json`.
 
