@@ -712,7 +712,7 @@ run_contracts() {
   wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
     || fail "Repeated persistent body-file write did not replace the WireMock pod."
   result=$(mcp_success list_body_files "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
-  assert_jq "${result}" '.files | length == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
+  assert_jq "${result}" '(.files | length) == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
     "Body-file cursor page was incomplete"
 
   log "Checking matched/missed analysis, redaction, and Admin-path guards."
