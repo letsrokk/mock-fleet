@@ -171,6 +171,49 @@ expect_render_failure 'CPU baseline limit above ceiling' 'wiremock.config.defaul
   --set-string wiremock.resourcePolicy.limitCeiling.cpu=500m --set-string wiremock.config.default.resources.limits.cpu=1
 expect_render_failure 'memory baseline request above limit' 'wiremock.config.default.resources.requests.memory must not exceed wiremock.config.default.resources.limits.memory' \
   --set-string wiremock.config.default.resources.requests.memory=2Gi --set-string wiremock.config.default.resources.limits.memory=1Gi
+expect_render_failure 'HTTP target collides with Hazelcast' '/fleet/api/service/ports/targetHttp' \
+  --set fleet.api.service.ports.targetHttp=5701
+expect_render_failure 'HTTP target drifts from the application listener' '/fleet/api/service/ports/targetHttp' \
+  --set fleet.api.service.ports.targetHttp=9090
+expect_render_failure 'Hazelcast collides with HTTP' 'hazelcast.port must not equal fleet.api.service.ports.targetHttp' \
+  --set hazelcast.port=8080
+expect_render_failure 'precision-sensitive CPU request below floor' 'wiremock.config.default.resources.requests.cpu must not be below wiremock.resourcePolicy.requestFloor.cpu' \
+  --set-string wiremock.resourcePolicy.requestFloor.cpu=9007199254740993 \
+  --set-string wiremock.config.default.resources.requests.cpu=9007199254740992 \
+  --set-string wiremock.resourcePolicy.limitCeiling.cpu=9007199254740994 \
+  --set-string wiremock.config.default.resources.limits.cpu=9007199254740994
+expect_render_failure 'milli request just below floor' 'wiremock.config.default.resources.requests.cpu must not be below wiremock.resourcePolicy.requestFloor.cpu' \
+  --set-string wiremock.resourcePolicy.requestFloor.cpu=1 \
+  --set-string wiremock.config.default.resources.requests.cpu=999m
+expect_render_failure 'milli limit just above ceiling' 'wiremock.config.default.resources.limits.cpu must not exceed wiremock.resourcePolicy.limitCeiling.cpu' \
+  --set-string wiremock.resourcePolicy.limitCeiling.cpu=1 \
+  --set-string wiremock.config.default.resources.limits.cpu=1001m
+expect_render_failure 'binary-equivalent request just below floor' 'wiremock.config.default.resources.requests.memory must not be below wiremock.resourcePolicy.requestFloor.memory' \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Gi \
+  --set-string wiremock.config.default.resources.requests.memory=1073741823
+expect_render_failure 'binary-equivalent limit just above ceiling' 'wiremock.config.default.resources.limits.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory' \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1Gi \
+  --set-string wiremock.config.default.resources.limits.memory=1073741825
+expect_render_failure 'unsupported uppercase decimal kilo suffix' '/wiremock/resourcePolicy/requestFloor/cpu' \
+  --set-string wiremock.resourcePolicy.requestFloor.cpu=1K
+
+helm template exact-equivalence "${chart_dir}" \
+  --set-string wiremock.resourcePolicy.requestFloor.cpu=1e-3 \
+  --set-string wiremock.config.default.resources.requests.cpu=1m \
+  --set-string wiremock.resourcePolicy.limitCeiling.cpu=1000u \
+  --set-string wiremock.config.default.resources.limits.cpu=1000000n \
+  --set-string wiremock.resourcePolicy.requestFloor.memory=1Gi \
+  --set-string wiremock.config.default.resources.requests.memory=1073741824 \
+  --set-string wiremock.resourcePolicy.limitCeiling.memory=1024Mi \
+  --set-string wiremock.config.default.resources.limits.memory=1048576Ki \
+  --show-only templates/api-deployment.yaml >/dev/null
+
+helm template decimal-equivalence "${chart_dir}" \
+  --set-string wiremock.resourcePolicy.requestFloor.cpu=1e3 \
+  --set-string wiremock.config.default.resources.requests.cpu=1k \
+  --set-string wiremock.resourcePolicy.limitCeiling.cpu=1000000m \
+  --set-string wiremock.config.default.resources.limits.cpu=1000 \
+  --show-only templates/api-deployment.yaml >/dev/null
 
 for invariant in \
   'kind: ResourceQuota' \

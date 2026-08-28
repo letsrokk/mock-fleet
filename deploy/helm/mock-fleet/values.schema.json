@@ -38,6 +38,19 @@
                   },
                   "required": ["enabled"]
                 },
+                "service": {
+                  "type": "object",
+                  "properties": {
+                    "ports": {
+                      "type": "object",
+                      "properties": {
+                        "targetHttp": { "type": "integer", "const": 8080 }
+                      },
+                      "required": ["targetHttp"]
+                    }
+                  },
+                  "required": ["ports"]
+                },
                 "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 },
                 "updateStrategy": {
                   "type": "object",
@@ -345,14 +358,10 @@
       "required": ["enabled", "quarkusLaunchDevmode", "javaToolOptions"]
     },
     "resourceQuantity": {
-      "oneOf": [
-        {
-          "type": "string",
-          "minLength": 1,
-          "pattern": "^(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+|[EPTGMK]i|[numkMGTPE])?$"
-        },
-        { "type": "number", "exclusiveMinimum": 0 }
-      ]
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]{1,2}|[EPTGMK]i|[numkMGTPE])?$"
     },
     "resourcePair": {
       "type": "object",
