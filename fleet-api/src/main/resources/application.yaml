@@ -26,6 +26,9 @@ mock-fleet:
   namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
+  max-active-mocks: ${MOCK_FLEET_MAX_ACTIVE_MOCKS:20}
+  max-concurrent-starts: ${MOCK_FLEET_MAX_CONCURRENT_STARTS:4}
+  queued-start-capacity: ${MOCK_FLEET_QUEUED_START_CAPACITY:16}
   wiremock-pod-name-prefix: ${MOCK_FLEET_WIREMOCK_POD_NAME_PREFIX:mock-fleet}
   wiremock-container-name: ${MOCK_FLEET_WIREMOCK_CONTAINER_NAME:wiremock}
   wiremock-image: ${MOCK_FLEET_WIREMOCK_IMAGE:wiremock/wiremock:3.13.2-2}

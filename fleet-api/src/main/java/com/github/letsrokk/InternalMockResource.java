@@ -7,6 +7,8 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 
+import java.util.concurrent.CompletionStage;
+
 @Path("/internal/mocks")
 @Produces(MediaType.APPLICATION_JSON)
 public class InternalMockResource {
@@ -16,8 +18,8 @@ public class InternalMockResource {
 
     @POST
     @Path("/{mockId}/upstream")
-    public UpstreamResponse resolveUpstream(@PathParam("mockId") String mockId) {
-        return new UpstreamResponse(podManager.getUpstreamBaseUrl(mockId));
+    public CompletionStage<UpstreamResponse> resolveUpstream(@PathParam("mockId") String mockId) {
+        return podManager.getUpstreamBaseUrlAsync(mockId).thenApply(UpstreamResponse::new);
     }
 
     public record UpstreamResponse(String baseUrl) {

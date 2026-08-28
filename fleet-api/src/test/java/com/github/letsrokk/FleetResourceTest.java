@@ -73,6 +73,38 @@ class FleetResourceTest {
     }
 
     @Test
+    void returnsStableCapacityExhaustionError() {
+        when(podManager.startMock("demo"))
+                .thenThrow(new MockCapacity.CapacityExceededException(20));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(429)
+                .body("code", is("MOCK_CAPACITY_EXHAUSTED"))
+                .body("retryable", is(true))
+                .body("stateMayHaveChanged", is(false))
+                .body("details.maxActiveMocks", is(20));
+    }
+
+    @Test
+    void returnsStableStartQueueSaturationError() {
+        when(podManager.startMock("demo"))
+                .thenThrow(new PodManager.StartQueueFullException("demo"));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(503)
+                .body("code", is("MOCK_START_QUEUE_FULL"))
+                .body("retryable", is(true))
+                .body("stateMayHaveChanged", is(false))
+                .body("details.mockId", is("demo"));
+    }
+
+    @Test
     void returnsRunningImmediatelyForAnExistingMock() {
         when(podManager.startMock("demo")).thenReturn(new PodManager.MockPodStatus(
                 "demo", "mock-fleet-demo-1", MockLifecycleStatus.RUNNING, null));

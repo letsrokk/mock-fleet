@@ -14,6 +14,12 @@ public interface MockFleetConfig {
 
     Duration podCreationTimeout();
 
+    int maxActiveMocks();
+
+    int maxConcurrentStarts();
+
+    int queuedStartCapacity();
+
     String wiremockPodNamePrefix();
 
     String wiremockContainerName();
