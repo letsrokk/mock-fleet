@@ -63,6 +63,12 @@ spec:
               value: {{ .Values.fleet.mcp.maxPayloadBytes | int64 | quote }}
             - name: FLEET_MCP_INCLUDED_BODY_BYTES
               value: {{ .Values.fleet.mcp.includedBodyBytes | int64 | quote }}
+            - name: FLEET_MCP_DEPENDENCY_HEALTH_TIMEOUT
+              value: {{ .Values.fleet.mcp.dependencyHealthTimeout | quote }}
+            - name: FLEET_MCP_MAX_COLLECTION_SCAN_BYTES
+              value: {{ .Values.fleet.mcp.maxCollectionScanBytes | int64 | quote }}
+            - name: FLEET_MCP_MAX_COLLECTION_SCAN_ITEMS
+              value: {{ .Values.fleet.mcp.maxCollectionScanItems | int64 | quote }}
             - name: JAVA_OPTS
               value: {{ .Values.env.javaOpts | quote }}
             {{- if .Values.env.javaToolOptions }}

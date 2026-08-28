@@ -10,6 +10,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -35,11 +36,49 @@ class FleetProxyClientTest {
                     request.getHeader("X-Test"), body.getBytes()));
             if (request.uri().equals("/orders/large-stream")) {
                 request.response().setChunked(true).write(Buffer.buffer(new byte[2048]));
+            } else if (request.uri().equals("/orders/collection-error")) {
+                request.response().setStatusCode(500)
+                        .end("{\"requests\":[{\"id\":1},{\"id\":2},{\"id\":3}]}");
+            } else if (request.uri().equals("/orders/collection-stream")) {
+                request.response().setChunked(true);
+                request.response().write("{\"requests\":[{\"id\":1},{\"id\":2},{\"id\":3},");
+                request.response().write(Buffer.buffer(new byte[2048]));
             } else {
                 request.response().setStatusCode(207).putHeader("X-Upstream", "yes").end("response");
             }
         })).listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
         baseUrl = URI.create("http://127.0.0.1:" + server.actualPort());
+    }
+
+    @Test
+    void completesCollectionScanAfterLimitPlusOneWithoutBufferingTheWholeResponse() {
+        var client = client(RoutingMode.PATH);
+
+        CollectionScan page = assertTimeoutPreemptively(Duration.ofSeconds(1),
+                () -> client.scanCollection("orders", new TransportRequest(HttpMethod.GET,
+                        "/collection-stream", Map.of(), new byte[0]), new ObjectMapper(),
+                        "requests", 0, 2, 64 * 1024 * 1024, 100));
+
+        assertEquals(2, page.items().size());
+        assertEquals(1, page.items().get(0).path("id").asInt());
+        assertEquals(2, page.items().get(1).path("id").asInt());
+        assertEquals(2, page.nextPosition());
+        assertEquals(true, page.hasMore());
+        client.close();
+    }
+
+    @Test
+    void doesNotTreatAnErrorResponseContainingACollectionAsSuccess() {
+        var client = client(RoutingMode.PATH);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.scanCollection("orders", new TransportRequest(HttpMethod.GET,
+                        "/collection-error", Map.of(), new byte[0]), new ObjectMapper(),
+                        "requests", 0, 2, 64 * 1024 * 1024, 100));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertEquals(500, error.details().get("status"));
+        client.close();
     }
 
     @AfterEach

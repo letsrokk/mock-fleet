@@ -44,6 +44,9 @@ mock-fleet:
     max-page-size: ${FLEET_MCP_MAX_PAGE_SIZE:200}
     max-payload-bytes: ${FLEET_MCP_MAX_PAYLOAD_BYTES:1048576}
     included-body-bytes: ${FLEET_MCP_INCLUDED_BODY_BYTES:262144}
+    dependency-health-timeout: ${FLEET_MCP_DEPENDENCY_HEALTH_TIMEOUT:1S}
+    max-collection-scan-bytes: ${FLEET_MCP_MAX_COLLECTION_SCAN_BYTES:67108864}
+    max-collection-scan-items: ${FLEET_MCP_MAX_COLLECTION_SCAN_ITEMS:100000}
     sensitive-headers: ${FLEET_MCP_SENSITIVE_HEADERS:Authorization,Proxy-Authorization,Cookie,Set-Cookie,X-API-Key}
     outbound-exceptions: ${FLEET_MCP_OUTBOUND_EXCEPTIONS:}
     outbound-allowed-listeners: ${FLEET_MCP_OUTBOUND_ALLOWED_LISTENERS:}

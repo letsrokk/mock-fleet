@@ -28,9 +28,10 @@ public final class JsonPaginator {
         }
         result.set(collectionField, page);
         ObjectNode meta = mapper.createObjectNode();
-        meta.put("total", collection.size());
         meta.put("limit", limit);
-        meta.put("offset", offset);
+        meta.put("returned", page.size());
+        meta.put("hasMore", end < collection.size());
+        meta.put("nextPosition", end);
         result.set("meta", meta);
         return result;
     }

@@ -15,7 +15,8 @@ public final class McpClientProducer {
             McpMetrics metrics) {
         Set<String> sensitiveHeaders = config.sensitiveHeaders().stream().collect(Collectors.toUnmodifiableSet());
         return new WireMockAdminClient(proxyClient, mapper, config.maxPayloadBytes(), sensitiveHeaders, metrics,
-                WireMockVersion.parseImage(config.wiremockImage()));
+                WireMockVersion.parseImage(config.wiremockImage()), config.maxCollectionScanBytes(),
+                config.maxCollectionScanItems());
     }
 
     @Produces

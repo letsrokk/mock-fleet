@@ -98,7 +98,7 @@ class FleetMcpToolsTrafficTest {
             fleet.respond(200, running());
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
-            ToolResponse starting = tools.listStubs("orders", 50, 0);
+            ToolResponse starting = tools.listStubs("orders", 50, null);
             assertTrue(starting.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) starting.structuredContent()).error();
             assertEquals("MOCK_STARTING", error.code());
@@ -106,12 +106,13 @@ class FleetMcpToolsTrafficTest {
             assertEquals(1000, error.details().get("retryAfterMs"));
             assertEquals(0, transport.requestCount());
 
-            ToolResponse running = tools.listStubs("orders", 50, 0);
+            ToolResponse running = tools.listStubs("orders", 50, null);
             assertFalse(running.isError());
             ObjectNode result = (ObjectNode) running.structuredContent();
             assertEquals("orders", result.path("mockId").asText());
             assertEquals("stub-1", result.path("stubs").get(0).path("id").asText());
-            assertEquals(1, result.path("page").path("total").asInt());
+            assertEquals(1, result.path("page").path("returned").asInt());
+            assertFalse(result.path("page").path("hasMore").asBoolean());
             assertEquals(2, transport.requestCount());
         }
     }
@@ -348,12 +349,59 @@ class FleetMcpToolsTrafficTest {
 
             ToolResponse response = tools(fleet.client(), transport, mapper).getBodyFile("orders", "result.txt");
 
-            JsonNode result = (ObjectNode) response.structuredContent();
+            JsonNode result = mapper.valueToTree(response.structuredContent());
             assertEquals("orders", result.path("mockId").asText());
             assertEquals("result.txt", result.path("fileName").asText());
+            assertFalse(result.has("contentType"));
             assertEquals("utf8", result.path("body").path("encoding").asText());
             assertEquals("file text", result.path("body").path("data").asText());
             assertEquals(9, result.path("body").path("sizeBytes").asInt());
+        }
+    }
+
+    @Test
+    void forceDeletingBodyFileSkipsReferenceScan() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(204, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .deleteBodyFile("orders", "payload.bin", true);
+
+            assertFalse(response.isError());
+            JsonNode result = mapper.valueToTree(response.structuredContent());
+            assertTrue(result.path("deleted").asBoolean());
+            assertTrue(result.path("forced").asBoolean());
+            assertEquals(2, transport.requestCount());
+        }
+    }
+
+    @Test
+    void bodyFileReferenceErrorReportsOnlyTheFirstStub() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, """
+                {"mappings":[
+                  {"id":"first","response":{"bodyFileName":"payload.bin"}},
+                  {"id":"second","response":{"bodyFileName":"payload.bin"}}],
+                 "meta":{"total":2}}
+                """);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .deleteBodyFile("orders", "payload.bin", false);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("BODY_FILE_REFERENCED", error.code(), error.message());
+            assertEquals("first", error.details().get("stubId"));
+            assertFalse(error.details().containsKey("stubIds"));
+            assertEquals(2, transport.requestCount());
         }
     }
 
@@ -450,6 +498,9 @@ class FleetMcpToolsTrafficTest {
             @Override public int maxPageSize() { return 200; }
             @Override public int maxPayloadBytes() { return 4096; }
             @Override public int includedBodyBytes() { return 4096; }
+            @Override public Duration dependencyHealthTimeout() { return Duration.ofSeconds(1); }
+            @Override public long maxCollectionScanBytes() { return 64 * 1024 * 1024; }
+            @Override public int maxCollectionScanItems() { return 100_000; }
             @Override public List<String> sensitiveHeaders() { return List.of("Authorization"); }
             @Override public Optional<List<String>> outboundExceptions() { return Optional.empty(); }
             @Override public Optional<List<String>> outboundAllowedListeners() { return Optional.empty(); }

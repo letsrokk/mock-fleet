@@ -27,6 +27,21 @@ class JsonSanitizerTest {
     }
 
     @Test
+    void redactsParsedCookiesWhenCookieHeaderIsSensitive() throws Exception {
+        var input = mapper.readTree("""
+                {"request":{"headers":{"Cookie":"session=secret-cookie"},
+                 "cookies":{"session":{"value":"secret-cookie"},"theme":"secret-theme"}}}
+                """);
+
+        var output = sanitizer.redactHeaders(input);
+
+        assertFalse(output.toString().contains("secret-cookie"), output.toPrettyString());
+        assertFalse(output.toString().contains("secret-theme"), output.toPrettyString());
+        assertEquals("[REDACTED]", output.at("/request/cookies/session/value").textValue());
+        assertEquals("[REDACTED]", output.at("/request/cookies/theme").textValue());
+    }
+
+    @Test
     void removesSensitiveHeadersFromRecorderCandidates() throws Exception {
         var input = mapper.readTree("""
                 {"mappings":[{"request":{"headers":{"Cookie":{"equalTo":"secret"},"Accept":{"equalTo":"text/plain"}}},
@@ -38,5 +53,20 @@ class JsonSanitizerTest {
         assertFalse(output.at("/mappings/0/request/headers").has("Cookie"));
         assertFalse(output.at("/mappings/0/response/headers").has("X-API-Key"));
         assertEquals("text/plain", output.at("/mappings/0/response/headers/Content-Type").textValue());
+    }
+
+    @Test
+    void removesCookieMatchersAndParsedCookiesFromRecorderCandidates() throws Exception {
+        var input = mapper.readTree("""
+                {"mappings":[{"request":{"headers":{"Cookie":{"equalTo":"secret-header"}},
+                 "cookies":{"session":{"equalTo":"secret-cookie"}},"method":"GET"},
+                 "response":{"status":200}}]}
+                """);
+
+        var output = sanitizer.removeSensitiveHeaders(input);
+
+        assertFalse(output.toString().contains("secret-header"), output.toPrettyString());
+        assertFalse(output.toString().contains("secret-cookie"), output.toPrettyString());
+        assertFalse(output.at("/mappings/0/request").has("cookies"));
     }
 }

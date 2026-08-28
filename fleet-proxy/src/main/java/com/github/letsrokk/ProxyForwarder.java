@@ -94,7 +94,7 @@ public class ProxyForwarder {
                 .requestAbs(routingContext.request().method(), targetUri)
                 .followRedirects(false);
 
-        routingContext.request().headers().forEach(header -> request.putHeader(header.getKey(), header.getValue()));
+        routingContext.request().headers().forEach(header -> request.headers().add(header.getKey(), header.getValue()));
 
         if (body == null || body.length() == 0) {
             return request.send().compose(response -> writeResponse(routingContext, response));
@@ -108,7 +108,7 @@ public class ProxyForwarder {
                 routingContext.request().uri(),
                 response.statusCode());
         routingContext.response().setStatusCode(response.statusCode());
-        response.headers().forEach(header -> routingContext.response().putHeader(header.getKey(), header.getValue()));
+        response.headers().forEach(header -> routingContext.response().headers().add(header.getKey(), header.getValue()));
         Buffer responseBody = response.body();
         if (responseBody == null || responseBody.length() == 0) {
             return routingContext.response().end();

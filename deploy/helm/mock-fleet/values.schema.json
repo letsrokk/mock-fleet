@@ -122,7 +122,10 @@
                 "defaultPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
                 "maxPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
                 "maxPayloadBytes": { "type": "integer", "minimum": 1 },
-                "includedBodyBytes": { "type": "integer", "minimum": 1 }
+                "includedBodyBytes": { "type": "integer", "minimum": 1 },
+                "dependencyHealthTimeout": { "type": "string", "minLength": 1 },
+                "maxCollectionScanBytes": { "type": "integer", "minimum": 1 },
+                "maxCollectionScanItems": { "type": "integer", "minimum": 1 }
               },
               "required": [
                 "enabled",
@@ -136,7 +139,10 @@
                 "defaultPageSize",
                 "maxPageSize",
                 "maxPayloadBytes",
-                "includedBodyBytes"
+                "includedBodyBytes",
+                "dependencyHealthTimeout",
+                "maxCollectionScanBytes",
+                "maxCollectionScanItems"
               ]
             }
           ]

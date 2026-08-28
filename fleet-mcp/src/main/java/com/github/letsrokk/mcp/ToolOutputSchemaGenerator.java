@@ -49,7 +49,8 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
             case "CountRequests" -> strict(properties(
                     "mockId", string(), "count", integer()), "mockId", "count");
             case "NearMisses" -> strict(properties(
-                    "mockId", string(), "response", openObject()), "mockId", "response");
+                    "mockId", string(), "nearMisses", array(openObject()), "page", page()),
+                    "mockId", "nearMisses", "page");
             case "Reset" -> strict(properties("mockId", string(), "reset", bool()), "mockId", "reset");
             case "RecordingStatus" -> strict(properties(
                     "mockId", string(), "status", openObject()), "mockId", "status");
@@ -59,15 +60,14 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
             case "BodyFilePage" -> strict(properties(
                     "mockId", string(), "files", array(string()), "page", page()), "mockId", "files", "page");
             case "GetBodyFile" -> strict(properties(
-                    "mockId", string(), "fileName", string(), "contentType", string(), "body", body()),
-                    "mockId", "fileName", "contentType", "body");
+                    "mockId", string(), "fileName", string(), "body", body()),
+                    "mockId", "fileName", "body");
             case "PutBodyFile" -> strict(properties(
                     "mockId", string(), "fileName", string(), "sizeBytes", integer()),
                     "mockId", "fileName", "sizeBytes");
             case "DeleteBodyFile" -> strict(properties(
-                    "mockId", string(), "fileName", string(), "deleted", bool(),
-                    "referencingStubIds", array(string())),
-                    "mockId", "fileName", "deleted", "referencingStubIds");
+                    "mockId", string(), "fileName", string(), "deleted", bool(), "forced", bool()),
+                    "mockId", "fileName", "deleted", "forced");
             case "ScenarioPage" -> strict(properties(
                     "mockId", string(), "scenarios", array(openObject()), "page", page()),
                     "mockId", "scenarios", "page");
@@ -124,8 +124,8 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
     }
 
     private JsonObject page() {
-        return strict(properties("total", integer(), "limit", integer(), "offset", integer()),
-                "total", "limit", "offset");
+        return strict(properties("limit", integer(), "returned", integer(), "hasMore", bool(),
+                "nextCursor", nullableString()), "limit", "returned", "hasMore", "nextCursor");
     }
 
     private JsonObject strict(JsonObject properties, String... required) {

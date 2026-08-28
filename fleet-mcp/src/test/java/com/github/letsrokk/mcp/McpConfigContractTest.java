@@ -128,7 +128,7 @@ class McpConfigContractTest {
 
         assertTrue(result.path("isError").asBoolean());
         assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("error").path("code").asText());
-        assertEquals("resources.limits is required when resources are provided",
+        assertEquals("Invalid tool arguments: $.resources.limits is required",
                 result.path("structuredContent").path("error").path("message").asText());
     }
 
@@ -171,6 +171,24 @@ class McpConfigContractTest {
                 lingeringDelete.path("structuredContent").path("error").path("code").asText());
         assertEquals("INVALID_UPSTREAM_RESPONSE",
                 malformedDelete.path("structuredContent").path("error").path("code").asText());
+        assertTrue(missingUpdate.path("structuredContent").path("error").path("stateMayHaveChanged").asBoolean());
+        assertTrue(lingeringDelete.path("structuredContent").path("error").path("stateMayHaveChanged").asBoolean());
+        assertTrue(malformedDelete.path("structuredContent").path("error").path("stateMayHaveChanged").asBoolean());
+    }
+
+    @Test
+    void acceptsDeletedSavedConfigWhenAnEffectiveMockRowRemains() throws Exception {
+        JsonNode retainedEffectiveRow = configView(true).deepCopy();
+        ((com.fasterxml.jackson.databind.node.ObjectNode) retainedEffectiveRow)
+                .set("savedMockIds", mapper.createArrayNode());
+        when(fleetApi.deleteConfig("catalog", "42", ConfigApplyMode.futureOnly))
+                .thenReturn(mutation(retainedEffectiveRow, "futureOnly"));
+
+        JsonNode deletion = structured(callTool("delete_mock_config", """
+                {"mockId":"catalog","resourceVersion":"42","applyMode":"futureOnly"}
+                """));
+
+        assertTrue(deletion.path("deleted").asBoolean());
     }
 
     @Test
@@ -181,7 +199,7 @@ class McpConfigContractTest {
 
         assertTrue(result.path("isError").asBoolean(), result.toPrettyString());
         assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("error").path("code").asText());
-        assertEquals("Unsupported applyMode: restartEverything",
+        assertEquals("Invalid tool arguments: $.applyMode is not an allowed value",
                 result.path("structuredContent").path("error").path("message").asText());
     }
 
@@ -201,6 +219,39 @@ class McpConfigContractTest {
                 """));
 
         assertEquals(3, response.path("count").asInt());
+    }
+
+    @Test
+    void dependencyOutagesAffectReadinessButNotLiveness() {
+        given()
+        .when()
+                .get("/__fleet/mcp/health/live")
+        .then()
+                .statusCode(200)
+                .body("status", org.hamcrest.Matchers.equalTo("UP"));
+
+        given()
+        .when()
+                .get("/__fleet/mcp/health/ready")
+        .then()
+                .statusCode(503)
+                .body("status", org.hamcrest.Matchers.equalTo("DOWN"))
+                .body("checks.name", org.hamcrest.Matchers.hasItems("fleet-api", "fleet-proxy"));
+    }
+
+    @Test
+    void exposesArtifactVersionAndFullBuildProvenance() {
+        String buildTime = given()
+        .when()
+                .get("/__fleet/mcp/version")
+        .then()
+                .statusCode(200)
+                .body("component", org.hamcrest.Matchers.equalTo("mcp"))
+                .body("version", org.hamcrest.Matchers.equalTo("1.5.1"))
+                .body("revision", org.hamcrest.Matchers.matchesPattern("[0-9a-fA-F]{40}"))
+                .extract().path("buildTime");
+
+        java.time.OffsetDateTime.parse(buildTime);
     }
 
     private JsonNode callTool(String name, String arguments) throws Exception {
@@ -233,10 +284,11 @@ class McpConfigContractTest {
                   "effective":{"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}}}]
                 """ : "[]";
         return mapper.readTree("""
-                {"resourceVersion":"42","mockIds":%s,"mocks":%s,
+                {"resourceVersion":"42","mockIds":%s,"savedMockIds":%s,"mocks":%s,
                  "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging","description":"Log details","values":[]}],
                  "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
-                """.formatted(includeCatalog ? "[\"catalog\"]" : "[]", mocks));
+                """.formatted(includeCatalog ? "[\"catalog\"]" : "[]",
+                        includeCatalog ? "[\"catalog\"]" : "[]", mocks));
     }
 
     private JsonNode mutation(JsonNode config, String mode) {

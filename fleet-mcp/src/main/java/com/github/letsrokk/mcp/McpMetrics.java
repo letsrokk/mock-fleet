@@ -37,4 +37,8 @@ public final class McpMetrics {
             registry.counter("mock_fleet_mcp_redactions", "kind", "header").increment(count);
         }
     }
+
+    public void bindingFailure(String toolName) {
+        registry.counter("mock_fleet_mcp_errors", "tool", toolName, "kind", "binding").increment();
+    }
 }

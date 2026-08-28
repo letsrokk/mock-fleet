@@ -10,13 +10,16 @@ class JsonPaginatorTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void paginatesArrayResponsesWithStableMetadata() throws Exception {
+    void paginatesArrayResponsesWithCursorMetadata() throws Exception {
         var result = JsonPaginator.page(mapper, mapper.readTree("[1,2,3,4]"), "items", 2, 1);
 
         assertEquals(mapper.readTree("[2,3]"), result.path("items"));
-        assertEquals(4, result.path("meta").path("total").asInt());
         assertEquals(2, result.path("meta").path("limit").asInt());
-        assertEquals(1, result.path("meta").path("offset").asInt());
+        assertEquals(2, result.path("meta").path("returned").asInt());
+        assertEquals(true, result.path("meta").path("hasMore").asBoolean());
+        assertEquals(3, result.path("meta").path("nextPosition").asLong());
+        assertEquals(false, result.path("meta").has("total"));
+        assertEquals(false, result.path("meta").has("offset"));
     }
 
     @Test
@@ -27,5 +30,7 @@ class JsonPaginatorTest {
 
         assertEquals(mapper.readTree("[3]"), result.path("requests"));
         assertEquals(false, result.path("requestJournalDisabled").asBoolean());
+        assertEquals(false, result.path("meta").path("hasMore").asBoolean());
+        assertEquals(3, result.path("meta").path("nextPosition").asLong());
     }
 }
