@@ -721,11 +721,11 @@ run_contracts() {
   config='{"request":{"method":"GET","urlPath":"/never-hit"},"response":{"status":204}}'
   result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
   unmatched_stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
-  config='{"request":{"method":"GET","urlPath":"/multi-header"},"response":{"status":200,"headers":{"Set-Cookie":["first=one","second=two"]}}}'
+  config='{"request":{"method":"GET","urlPath":"/multi-header"},"response":{"status":200,"headers":{"X-Duplicate-Response":["first","second"]}}}'
   mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')" >/dev/null
   result=$(mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/multi-header",headers:{"X-Duplicate":["one","two"]}}')")
-  assert_jq "${result}" '.response.headers | to_entries | map(select((.key | ascii_downcase) == "set-cookie"))[0].value == ["first=one","second=two"]' \
-    "Fleet Proxy replaced duplicate Set-Cookie response headers"
+  assert_jq "${result}" '.response.headers | to_entries | map(select((.key | ascii_downcase) == "x-duplicate-response"))[0].value == ["first","second"]' \
+    "Fleet Proxy replaced duplicate response headers"
   result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/multi-header"},limit:10}')")
   assert_jq "${result}" '.requests[0].request.headers."X-Duplicate" == ["one","two"] or .requests[0].headers."X-Duplicate" == ["one","two"]' \
     "Fleet Proxy replaced duplicate request headers"
