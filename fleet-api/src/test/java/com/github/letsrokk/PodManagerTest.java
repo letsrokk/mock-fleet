@@ -962,7 +962,8 @@ class PodManagerTest {
         when(storageConfig.type()).thenReturn(PodFactory.STORAGE_TYPE_S3);
         PodFactory podFactory = new PodFactory(config);
 
-        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertEquals(PodFactory.APP_NAME_VALUE, pod.getMetadata().getLabels().get(PodFactory.LABEL_APP_NAME));
         assertEquals(PodFactory.MANAGED_BY_VALUE, pod.getMetadata().getLabels().get(PodFactory.LABEL_MANAGED_BY));
@@ -997,7 +998,8 @@ class PodManagerTest {
         PodFactory podFactory = new PodFactory(config);
 
         Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo",
-                List.of("--global-response-templating", "--verbose"));
+                List.of("--global-response-templating", "--verbose"),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertEquals(List.of("--global-response-templating", "--verbose"),
                 pod.getSpec().getContainers().getFirst().getArgs());
@@ -1015,7 +1017,8 @@ class PodManagerTest {
         when(storageConfig.persistent()).thenReturn(false);
         PodFactory podFactory = new PodFactory(config);
 
-        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertEquals("wiremock-workload", pod.getSpec().getServiceAccountName());
     }
@@ -1032,7 +1035,8 @@ class PodManagerTest {
         when(storageConfig.persistent()).thenReturn(false);
         PodFactory podFactory = new PodFactory(config);
 
-        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertTrue(pod.getSpec().getServiceAccountName() == null
                 || pod.getSpec().getServiceAccountName().isBlank());
@@ -1068,7 +1072,8 @@ class PodManagerTest {
         when(storageConfig.type()).thenReturn("emptyDir");
         PodFactory podFactory = new PodFactory(config);
 
-        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertEquals("custom-wiremock", pod.getSpec().getContainers().getFirst().getName());
         assertEquals("example.com/wiremock:test", pod.getSpec().getContainers().getFirst().getImage());
@@ -1092,7 +1097,8 @@ class PodManagerTest {
         when(s3Config.path()).thenReturn("/mock-fleet");
         PodFactory podFactory = new PodFactory(config);
 
-        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo");
+        Pod pod = podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                resources("0.5", "512Mi", "1", "1Gi"));
 
         assertEquals("mock-fleet-pvc",
                 pod.getSpec().getVolumes().getFirst().getPersistentVolumeClaim().getClaimName());
@@ -1120,7 +1126,8 @@ class PodManagerTest {
         PodFactory podFactory = new PodFactory(config);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
-                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo"));
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(),
+                        resources("0.5", "512Mi", "1", "1Gi")));
         assertEquals("Unsupported persistent storage type: emptyDir", exception.getMessage());
     }
 

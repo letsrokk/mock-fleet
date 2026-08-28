@@ -7,6 +7,9 @@ import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -121,6 +124,30 @@ class WireMockResourcePolicyTest {
 
         WebApplicationException exception = assertThrows(WebApplicationException.class,
                 () -> podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), incomplete));
+
+        assertEquals("WireMock resources require requests and limits for cpu and memory.", exception.getMessage());
+    }
+
+    @Test
+    void podFactoryExposesOnlyTheValidatedConstructionPath() {
+        List<List<Class<?>>> publicConstructionPaths = Arrays.stream(PodFactory.class.getDeclaredMethods())
+                .filter(method -> method.getName().equals("createPodSpec"))
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .map(Method::getParameterTypes)
+                .map(Arrays::asList)
+                .toList();
+
+        assertEquals(List.of(List.of(String.class, String.class, List.class, ResourceRequirements.class)),
+                publicConstructionPaths);
+    }
+
+    @Test
+    void podFactoryRejectsMissingEffectiveResourcesBeforeBuildingThePod() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        PodFactory podFactory = new PodFactory(config);
+
+        WebApplicationException exception = assertThrows(WebApplicationException.class,
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null));
 
         assertEquals("WireMock resources require requests and limits for cpu and memory.", exception.getMessage());
     }
