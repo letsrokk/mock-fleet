@@ -22,9 +22,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @Singleton
 public final class FleetMcpTools {
+
+    private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private final FleetApiClient fleetApi;
     private final WireMockAdminClient wireMock;
@@ -302,7 +305,7 @@ public final class FleetMcpTools {
             TransportResponse response = wireMock.sendRequest(mockId, parseMethod(method), path, headerMap(headers), requestBody);
             ObjectNode result = mapper.createObjectNode();
             result.put("mockId", mockId);
-            result.set("response", trafficResult(response));
+            result.set("response", trafficResult(mockId, response));
             return McpToolExecutor.ToolResult.of("Received HTTP " + response.status() + " from " + mockId + ".", result);
         });
     }
@@ -693,9 +696,11 @@ public final class FleetMcpTools {
         }
     }
 
-    private ObjectNode trafficResult(TransportResponse response) {
+    private ObjectNode trafficResult(String mockId, TransportResponse response) {
         if (response.body().length > config.includedBodyBytes()) {
-            throw tooLarge(response.body().length, config.includedBodyBytes());
+            throw new McpOperationException("RESULT_TOO_LARGE", "Body exceeds the configured inclusion limit", false,
+                    true, Map.of("mockId", mockId, "actualBytes", response.body().length,
+                            "limitBytes", config.includedBodyBytes()));
         }
         ObjectNode result = binaryResult(response.body(), firstHeader(response.headers(), "content-type"));
         result.put("status", response.status());
@@ -803,13 +808,25 @@ public final class FleetMcpTools {
         }
         Map<String, List<String>> result = new LinkedHashMap<>();
         headers.forEach((name, value) -> {
+            if (name == null || !HEADER_NAME.matcher(name).matches()) {
+                throw new IllegalArgumentException("Header name is invalid");
+            }
             if (value instanceof List<?> values) {
-                result.put(name, values.stream().map(String::valueOf).toList());
+                result.put(name, values.stream().map(String::valueOf).map(FleetMcpTools::requireHeaderValue).toList());
             } else {
-                result.put(name, List.of(String.valueOf(value)));
+                result.put(name, List.of(requireHeaderValue(String.valueOf(value))));
             }
         });
         return Map.copyOf(result);
+    }
+
+    private static String requireHeaderValue(String value) {
+        boolean invalid = value.chars().anyMatch(character -> character == '\r' || character == '\n'
+                || character == 0x7f || (character < 0x20 && character != '\t'));
+        if (invalid) {
+            throw new IllegalArgumentException("Header value contains prohibited control characters");
+        }
+        return value;
     }
 
     private byte[] decodeBody(Map<String, Object> body, boolean required) {

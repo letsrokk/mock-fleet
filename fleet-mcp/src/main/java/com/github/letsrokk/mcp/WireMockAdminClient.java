@@ -143,7 +143,8 @@ public final class WireMockAdminClient {
     public JsonNode createStub(String mockId, ObjectNode mapping) {
         ObjectNode payload = serverManagedCopy(mapping);
         payload.put("persistent", false);
-        return sendMutationJson(mockId, HttpMethod.POST, "/__admin/mappings", payload);
+        return requireMutationMapping(mockId, null,
+                sendMutationJson(mockId, HttpMethod.POST, "/__admin/mappings", payload));
     }
 
     public JsonNode updateStub(String mockId, String stubId, ObjectNode mapping) {
@@ -160,7 +161,8 @@ public final class WireMockAdminClient {
             return persistentMutation(mockId, "update", id, (ObjectNode) current, payload, pending);
         }
         try {
-            return sendMutationJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, payload);
+            return requireMutationMapping(mockId, id,
+                    sendMutationJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, payload));
         } catch (RuntimeException updateFailure) {
             JsonNode verified = getStubAfterAmbiguousFailure(mockId, id, updateFailure);
             if (mappingMatches(verified, payload)) {
@@ -283,7 +285,12 @@ public final class WireMockAdminClient {
 
     public JsonNode stopRecording(String mockId) {
         Set<String> baseline = mappingIds(mockId);
-        JsonNode result = sendMutationWithoutBodyJson(mockId, HttpMethod.POST, "/__admin/recordings/stop");
+        JsonNode result;
+        try {
+            result = sendMutationWithoutBodyJson(mockId, HttpMethod.POST, "/__admin/recordings/stop");
+        } catch (RuntimeException failure) {
+            throw recorderMutationFailure(mockId, baseline, failure);
+        }
         try {
             return sanitizeRecorderCandidates(mockId, result, baseline);
         } catch (RuntimeException failure) {
@@ -296,7 +303,12 @@ public final class WireMockAdminClient {
         ObjectNode payload = snapshotSpec.deepCopy();
         payload.put("persist", false);
         payload.put("outputFormat", "IDS");
-        JsonNode result = sendMutationJson(mockId, HttpMethod.POST, "/__admin/recordings/snapshot", payload);
+        JsonNode result;
+        try {
+            result = sendMutationJson(mockId, HttpMethod.POST, "/__admin/recordings/snapshot", payload);
+        } catch (RuntimeException failure) {
+            throw recorderMutationFailure(mockId, baseline, failure);
+        }
         try {
             return sanitizeRecorderCandidates(mockId, result, baseline);
         } catch (RuntimeException failure) {
@@ -395,8 +407,9 @@ public final class WireMockAdminClient {
             throw new McpOperationException("INVALID_JSON", "Unable to serialize WireMock request JSON", false,
                     Map.of());
         }
+        TransportResponse response = sendMutation(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body));
         try {
-            return parseJson(sendMutation(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body)), true);
+            return parseJson(response, true);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
@@ -408,12 +421,29 @@ public final class WireMockAdminClient {
     }
 
     private JsonNode sendMutationWithoutBodyJson(String mockId, HttpMethod method, String endpoint) {
+        TransportResponse response = sendMutation(mockId, new TransportRequest(method, endpoint,
+                Map.of("accept", List.of("application/json")), new byte[0]));
         try {
-            return parseJson(sendMutation(mockId, new TransportRequest(method, endpoint,
-                    Map.of("accept", List.of("application/json")), new byte[0])), true);
+            return parseJson(response, true);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
+    }
+
+    private RuntimeException recorderMutationFailure(String mockId, Set<String> baseline, RuntimeException failure) {
+        if (!(failure instanceof McpOperationException operationFailure)
+                || !operationFailure.stateMayHaveChanged()) {
+            return failure;
+        }
+        McpOperationException uncertain = mutationFailure(mockId, failure);
+        List<String> candidateIds;
+        try {
+            candidateIds = List.copyOf(candidatesCreatedSince(mockId, baseline));
+        } catch (RuntimeException discoveryFailure) {
+            uncertain.addSuppressed(discoveryFailure);
+            return uncertain;
+        }
+        return recorderCleanupFailure(mockId, candidateIds, uncertain);
     }
 
     private JsonNode sanitizeRecorderCandidates(String mockId, JsonNode result, Set<String> baseline) {
@@ -733,6 +763,24 @@ public final class WireMockAdminClient {
         return new McpOperationException("UPSTREAM_UNAVAILABLE",
                 "WireMock mutation result is uncertain: " + failure.getMessage(), true, true,
                 Map.of("mockId", mockId, "cause", failure.getClass().getSimpleName()));
+    }
+
+    private static JsonNode requireMutationMapping(String mockId, String expectedId, JsonNode response) {
+        String actualId = response != null && response.isObject() && response.path("id").isTextual()
+                ? response.path("id").asText() : null;
+        try {
+            requireIdentifier(actualId, "returned mapping ID");
+        } catch (IllegalArgumentException invalidId) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "WireMock mutation response did not contain a usable mapping ID", false, true,
+                    Map.of("mockId", mockId));
+        }
+        if (expectedId != null && !expectedId.equals(actualId)) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "WireMock mutation response contained an unexpected mapping ID", false, true,
+                    Map.of("mockId", mockId, "expectedId", expectedId, "actualId", actualId));
+        }
+        return response;
     }
 
     private PersistentTransaction loadRecoveryTransaction(String mockId, String stubId) {

@@ -88,6 +88,37 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void sendRequestMarksPostDispatchInclusionFailureAsPotentiallyChanged() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "hello");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(false, 4))
+                    .sendRequest("orders", "GET", "/body", null, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error =
+                    ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("RESULT_TOO_LARGE", error.code());
+            assertTrue(error.stateMayHaveChanged());
+            assertEquals("orders", error.details().get("mockId"));
+        }
+    }
+
+    @Test
+    void sendRequestRejectsInvalidHeaderNameBeforeTrafficDispatch() {
+        assertInvalidRequestHeader(Map.of("Bad\nName", "value"));
+    }
+
+    @Test
+    void sendRequestRejectsInvalidHeaderValueBeforeTrafficDispatch() {
+        assertInvalidRequestHeader(Map.of("X-Test", "line-one\r\nline-two"));
+    }
+
+    @Test
     void coldStartReturnsRetryableErrorWithoutProxyTrafficThenSucceeds() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
@@ -581,6 +612,25 @@ class FleetMcpToolsTrafficTest {
                 new McpToolExecutor(registry), metrics);
     }
 
+    private static void assertInvalidRequestHeader(Map<String, Object> headers) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .sendRequest("orders", "GET", "/body", headers, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error =
+                    ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_ARGUMENT", error.code());
+            assertFalse(error.stateMayHaveChanged());
+            assertEquals(1, transport.requestCount());
+        }
+    }
+
     private static String running() {
         return "{\"mockId\":\"orders\",\"status\":\"RUNNING\",\"podName\":\"mock-orders-1\",\"message\":null,\"retryAfterMs\":null}";
     }
@@ -594,6 +644,10 @@ class FleetMcpToolsTrafficTest {
     }
 
     private static FleetMcpConfig config(boolean storageEnabled) {
+        return config(storageEnabled, 4096);
+    }
+
+    private static FleetMcpConfig config(boolean storageEnabled, int includedBodyBytes) {
         return new FleetMcpConfig() {
             @Override public URI apiBaseUrl() { return URI.create("http://api"); }
             @Override public URI proxyBaseUrl() { return URI.create("http://proxy"); }
@@ -606,7 +660,7 @@ class FleetMcpToolsTrafficTest {
             @Override public int defaultPageSize() { return 50; }
             @Override public int maxPageSize() { return 200; }
             @Override public int maxPayloadBytes() { return 4096; }
-            @Override public int includedBodyBytes() { return 4096; }
+            @Override public int includedBodyBytes() { return includedBodyBytes; }
             @Override public Duration dependencyHealthTimeout() { return Duration.ofSeconds(1); }
             @Override public long maxCollectionScanBytes() { return 64 * 1024 * 1024; }
             @Override public int maxCollectionScanItems() { return 100_000; }
