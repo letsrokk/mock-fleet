@@ -127,6 +127,18 @@ admission_fixture() {
     alternate-sidecar)
       fixture=$(jq -c '.spec.containers += [{name:"shell",image:"busybox:1.36",command:["sh"]}]' <<<"${fixture}")
       ;;
+    native-init-sidecar) fixture=$(jq -c '.spec.initContainers[0].restartPolicy = "Always"' <<<"${fixture}") ;;
+    pod-apparmor-unconfined) fixture=$(jq -c '.spec.securityContext.appArmorProfile = {type:"Unconfined"}' <<<"${fixture}") ;;
+    container-apparmor-unconfined) fixture=$(jq -c '.spec.containers[0].securityContext.appArmorProfile = {type:"Unconfined"}' <<<"${fixture}") ;;
+    init-apparmor-unconfined) fixture=$(jq -c '.spec.initContainers[0].securityContext.appArmorProfile = {type:"Unconfined"}' <<<"${fixture}") ;;
+    deprecated-apparmor-annotation)
+      fixture=$(jq -c '.metadata.annotations["container.apparmor.security.beta.kubernetes.io/wiremock"] = "unconfined"' <<<"${fixture}")
+      ;;
+    pod-selinux-user) fixture=$(jq -c '.spec.securityContext.seLinuxOptions = {user:"system_u",type:"container_t"}' <<<"${fixture}") ;;
+    container-selinux-type) fixture=$(jq -c '.spec.containers[0].securityContext.seLinuxOptions = {type:"spc_t"}' <<<"${fixture}") ;;
+    init-selinux-role) fixture=$(jq -c '.spec.initContainers[0].securityContext.seLinuxOptions = {role:"system_r",type:"container_init_t"}' <<<"${fixture}") ;;
+    container-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.containers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
+    init-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.initContainers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     *) printf 'Unknown admission fixture: %s\n' "${variant}" >&2; return 1 ;;
   esac
 
@@ -188,6 +200,12 @@ admission_binding_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet \
   --show-only templates/wiremock-validatingadmissionpolicybinding.yaml)"
+persistent_admission_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --set storage.persistent=true \
+  --set storage.s3.bucket=task9-test \
+  --show-only templates/wiremock-validatingadmissionpolicy.yaml)"
 
 for fragment in \
   'apiVersion: admissionregistration.k8s.io/v1' \
@@ -203,12 +221,21 @@ for fragment in \
   'custom-fleet-wiremock' \
   'wiremock/wiremock:3.13.2-2' \
   'automountServiceAccountToken' \
+  "!key.startsWith('container.apparmor.security.beta.kubernetes.io/')" \
+  'appArmorProfile.type' \
+  "['RuntimeDefault', 'Localhost']" \
+  'seLinuxOptions' \
+  "['container_t', 'container_init_t', 'container_kvm_t', 'container_engine_t']" \
+  'procMount' \
   'quantity(' \
   'sts.amazonaws.com' \
   'pods.eks.amazonaws.com'; do
   grep -Fq -- "${fragment}" <<<"${admission_render}" \
     || fail "WireMock admission policy is missing: ${fragment}"
 done
+
+grep -Fq '!has(object.spec.initContainers[0].restartPolicy)' <<<"${persistent_admission_render}" \
+  || fail 'Persistent WireMock admission policy permits a native init sidecar restartPolicy'
 
 for fragment in \
   'kind: ValidatingAdmissionPolicyBinding' \
@@ -236,10 +263,15 @@ for accepted_fixture in accepted accepted-workload-identity accepted-eks-pod-ide
   jq -e '.kind == "Pod" and .spec.automountServiceAccountToken == false' >/dev/null <<<"${fixture}" \
     || fail "Accepted admission fixture is malformed: ${accepted_fixture}"
 done
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath; do
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"
+done
+for persistent_rejected_fixture in native-init-sidecar init-apparmor-unconfined init-selinux-role init-procmount-unmasked; do
+  fixture=$(admission_fixture "${persistent_rejected_fixture}" testing custom-fleet custom-fleet-wiremock wiremock/wiremock:3.13.2-2 true custom-fleet-pvc /mock-fleet)
+  jq -e '.kind == "Pod" and (.spec.initContainers | length) == 1' >/dev/null <<<"${fixture}" \
+    || fail "Persistent rejected admission fixture is malformed: ${persistent_rejected_fixture}"
 done
 
 long_release=release-with-a-long-name-for-admission-policy-scope
@@ -255,6 +287,23 @@ long_name_b=$(helm template "${long_release}" "${chart_dir}" --namespace namespa
 expect_render_failure 'admission without dedicated WireMock service account' \
   'wiremock.serviceAccount must select a dedicated service account when wiremock.admissionPolicy.enabled=true' \
   --set wiremock.serviceAccount.create=false --set wiremock.serviceAccount.name=
+
+for shared_identity_case in \
+  '--set serviceAccount.name=shared --set wiremock.serviceAccount.name=shared' \
+  '--set fullnameOverride=custom-fleet --set serviceAccount.name=custom-fleet-wiremock' \
+  '--set fullnameOverride=custom-fleet --set wiremock.serviceAccount.name=custom-fleet-pod-manager'; do
+  read -r -a shared_identity_args <<<"${shared_identity_case}"
+  expect_render_failure 'API and WireMock service accounts resolve to the same identity' \
+    'API and WireMock service accounts must resolve to different names when wiremock.admissionPolicy.enabled=true' \
+    "${shared_identity_args[@]}"
+done
+
+annotated_wiremock_service_account=$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set-string 'wiremock.serviceAccount.annotations.eks\.amazonaws\.com/role-arn=arn:aws:iam::123456789012:role/mock-fleet' \
+  --show-only templates/wiremock-serviceaccount.yaml)
+grep -Fq 'eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/mock-fleet' <<<"${annotated_wiremock_service_account}" \
+  || fail 'Dedicated identity validation removed allowed WireMock service-account annotations'
 
 egress_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \

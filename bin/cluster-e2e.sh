@@ -145,7 +145,10 @@ verify_admission_dry_runs() {
   server_dry_run_admission_fixture accepted-workload-identity accepted
   server_dry_run_admission_fixture accepted-eks-pod-identity accepted
   for variant in privileged hostpath wrong-image wrong-service-account label-spoofing \
-      missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath; do
+      missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath \
+      native-init-sidecar pod-apparmor-unconfined container-apparmor-unconfined \
+      init-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user \
+      container-selinux-type init-selinux-role container-procmount-unmasked init-procmount-unmasked; do
     server_dry_run_admission_fixture "${variant}" rejected
   done
 }
@@ -184,6 +187,11 @@ verify_fixed_workloads_are_tokenless() {
   local pods
   pods=$(kubectl get pods --namespace "${namespace}" \
     -l 'app.kubernetes.io/component in (proxy,dash,mcp)' -o json)
+  jq -e '
+    (["proxy", "dash", "mcp"] -
+      ([.items[].metadata.labels["app.kubernetes.io/component"]] | unique) | length) == 0
+  ' >/dev/null <<<"${pods}" \
+    || fail "Expected Proxy, Dash, and MCP Pods are not all present for token verification."
   pods_have_no_general_api_token <<<"${pods}" \
     || fail "Proxy, Dash, or MCP received a general Kubernetes API token volume."
 }
@@ -1077,7 +1085,17 @@ self_test() {
     'excessive-limits rejected' \
     'alternate-sidecar rejected' \
     'identity-alternate-mount rejected' \
-    'identity-init-subpath rejected'; do
+    'identity-init-subpath rejected' \
+    'native-init-sidecar rejected' \
+    'pod-apparmor-unconfined rejected' \
+    'container-apparmor-unconfined rejected' \
+    'init-apparmor-unconfined rejected' \
+    'deprecated-apparmor-annotation rejected' \
+    'pod-selinux-user rejected' \
+    'container-selinux-type rejected' \
+    'init-selinux-role rejected' \
+    'container-procmount-unmasked rejected' \
+    'init-procmount-unmasked rejected'; do
     grep -Fxq "${expected_fixture}" <<<"${admission_matrix}" \
       || fail "Admission dry-run matrix omitted ${expected_fixture}."
   done
@@ -1112,6 +1130,25 @@ self_test() {
     fail "Tokenless workload assertion accepted a general Kubernetes API token."
   fi
   log "Tokenless workload identity contract passed."
+  local fixed_workload_pods
+  fixed_workload_pods='{"items":[
+    {"metadata":{"labels":{"app.kubernetes.io/component":"proxy"}},"spec":{"automountServiceAccountToken":false}},
+    {"metadata":{"labels":{"app.kubernetes.io/component":"dash"}},"spec":{"automountServiceAccountToken":false}},
+    {"metadata":{"labels":{"app.kubernetes.io/component":"mcp"}},"spec":{"automountServiceAccountToken":false}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${fixed_workload_pods}"; }
+    verify_fixed_workloads_are_tokenless
+  ); then
+    fail "Fixed workload presence rejected the E2E profile's enabled components."
+  fi
+  if (
+    kubectl() { printf '%s\n' '{"items":[]}' ; }
+    verify_fixed_workloads_are_tokenless >/dev/null 2>&1
+  ); then
+    fail "Fixed workload token assertion accepted a vacuous empty Pod set."
+  fi
+  log "Fixed workload presence contract passed."
   local parsed_session
   parsed_session=$(printf 'mcp-session-id: self-test-session\r\n' | extract_mcp_session_id)
   [[ "${parsed_session}" == self-test-session ]] \

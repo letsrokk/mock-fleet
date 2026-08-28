@@ -40,6 +40,10 @@ spec:
          'AWS_CONTAINER_CREDENTIALS_FULL_URI']
   validations:
     - expression: >-
+        !has(object.metadata.annotations) || object.metadata.annotations.all(key, value,
+          !key.startsWith('container.apparmor.security.beta.kubernetes.io/'))
+      message: Managed WireMock pods cannot use deprecated AppArmor annotations.
+    - expression: >-
         object.metadata.labels.size() == 3 &&
         object.metadata.labels['app.kubernetes.io/name'] == 'mock-fleet-wiremock' &&
         object.metadata.labels['app.kubernetes.io/managed-by'] == 'mock-fleet' &&
@@ -73,6 +77,13 @@ spec:
         (!has(object.spec.securityContext.runAsUser) || object.spec.securityContext.runAsUser != 0) &&
         has(object.spec.securityContext.seccompProfile) &&
         object.spec.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        (!has(object.spec.securityContext.appArmorProfile) ||
+          object.spec.securityContext.appArmorProfile.type in ['RuntimeDefault', 'Localhost']) &&
+        (!has(object.spec.securityContext.seLinuxOptions) ||
+          ((!has(object.spec.securityContext.seLinuxOptions.user) || object.spec.securityContext.seLinuxOptions.user == '') &&
+           (!has(object.spec.securityContext.seLinuxOptions.role) || object.spec.securityContext.seLinuxOptions.role == '') &&
+           (!has(object.spec.securityContext.seLinuxOptions.type) || object.spec.securityContext.seLinuxOptions.type == '' ||
+             object.spec.securityContext.seLinuxOptions.type in ['container_t', 'container_init_t', 'container_kvm_t', 'container_engine_t']))) &&
         (!has(object.spec.securityContext.sysctls) || object.spec.securityContext.sysctls.size() == 0)
       message: Managed WireMock pods require the restricted pod security context.
     - expression: object.spec.containers.size() == 1
@@ -99,6 +110,13 @@ spec:
         (!has(variables.wiremock.securityContext.capabilities.add) || variables.wiremock.securityContext.capabilities.add.size() == 0) &&
         has(variables.wiremock.securityContext.seccompProfile) &&
         variables.wiremock.securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        (!has(variables.wiremock.securityContext.appArmorProfile) ||
+          variables.wiremock.securityContext.appArmorProfile.type in ['RuntimeDefault', 'Localhost']) &&
+        (!has(variables.wiremock.securityContext.seLinuxOptions) ||
+          ((!has(variables.wiremock.securityContext.seLinuxOptions.user) || variables.wiremock.securityContext.seLinuxOptions.user == '') &&
+           (!has(variables.wiremock.securityContext.seLinuxOptions.role) || variables.wiremock.securityContext.seLinuxOptions.role == '') &&
+           (!has(variables.wiremock.securityContext.seLinuxOptions.type) || variables.wiremock.securityContext.seLinuxOptions.type == '' ||
+             variables.wiremock.securityContext.seLinuxOptions.type in ['container_t', 'container_init_t', 'container_kvm_t', 'container_engine_t']))) &&
         (!has(variables.wiremock.securityContext.procMount) || variables.wiremock.securityContext.procMount == 'Default')
       message: Managed WireMock containers require the restricted security context.
     - expression: >-
@@ -182,6 +200,7 @@ spec:
         object.spec.initContainers[0].name == 'prepare-wiremock-mappings' &&
         object.spec.initContainers[0].image == 'busybox:1.36' &&
         object.spec.initContainers[0].command == ['mkdir', '-p', {{ printf "%s/" .Values.storage.s3.path | quote }} + object.metadata.labels['mock-fleet/mock-id']] &&
+        !has(object.spec.initContainers[0].restartPolicy) &&
         (!has(object.spec.initContainers[0].args) || object.spec.initContainers[0].args.size() == 0) &&
         (!has(object.spec.initContainers[0].lifecycle)) &&
         (!has(object.spec.initContainers[0].ports) || object.spec.initContainers[0].ports.size() == 0) &&
@@ -205,6 +224,14 @@ spec:
         object.spec.initContainers[0].securityContext.capabilities.drop == ['ALL'] &&
         (!has(object.spec.initContainers[0].securityContext.capabilities.add) || object.spec.initContainers[0].securityContext.capabilities.add.size() == 0) &&
         object.spec.initContainers[0].securityContext.seccompProfile.type == 'RuntimeDefault' &&
+        (!has(object.spec.initContainers[0].securityContext.appArmorProfile) ||
+          object.spec.initContainers[0].securityContext.appArmorProfile.type in ['RuntimeDefault', 'Localhost']) &&
+        (!has(object.spec.initContainers[0].securityContext.seLinuxOptions) ||
+          ((!has(object.spec.initContainers[0].securityContext.seLinuxOptions.user) || object.spec.initContainers[0].securityContext.seLinuxOptions.user == '') &&
+           (!has(object.spec.initContainers[0].securityContext.seLinuxOptions.role) || object.spec.initContainers[0].securityContext.seLinuxOptions.role == '') &&
+           (!has(object.spec.initContainers[0].securityContext.seLinuxOptions.type) || object.spec.initContainers[0].securityContext.seLinuxOptions.type == '' ||
+             object.spec.initContainers[0].securityContext.seLinuxOptions.type in ['container_t', 'container_init_t', 'container_kvm_t', 'container_engine_t']))) &&
+        (!has(object.spec.initContainers[0].securityContext.procMount) || object.spec.initContainers[0].securityContext.procMount == 'Default') &&
         object.spec.initContainers[0].volumeMounts.filter(mount,
           mount.name == 'wiremock-mappings' && mount.mountPath == {{ .Values.storage.s3.path | quote }} &&
           (!has(mount.subPath) || mount.subPath == '') && (!has(mount.subPathExpr) || mount.subPathExpr == '')).size() == 1 &&

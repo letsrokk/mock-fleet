@@ -67,6 +67,8 @@ grep -Fq 'API RBAC can-i contract passed.' <<<"${self_test_output}" \
   || fail 'Harness self-test did not exercise the minimized API role checks.'
 grep -Fq 'Tokenless workload identity contract passed.' <<<"${self_test_output}" \
   || fail 'Harness self-test did not verify dedicated tokenless WireMock workload identity.'
+grep -Fq 'Fixed workload presence contract passed.' <<<"${self_test_output}" \
+  || fail 'Harness self-test did not require every enabled fixed workload before token assertions.'
 
 dry_run_output=$(MOCK_FLEET_E2E_RUN_ID=static-contract "${harness}" --dry-run)
 grep -Fq 'S3 bucket:    mock-fleet-e2e-data-static-contract-' <<<"${dry_run_output}" \

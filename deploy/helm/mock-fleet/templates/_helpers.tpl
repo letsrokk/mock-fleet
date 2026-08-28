@@ -296,6 +296,9 @@ app.kubernetes.io/component: mcp
 {{- if and .Values.wiremock.admissionPolicy.enabled (not (include "mock-fleet.wiremockServiceAccountName" .)) -}}
 {{- fail "wiremock.serviceAccount must select a dedicated service account when wiremock.admissionPolicy.enabled=true" -}}
 {{- end -}}
+{{- if and .Values.wiremock.admissionPolicy.enabled (eq (include "mock-fleet.serviceAccountName" .) (include "mock-fleet.wiremockServiceAccountName" .)) -}}
+{{- fail "API and WireMock service accounts must resolve to different names when wiremock.admissionPolicy.enabled=true" -}}
+{{- end -}}
 {{- if gt (int .Values.fleet.api.maxConcurrentStarts) (int .Values.fleet.api.maxActiveMocks) -}}
 {{- fail "fleet.api.maxConcurrentStarts must not exceed fleet.api.maxActiveMocks" -}}
 {{- end -}}
