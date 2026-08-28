@@ -22,6 +22,8 @@ public interface MockFleetConfig {
 
     String wiremockImagePullPolicy();
 
+    long wiremockTerminationGracePeriodSeconds();
+
     Optional<String> wiremockServiceAccountName();
 
     Optional<String> wiremockConfigPath();

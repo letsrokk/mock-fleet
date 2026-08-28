@@ -22,6 +22,7 @@ import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 
 @ApplicationScoped
 public class PodManager {
@@ -42,6 +43,9 @@ public class PodManager {
 
     @Inject
     MockFleetConfig config;
+
+    @Inject
+    PodTransitionCoordinator podTransitionCoordinator;
 
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
     Duration inactivityThreshold;
@@ -82,16 +86,9 @@ public class PodManager {
     }
 
     private void replaceClaimedMock(String mockId, PodState.RestartClaim claim) {
-        String previousPodName = claim.previousPodName();
-        if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
-            PodCreationException failure = new PodCreationException(
-                    "Failed to delete previous pod '" + previousPodName + "' before replacement startup.");
-            podState.failStart(mockId, claim.lifecycle().attemptId(), failure);
-            LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
-            return;
-        }
         try {
-            startClaimedMock(mockId, claim.lifecycle().attemptId());
+            serializedPodTransition(mockId, () -> startClaimedMockSerialized(
+                    mockId, claim.lifecycle().attemptId(), claim.previousPodName()));
         } catch (RuntimeException failure) {
             LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
         }
@@ -142,14 +139,24 @@ public class PodManager {
     }
 
     private MockPodRef startClaimedMock(String mockId, String attemptId, String previousPodName) {
+        return serializedPodTransition(mockId,
+                () -> startClaimedMockSerialized(mockId, attemptId, previousPodName));
+    }
+
+    private MockPodRef startClaimedMockSerialized(String mockId, String attemptId, String previousPodName) {
         try {
+            requireCurrentStartingAttempt(mockId, attemptId);
             if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
                 throw new PodCreationException(
                         "Failed to delete stale startup pod '" + previousPodName + "' before retry.");
             }
+            requireCurrentStartingAttempt(mockId, attemptId);
             MockPodRef pod = spawnPod(mockId, attemptId);
             if (!podState.completeStart(mockId, attemptId, pod)) {
-                deletePod(pod);
+                if (!deletePod(pod)) {
+                    throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
+                            + pod.podName() + "' could not be confirmed.");
+                }
                 throw new PodCreationException("Pod startup was superseded or stopped.");
             }
             return pod;
@@ -157,6 +164,16 @@ public class PodManager {
             podState.failStart(mockId, attemptId, error);
             throw error;
         }
+    }
+
+    private void requireCurrentStartingAttempt(String mockId, String attemptId) {
+        if (!podState.isCurrentStartingAttempt(mockId, attemptId)) {
+            throw new PodCreationException("Pod startup was superseded or stopped.");
+        }
+    }
+
+    private <T> T serializedPodTransition(String mockId, Supplier<T> action) {
+        return podTransitionCoordinator == null ? action.get() : podTransitionCoordinator.serialized(mockId, action);
     }
 
     private PodState.StartClaim claimStart(String mockId) {
@@ -230,13 +247,25 @@ public class PodManager {
                 wireMockOptions.resourcesFor(mockId));
         String namespace = currentNamespace();
 
+        if (attemptId != null) {
+            String reservedPodName = podNamePrefix + attemptId;
+            if (!podState.markStartupPodName(mockId, attemptId, reservedPodName)) {
+                throw new PodCreationException("Pod startup was superseded or stopped.");
+            }
+            pod.getMetadata().setName(reservedPodName);
+            pod.getMetadata().setGenerateName(null);
+        }
+
         pod = kubernetesClient.resource(pod)
                 .inNamespace(namespace)
                 .create();
         if (attemptId == null) {
             podState.markStartupPodName(mockId, pod.getMetadata().getName());
-        } else if (!podState.markStartupPodName(mockId, attemptId, pod.getMetadata().getName())) {
-            deletePod(pod);
+        } else if (!podState.isCurrentStartingAttempt(mockId, attemptId)) {
+            if (!deletePod(pod)) {
+                throw new PodCreationException("Pod startup was superseded or stopped, and cleanup of pod '"
+                        + pod.getMetadata().getName() + "' could not be confirmed.");
+            }
             throw new PodCreationException("Pod startup was superseded or stopped.");
         }
 
@@ -448,7 +477,18 @@ public class PodManager {
     }
 
     boolean deletePod(Pod pod) {
-        return wasDeleteSuccessful(kubernetesClient.resource(pod).delete());
+        String podName = pod.getMetadata().getName();
+        try {
+            var podResource = kubernetesClient.resource(pod);
+            List<StatusDetails> details = podResource.delete();
+            if (!wasDeleteSuccessful(details)) {
+                return podResource.get() == null;
+            }
+            return waitForPodToBeDeleted(podName, podResource::get);
+        } catch (RuntimeException failure) {
+            LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
+            return false;
+        }
     }
 
     boolean deletePod(MockPodRef pod) {
@@ -456,11 +496,40 @@ public class PodManager {
     }
 
     boolean deletePod(String podName) {
-        var podResource = kubernetesClient.pods()
-                .inNamespace(currentNamespace())
-                .withName(podName);
-        List<StatusDetails> details = podResource.delete();
-        return wasDeleteSuccessful(details) || podResource.get() == null;
+        try {
+            var podResource = kubernetesClient.pods()
+                    .inNamespace(currentNamespace())
+                    .withName(podName);
+            List<StatusDetails> details = podResource.delete();
+            if (!wasDeleteSuccessful(details)) {
+                return podResource.get() == null;
+            }
+            return waitForPodToBeDeleted(podName, podResource::get);
+        } catch (RuntimeException failure) {
+            LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
+            return false;
+        }
+    }
+
+    private boolean waitForPodToBeDeleted(String podName, Supplier<Pod> podLookup) {
+        if (podLookup.get() == null) {
+            return true;
+        }
+        long deadline = System.nanoTime() + podCreationTimeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.warnf("Interrupted while waiting for pod '%s' to be deleted.", podName);
+                return false;
+            }
+            if (podLookup.get() == null) {
+                return true;
+            }
+        }
+        LOG.warnf("Pod '%s' was still present after the deletion timeout.", podName);
+        return false;
     }
 
     boolean wasDeleteSuccessful(List<StatusDetails> details) {

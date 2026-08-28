@@ -10,12 +10,18 @@ import java.lang.reflect.Type;
 @Singleton
 public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenerator {
 
+    private final FleetMcpConfig config;
+
+    public StrictInputSchemaGenerator(FleetMcpConfig config) {
+        this.config = config;
+    }
+
     @Override
     public InputSchema generate(ToolManager.ToolInfo tool) {
         JsonObject properties = new JsonObject();
         JsonArray required = new JsonArray();
         for (ToolManager.ToolArgument argument : tool.arguments()) {
-            properties.put(argument.name(), schema(argument.type(), argument.description(), argument.defaultValue()));
+            properties.put(argument.name(), schema(tool.name(), argument));
             if (argument.required()) {
                 required.add(argument.name());
             }
@@ -28,7 +34,10 @@ public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenera
         return new StrictInputSchema(schema);
     }
 
-    private JsonObject schema(Type type, String description, String defaultValue) {
+    private JsonObject schema(String toolName, ToolManager.ToolArgument argument) {
+        Type type = argument.type();
+        String description = argument.description();
+        String defaultValue = argument.defaultValue();
         String name = type.getTypeName();
         JsonObject schema = new JsonObject();
         if (name.equals("java.lang.String")) {
@@ -53,6 +62,13 @@ public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenera
             } else {
                 schema.put("default", defaultValue);
             }
+        }
+        if ("mockId".equals(argument.name())) {
+            schema.put("pattern", MockIdValidator.pattern()).put("maxLength", MockIdValidator.maxLength());
+        } else if ("limit".equals(argument.name())) {
+            schema.put("minimum", 1).put("maximum", config.maxPageSize());
+        } else if ("delete_mock_config".equals(toolName) && "applyMode".equals(argument.name())) {
+            schema.put("enum", new JsonArray().add("futureOnly").add("restartActive"));
         }
         return schema;
     }

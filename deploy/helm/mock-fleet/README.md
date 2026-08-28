@@ -57,7 +57,7 @@ Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary 
 
 `fleet-api` initializes its editable ConfigMap before it becomes ready, so either API replica can serve a fresh configuration view. Config rows contain `lifecycle` (`STOPPED`, `STARTING`, `RUNNING`, or `FAILED`) rather than a boolean active flag. Config PUT and DELETE responses are `{config,apply:{mockId,mode,lifecycle}}`. The `restartActive` mode restarts only a STARTING or RUNNING mock and normally returns STARTING while replacement continues.
 
-`POST /__fleet/api/mocks/{mockId}/start` is idempotent. It returns 200 for RUNNING or 202 for STARTING with `retryAfterMs: 1000`. Poll the same endpoint until RUNNING. DELETE is also idempotent and returns STOPPED for running, starting, failed, already stopped, and absent mocks. Lifecycle and config failures use `ApiError {code,message,retryable,stateMayHaveChanged,details}`. Optimistic config conflicts use `CONFIG_CONFLICT` and include `expectedVersion` and `currentVersion`.
+`POST /__fleet/api/mocks/{mockId}/start` is idempotent. It returns 200 for RUNNING or 202 for STARTING with `retryAfterMs: 1000`. Poll the same endpoint until RUNNING. DELETE is also idempotent. It waits for an existing pod to be removed before returning STOPPED and returns STOPPED directly for already stopped or absent mocks. Lifecycle and config failures use `ApiError {code,message,retryable,stateMayHaveChanged,details}`. Optimistic config conflicts use `CONFIG_CONFLICT` and include `expectedVersion` and `currentVersion`.
 
 The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/openapi.yaml` and is served by the running API at `/__fleet/api/openapi?format=json`.
 
@@ -70,7 +70,7 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 - spawned WireMock pods at `/home/wiremock`
 - `fleet-api` at `storage.mappingsPath`
 
-`storage.s3.mountOptions` includes `allow-delete` by default because the dashboard can delete mapping files and folders.
+`storage.s3.mountOptions` includes `allow-delete`, `allow-overwrite`, and `metadata-ttl minimal` by default. The first two options support dashboard and MCP file mutations. The minimal metadata TTL reduces cross-mount staleness while the CSI data cache is enabled; Mountpoint does not coordinate concurrent writes to the same key, so clients must not race those writes.
 
 For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live suite requires a prepared SeaweedFS-compatible S3 CSI driver and explicit S3 credentials. It creates a unique namespace and bucket, validates two API replicas and the REST/MCP recovery paths, and removes all owned resources through an EXIT trap. `--dry-run` prints the resolved scope, `--self-test` performs static harness checks, and `--keep` retains failed-run resources for investigation. The `Cluster E2E` GitHub Actions workflow runs only through `workflow_dispatch` on a prepared runner; normal push checks stay unchanged.
 
@@ -142,7 +142,7 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 | `fleet.api.logging.json` | `false` | Enable JSON console logging for the API. |
 | `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
-| `fleet.api.terminationGracePeriodSeconds` | `300` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
+| `fleet.api.terminationGracePeriodSeconds` | `30` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
 | `fleet.api.updateStrategy.type` | `RollingUpdate` | API deployment update strategy. |
 | `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods during rollout. |
 | `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods during rollout. |
@@ -199,7 +199,8 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.outbound.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | Labels selecting the cluster DNS pods allowed by the WireMock egress policy. |
 | `fleet.mcp.outbound.networkPolicy.allowedCidrs` | `[]` | Private or special-use CIDRs explicitly allowed at connection time. Configure the corresponding host in `outbound.exceptions` too. |
 | `fleet.mcp.sensitiveHeaders` | common credential headers | Headers redacted from traffic, journal, and recorder results. |
-| `fleet.mcp.timeout` | `10S` | Internal Fleet API and Proxy request timeout. |
+| `fleet.mcp.timeout` | `10S` | Normal internal Fleet API and Proxy request timeout. |
+| `fleet.mcp.lifecycleTimeout` | `70S` | Timeout for pod deletion through `stop_mock`; keep this longer than `fleet.api.podCreationTimeout`. |
 | `fleet.mcp.defaultPageSize` | `50` | Default collection page size. |
 | `fleet.mcp.maxPageSize` | `200` | Maximum collection page size. |
 | `fleet.mcp.maxPayloadBytes` | `1048576` | Maximum complete structured result size. |
@@ -223,6 +224,7 @@ MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `reco
 | `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
 | `wiremock.containerImage` | `wiremock/wiremock:3.13.2-2` | Image used for spawned WireMock pods. MCP supports WireMock 3.0.0 and newer. |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
+| `wiremock.terminationGracePeriodSeconds` | `5` | Graceful shutdown window for spawned WireMock pods. Fleet waits for full pod removal before replacement. |
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
 | `wiremock.serviceAccount.name` | `""` | Service account name. A generated name is used when creation is enabled and this is empty. |
 | `wiremock.serviceAccount.annotations` | `{}` | Annotations for workload identity or other integrations. |
@@ -284,7 +286,7 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | `storage.s3.path` | `/mock-fleet` | Path mounted inside WireMock init containers before per-mock subpaths are created. |
 | `storage.s3.authenticationSource` | `driver` | S3 CSI authentication source. |
 | `storage.s3.cacheSize` | `1Gi` | S3 CSI cache emptyDir size limit. |
-| `storage.s3.mountOptions` | `[allow-delete]` | S3 CSI mount options. Keep `allow-delete` for dashboard delete actions. |
+| `storage.s3.mountOptions` | `[allow-delete, allow-overwrite, metadata-ttl minimal]` | S3 CSI mount options for shared API/WireMock mutations and reduced cross-mount staleness. They do not coordinate concurrent writes to one key. |
 
 ### Ingress
 

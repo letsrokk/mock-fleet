@@ -24,7 +24,9 @@ class WireMockAdminClientTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final RecordingTransport transport = new RecordingTransport();
     private final WireMockAdminClient client = new WireMockAdminClient(
-            transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"));
+            transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"), null, null,
+            67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
+            new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
     @Test
     void uploadsBodyFilesAsOpaqueBytes() {
@@ -33,6 +35,62 @@ class WireMockAdminClientTest {
         client.putBodyFile("orders", "payload.bin", new byte[] {0, 1});
 
         assertEquals(List.of("application/octet-stream"), transport.last().headers().get("content-type"));
+    }
+
+    @Test
+    void retriesBodyFileReadAfterStaleS3FileHandle() {
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(200, "hello");
+
+        TransportResponse response = client.getBodyFile("orders", "payload.txt");
+
+        assertEquals("hello", response.bodyAsString());
+        assertEquals(2, transport.requestCount());
+        assertEquals("/__admin/files/payload.txt", transport.requestAt(0).target());
+        assertEquals("/__admin/files/payload.txt", transport.requestAt(1).target());
+    }
+
+    @Test
+    void retriesBodyFileReadAcrossAnS3RemountWindow() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
+                new WireMockAdminClient.BodyFileReadPolicy(5, 0));
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(200, "hello");
+
+        TransportResponse response = polling.getBodyFile("orders", "payload.txt");
+
+        assertEquals("hello", response.bodyAsString());
+        assertEquals(5, transport.requestCount());
+    }
+
+    @Test
+    void doesNotRetryUnrelatedBodyFileServerErrors() {
+        transport.respond(500, "unexpected failure");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.getBodyFile("orders", "payload.txt"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertEquals(1, transport.requestCount());
+    }
+
+    @Test
+    void boundsStaleS3FileHandleRetries() {
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.getBodyFile("orders", "payload.txt"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.retryable());
+        assertEquals(3, transport.requestCount());
     }
 
     @Test
@@ -51,6 +109,79 @@ class WireMockAdminClientTest {
         assertFalse(sent.get("persistent").booleanValue());
         assertEquals(HttpMethod.POST, transport.last().method());
         assertEquals("/__admin/mappings", transport.last().target());
+    }
+
+    @Test
+    void createStubMarksInvalidSuccessResponseAsPotentiallyChanged() {
+        transport.respond(201, "not-json");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.createStub("orders", mapper.createObjectNode()));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "", "null", "[]", "{}", "{\"request\":{}}", "{\"id\":\"bad/id\"}" })
+    void createStubRejectsSuccessResponsesWithoutAUsableMappingId(String body) {
+        transport.respond(201, body);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.createStub("orders", mapper.createObjectNode()));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
+    }
+
+    @Test
+    void mutationRequestRejectedBeforeDispatchDoesNotReportChangedState() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 1, Set.of("authorization"));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.putBodyFile("orders", "payload.bin", new byte[] {0, 1}));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(0, transport.requestCount());
+    }
+
+    @Test
+    void jsonMutationRejectedBeforeDispatchDoesNotReportChangedState() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 1, Set.of("authorization"));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.createStub("orders", mapper.createObjectNode()));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(0, transport.requestCount());
+    }
+
+    @Test
+    void authoritativeClientErrorDoesNotReportChangedMutationState() {
+        transport.respond(400, "invalid mapping");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.createStub("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertFalse(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void resetRequestJournalMarksServerFailureAsPotentiallyChanged() {
+        transport.respond(500, "reset response lost");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.resetRequestJournal("orders"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.stateMayHaveChanged());
     }
 
     @Test
@@ -478,6 +609,29 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void temporaryUpdateRejectsMalformedSuccessResponseAfterReadBack() throws Exception {
+        String before = """
+                {"id":"server-id","uuid":"server-id","persistent":false,
+                 "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
+                """;
+        transport.respond(404, "");
+        transport.respond(200, before);
+        transport.respond(200, "{}");
+        transport.respond(200, before);
+        ObjectNode input = (ObjectNode) mapper.readTree("""
+                {"request":{"method":"POST","url":"/orders"},"response":{"status":202}}
+                """);
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.updateStub("orders", "server-id", input));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
+        assertEquals(4, transport.requestCount());
+    }
+
+    @Test
     void deleteReturnsNormallyWhenReadBackShowsAmbiguousFailureApplied() {
         transport.respond(500, "response lost");
         transport.respond(404, "");
@@ -677,6 +831,42 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void recorderStartMarksInvalidFollowUpStatusAsPotentiallyChanged() {
+        transport.respond(200, "{}");
+        transport.respond(200, "{}");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.startRecording("orders", mapper.createObjectNode()));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void recorderStartMarksStatusLookupFailureAsPotentiallyChanged() {
+        transport.respond(200, "{}");
+        transport.respond(500, "status unavailable");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.startRecording("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void recorderStartPreservesAuthoritativeClientRejection() {
+        transport.respond(400, "invalid recording spec");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.startRecording("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(1, transport.requestCount());
+    }
+
+    @Test
     void recorderBaselineHonorsTheMappingScanItemBudget() {
         WireMockAdminClient limited = new WireMockAdminClient(transport, mapper, 1024 * 1024,
                 Set.of("cookie"), null, null, 1024 * 1024, 1);
@@ -739,9 +929,189 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.DELETE, transport.requestAt(3).method());
         assertEquals("/__admin/mappings/recorded-id", transport.requestAt(3).target());
         assertEquals(HttpMethod.GET, transport.requestAt(4).method());
+    }
+
+    @Test
+    void recorderFinalizationDiscoversAndDeletesCandidatesWhenResultJsonIsInvalid() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "not-json");
+        transport.respond(200, """
+                {"mappings":[{"id":"recorded-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("/__admin/mappings/recorded-id", transport.requestAt(3).target());
+        assertEquals(5, transport.requestCount());
+    }
+
+    @Test
+    void recorderFinalizationDiscoversAndDeletesCandidatesWhenResultIsOversized() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 128, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "x".repeat(129));
+        transport.respond(200, """
+                {"mappings":[{"id":"recorded-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.stopRecording("orders"));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("/__admin/mappings/recorded-id", transport.requestAt(3).target());
+        assertEquals(5, transport.requestCount());
+    }
+
+    @Test
+    void recorderFinalizationDiscoversAndDeletesCandidatesWhenResultIsLost() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, """
+                {"mappings":[{"id":"recorded-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("UPSTREAM_UNAVAILABLE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("/__admin/mappings/recorded-id", transport.requestAt(3).target());
+        assertEquals(5, transport.requestCount());
+    }
+
+    @Test
+    void recorderFinalizationPollsForCandidatesCreatedAfterTheFirstRecoveryScan() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(4, 2, 0));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, """
+                {"mappings":[{"id":"delayed-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> polling.stopRecording("orders"));
+
+        assertEquals("UPSTREAM_UNAVAILABLE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("/__admin/mappings/delayed-id", transport.requestAt(4).target());
+        assertEquals(8, transport.requestCount());
+    }
+
+    @Test
+    void recorderFinalizationReportsCandidateDiscoveryFailure() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.fail(new McpOperationException("WIREMOCK_ADMIN_ERROR", "scan failed", true, Map.of()));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("candidate-discovery", error.details().get("stage"));
+        assertEquals("WIREMOCK_ADMIN_ERROR",
+                ((Map<?, ?>) error.details().get("discoveryError")).get("code"));
+    }
+
+    @Test
+    void recorderFinalizationLabelsObservationInterruption() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 1, 1));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+
+        McpOperationException error;
+        try {
+            Thread.currentThread().interrupt();
+            error = assertThrows(McpOperationException.class, () -> polling.stopRecording("orders"));
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-observation", error.details().get("stage"));
+        assertTrue(error.details().containsKey("observationError"));
+        assertFalse(error.details().containsKey("discoveryError"));
+    }
+
+    @Test
+    void recorderFinalizationReportsAmbiguousCandidateCleanupFailure() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, """
+                {"mappings":[{"id":"recorded-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(500, "delete failed");
+        transport.respond(200, "{\"id\":\"recorded-id\"}");
+        transport.respond(500, "update failed");
+        transport.respond(200, "{\"id\":\"recorded-id\"}");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-cleanup", error.details().get("stage"));
+        assertEquals(List.of("recorded-id"), error.details().get("cleanupFailedIds"));
+    }
+
+    @Test
+    void recorderFinalizationReportsUnstableFinalCandidateScan() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 2, 0));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, """
+                {"mappings":[{"id":"late-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> polling.stopRecording("orders"));
+
+        assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertEquals("candidate-stabilization", error.details().get("stage"));
+        assertEquals(List.of("late-id"), error.details().get("candidateIds"));
+    }
+
+    @Test
+    void recorderStopPreservesAuthoritativeClientRejectionWithoutCleanup() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(400, "not recording");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(2, transport.requestCount());
     }
 
     @Test
@@ -778,11 +1148,44 @@ class WireMockAdminClientTest {
                 () -> client.snapshotRequests("orders", mapper.createObjectNode()));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.POST, transport.requestAt(1).method());
         ObjectNode payload = transport.jsonAt(mapper, 1);
         assertFalse(payload.path("persist").asBoolean(true));
         assertEquals("IDS", payload.path("outputFormat").asText());
         assertEquals("/__admin/mappings/snapshot-id", transport.requestAt(3).target());
+    }
+
+    @Test
+    void recorderSnapshotCleansCandidatesAfterAmbiguousServerFailure() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(500, "snapshot response lost");
+        transport.respond(200, """
+                {"mappings":[{"id":"snapshot-id"}],"meta":{"total":1}}
+                """);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.snapshotRequests("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("/__admin/mappings/snapshot-id", transport.requestAt(3).target());
+        assertEquals(5, transport.requestCount());
+    }
+
+    @Test
+    void recorderSnapshotPreservesAuthoritativeClientRejectionWithoutCleanup() {
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(400, "invalid snapshot spec");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.snapshotRequests("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(2, transport.requestCount());
     }
 
     @Test
@@ -825,8 +1228,10 @@ class WireMockAdminClientTest {
         transport.respond(204, "");
         transport.respond(404, "");
 
-        assertThrows(McpOperationException.class, () -> client.stopRecording("orders"));
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
 
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.DELETE, transport.requestAt(5).method());
         assertEquals("/__admin/mappings/first-id", transport.requestAt(5).target());
         assertEquals(HttpMethod.GET, transport.requestAt(6).method());
@@ -851,6 +1256,7 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals("/__admin/mappings/first-id", transport.requestAt(3).target());
         assertEquals("/__admin/mappings/second-id", transport.requestAt(5).target());
         assertEquals(7, transport.requestCount());
@@ -896,6 +1302,8 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
         assertEquals(List.of("recorded-id"), error.details().get("cleanupFailedIds"));
     }
 
@@ -911,6 +1319,19 @@ class WireMockAdminClientTest {
         assertEquals("missing", notFound.bodyAsString());
         assertEquals(500, failed.status());
         assertEquals("failed", failed.bodyAsString());
+    }
+
+    @Test
+    void ordinaryTrafficMarksOversizedResponseAsPotentiallyChanged() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 8, Set.of("authorization"));
+        transport.respond(200, "response-too-large");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.sendRequest("orders", HttpMethod.GET, "/orders", Map.of(), new byte[0]));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertTrue(error.stateMayHaveChanged());
     }
 
     @Test
@@ -981,12 +1402,16 @@ class WireMockAdminClientTest {
     }
 
     private static final class RecordingTransport implements FleetProxyTransport {
-        private final ArrayDeque<TransportResponse> responses = new ArrayDeque<>();
+        private final ArrayDeque<Object> responses = new ArrayDeque<>();
         private final List<TransportRequest> requests = new ArrayList<>();
 
         void respond(int status, String body) {
             responses.add(new TransportResponse(status, Map.of("content-type", List.of("application/json")),
                     body.getBytes(StandardCharsets.UTF_8)));
+        }
+
+        void fail(RuntimeException failure) {
+            responses.add(failure);
         }
 
         TransportRequest last() {
@@ -1012,7 +1437,11 @@ class WireMockAdminClientTest {
         @Override
         public TransportResponse execute(String mockId, TransportRequest request) {
             requests.add(request);
-            return responses.removeFirst();
+            Object response = responses.removeFirst();
+            if (response instanceof RuntimeException failure) {
+                throw failure;
+            }
+            return (TransportResponse) response;
         }
     }
 }

@@ -87,7 +87,8 @@ public class PodState {
                 lastAccessTimeMap.remove(pod.podName());
             }
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle replacement = MockPodLifecycle.starting(attemptId, null, System.currentTimeMillis());
+            MockPodLifecycle replacement = MockPodLifecycle.starting(
+                    attemptId, previousPodName, System.currentTimeMillis());
             podLifecycleMap.put(mockId, replacement);
             return new RestartClaim(true, replacement, previousPodName);
         } finally {
@@ -108,6 +109,10 @@ public class PodState {
         } finally {
             podLifecycleMap.unlock(mockId);
         }
+    }
+
+    public boolean isCurrentStartingAttempt(String mockId, String attemptId) {
+        return isCurrentStartingAttempt(podLifecycleMap.get(mockId), attemptId);
     }
 
     public boolean completeStart(String mockId, String attemptId, MockPodRef pod) {
@@ -132,10 +137,8 @@ public class PodState {
             if (!isCurrentStartingAttempt(current, attemptId)) {
                 return;
             }
-            podLifecycleMap.put(mockId,
-                    MockPodLifecycle.failed(attemptId, current.podName(), conciseFailureReason(exception)),
-                    FAILED_STARTUP_RETENTION_SECONDS,
-                    TimeUnit.SECONDS);
+            putFailedLifecycle(mockId,
+                    MockPodLifecycle.failed(attemptId, current.podName(), conciseFailureReason(exception)));
         } finally {
             podLifecycleMap.unlock(mockId);
         }
@@ -220,12 +223,17 @@ public class PodState {
     void markStartupFailed(String mockId, RuntimeException exception) {
         MockPodLifecycle current = podLifecycleMap.get(mockId);
         String podName = current == null ? null : current.podName();
-        podLifecycleMap.put(
-                mockId,
+        putFailedLifecycle(mockId,
                 MockPodLifecycle.failed(current == null ? null : current.attemptId(), podName,
-                        conciseFailureReason(exception)),
-                FAILED_STARTUP_RETENTION_SECONDS,
-                TimeUnit.SECONDS);
+                        conciseFailureReason(exception)));
+    }
+
+    private void putFailedLifecycle(String mockId, MockPodLifecycle failed) {
+        if (failed.podName() == null || failed.podName().isBlank()) {
+            podLifecycleMap.put(mockId, failed, FAILED_STARTUP_RETENTION_SECONDS, TimeUnit.SECONDS);
+            return;
+        }
+        podLifecycleMap.put(mockId, failed);
     }
 
     public Multi<Long> podChanges() {

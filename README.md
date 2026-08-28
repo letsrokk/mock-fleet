@@ -64,7 +64,7 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 
 The MCP service uses stateful Streamable HTTP and therefore runs one replica. Enabling it requires a pinned WireMock 3.x image; the default is `wiremock/wiremock:3.13.2-2`.
 
-The REST lifecycle is asynchronous and idempotent. `POST /__fleet/api/mocks/{mockId}/start` returns 200 for RUNNING or 202 for STARTING with `retryAfterMs`; poll the same endpoint until RUNNING. DELETE returns STOPPED even when the mock is starting, failed, already stopped, or absent. Config rows expose `lifecycle`, and config mutations return `{config,apply:{mockId,mode,lifecycle}}`. All lifecycle/config errors use `ApiError {code,message,retryable,stateMayHaveChanged,details}`; `CONFIG_CONFLICT` includes expected and current versions.
+The REST lifecycle is asynchronous and idempotent. `POST /__fleet/api/mocks/{mockId}/start` returns 200 for RUNNING or 202 for STARTING with `retryAfterMs`; poll the same endpoint until RUNNING. DELETE waits for an existing pod to be removed before it returns STOPPED, and also returns STOPPED when the mock is starting, failed, already stopped, or absent. Config rows expose `lifecycle`, and config mutations return `{config,apply:{mockId,mode,lifecycle}}`. All lifecycle/config errors use `ApiError {code,message,retryable,stateMayHaveChanged,details}`; `CONFIG_CONFLICT` includes expected and current versions.
 
 The checked-in [OpenAPI contract](fleet-api/src/main/resources/META-INF/openapi.yaml) documents the exact REST shapes. The running API serves the merged document at `/__fleet/api/openapi?format=json` and Swagger UI at `/__fleet/api/swagger-ui`.
 

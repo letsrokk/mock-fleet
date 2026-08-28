@@ -25,6 +25,22 @@ network_policy_render="$(helm template unusual-release "${chart_dir}" \
   --set fleet.mcp.enabled=true \
   --show-only templates/wiremock-egress-networkpolicy.yaml)"
 
+storage_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set storage.persistent=true \
+  --set storage.s3.bucket=contract-bucket \
+  --show-only templates/wiremock-mappings-pv.yaml)"
+
+for fragment in \
+  '- allow-delete' \
+  '- allow-overwrite' \
+  '- metadata-ttl minimal'; do
+  if ! grep -Fq -- "${fragment}" <<<"${storage_render}"; then
+    echo "Persistent S3 storage is missing its multi-writer mount option: ${fragment}" >&2
+    exit 1
+  fi
+done
+
 required_fragments=(
   'name: custom-fleet-mcp'
   'type: Recreate'
@@ -103,6 +119,17 @@ for fragment in \
   fi
 done
 
+grace_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set wiremock.terminationGracePeriodSeconds=12 \
+  --show-only templates/api-deployment.yaml)"
+grace_value="$(awk '/name: MOCK_FLEET_WIREMOCK_TERMINATION_GRACE_PERIOD_SECONDS/{getline; print $2; exit}' \
+  <<<"${grace_render}")"
+if [[ "${grace_value}" != '"12"' ]]; then
+  echo "Rendered API deployment omitted the WireMock termination grace period: ${grace_value}" >&2
+  exit 1
+fi
+
 mcp_ingress_line="$(grep -nE 'path: /__fleet/mcp$' <<<"${enabled_render}" | cut -d: -f1)"
 dash_ingress_line="$(grep -nE 'path: /__fleet$' <<<"${enabled_render}" | cut -d: -f1)"
 if [[ -z "${mcp_ingress_line}" || -z "${dash_ingress_line}" || ${mcp_ingress_line} -ge ${dash_ingress_line} ]]; then
@@ -121,13 +148,15 @@ override_render="$(helm template unusual-release "${chart_dir}" \
   --set fleet.mcp.apiBaseUrl=http://api.local:9000 \
   --set fleet.mcp.proxyBaseUrl=http://proxy.local:9001 \
   --set fleet.mcp.routing.mode=HOST \
-  --set fleet.mcp.routing.fleetHost=internal.example.test)"
+  --set fleet.mcp.routing.fleetHost=internal.example.test \
+  --set fleet.mcp.lifecycleTimeout=75S)"
 
 for fragment in \
   'value: "http://api.local:9000"' \
   'value: "http://proxy.local:9001"' \
   'value: "HOST"' \
-  'value: "internal.example.test"'; do
+  'value: "internal.example.test"' \
+  'value: "75S"'; do
   if ! grep -Fq "${fragment}" <<<"${override_render}"; then
     echo "Rendered MCP override is missing: ${fragment}" >&2
     exit 1

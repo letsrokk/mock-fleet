@@ -63,6 +63,8 @@ spec:
               value: {{ .Values.wiremock.containerImage | quote }}
             - name: MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY
               value: {{ .Values.wiremock.containerImagePullPolicy | quote }}
+            - name: MOCK_FLEET_WIREMOCK_TERMINATION_GRACE_PERIOD_SECONDS
+              value: {{ .Values.wiremock.terminationGracePeriodSeconds | quote }}
             {{- $wiremockServiceAccountName := include "mock-fleet.wiremockServiceAccountName" . }}
             {{- if $wiremockServiceAccountName }}
             - name: MOCK_FLEET_WIREMOCK_SERVICE_ACCOUNT_NAME

@@ -185,6 +185,7 @@ fleet:
       - Set-Cookie
       - X-API-Key
     timeout: 10S
+    lifecycleTimeout: 70S
     defaultPageSize: 50
     maxPageSize: 200
     maxPayloadBytes: 1048576
@@ -232,6 +233,7 @@ wiremock:
   containerName: wiremock
   containerImage: wiremock/wiremock:3.13.2-2
   containerImagePullPolicy: IfNotPresent
+  terminationGracePeriodSeconds: 5
   serviceAccount:
     create: true
     name: ""
@@ -262,6 +264,8 @@ storage:
     cacheSize: 1Gi
     mountOptions:
       - allow-delete
+      - allow-overwrite
+      - metadata-ttl minimal
 
 ingress:
   enabled: false

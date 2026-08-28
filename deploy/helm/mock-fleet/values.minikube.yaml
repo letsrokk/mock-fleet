@@ -36,6 +36,8 @@ storage:
       - force-path-style
       - allow-other
       - allow-delete
+      - allow-overwrite
+      - metadata-ttl minimal
       - region us-east-1
       - prefix mock-fleet/
 

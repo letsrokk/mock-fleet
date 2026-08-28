@@ -41,7 +41,7 @@ class FleetMcpToolsTrafficTest {
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, running());
             fleet.respond(200, running());
-            var tools = new FleetMcpTools(fleet.client(), wireMock, config(), mapper,
+            var tools = new FleetMcpTools(fleet.client(), wireMock, config(false), mapper,
                     new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
                     new McpToolExecutor(registry), metrics);
 
@@ -73,7 +73,7 @@ class FleetMcpToolsTrafficTest {
                 new WireMockVersion(3, 13, 2));
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, running());
-            var tools = new FleetMcpTools(fleet.client(), wireMock, config(), mapper, null, null,
+            var tools = new FleetMcpTools(fleet.client(), wireMock, config(false), mapper, null, null,
                     new McpToolExecutor(registry), metrics);
 
             ToolResponse response = tools.sendRequest("orders", "GET", "/expected-error", null, null);
@@ -85,6 +85,37 @@ class FleetMcpToolsTrafficTest {
             assertEquals("utf8", structured.path("response").path("body").path("encoding").asText());
             assertEquals("upstream-body", structured.path("response").path("body").path("data").asText());
         }
+    }
+
+    @Test
+    void sendRequestMarksPostDispatchInclusionFailureAsPotentiallyChanged() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "hello");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(false, 4))
+                    .sendRequest("orders", "GET", "/body", null, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error =
+                    ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("RESULT_TOO_LARGE", error.code());
+            assertTrue(error.stateMayHaveChanged());
+            assertEquals("orders", error.details().get("mockId"));
+        }
+    }
+
+    @Test
+    void sendRequestRejectsInvalidHeaderNameBeforeTrafficDispatch() {
+        assertInvalidRequestHeader(Map.of("Bad\nName", "value"));
+    }
+
+    @Test
+    void sendRequestRejectsInvalidHeaderValueBeforeTrafficDispatch() {
+        assertInvalidRequestHeader(Map.of("X-Test", "line-one\r\nline-two"));
     }
 
     @Test
@@ -176,6 +207,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(0, transport.requestCount());
         }
@@ -197,6 +229,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(0, transport.requestCount());
         }
@@ -251,6 +284,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
             assertEquals(0, transport.requestCount());
@@ -273,6 +307,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
             assertEquals(0, transport.requestCount());
@@ -356,6 +391,80 @@ class FleetMcpToolsTrafficTest {
             assertEquals("utf8", result.path("body").path("encoding").asText());
             assertEquals("file text", result.path("body").path("data").asText());
             assertEquals(9, result.path("body").path("sizeBytes").asInt());
+        }
+    }
+
+    @Test
+    void replacesPersistentMockPodAfterBodyFileWrite() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(201, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, stopped());
+            fleet.respond(202, starting());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(true))
+                    .putBodyFile("orders", "result.txt",
+                            Map.of("encoding", "utf8", "data", "hello", "sizeBytes", 5));
+
+            assertFalse(response.isError());
+            assertEquals(List.of(
+                    "POST /__fleet/api/mocks/orders/start",
+                    "DELETE /__fleet/api/mocks/orders",
+                    "POST /__fleet/api/mocks/orders/start"), fleet.requests());
+            assertEquals(2, transport.requestCount());
+        }
+    }
+
+    @Test
+    void leavesMockRunningAfterBodyFileWriteWhenRemountIsDisabled() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(201, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(false))
+                    .putBodyFile("orders", "result.txt",
+                            Map.of("encoding", "utf8", "data", "hello", "sizeBytes", 5));
+
+            assertFalse(response.isError());
+            assertEquals(List.of("POST /__fleet/api/mocks/orders/start"), fleet.requests());
+        }
+    }
+
+    @Test
+    void reportsStoredBodyFileWhenPersistentPodReplacementFails() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(201, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(503, """
+                    {"code":"MOCK_STOP_FAILED","message":"pod deletion timed out","retryable":true,
+                     "stateMayHaveChanged":false,"details":{"mockId":"orders"}}
+                    """);
+
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(true))
+                    .putBodyFile("orders", "result.txt",
+                            Map.of("encoding", "utf8", "data", "hello", "sizeBytes", 5));
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error =
+                    ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("MOCK_STOP_FAILED", error.code());
+            assertTrue(error.retryable());
+            assertTrue(error.stateMayHaveChanged());
+            assertEquals(true, error.details().get("bodyFileStored"));
+            assertEquals("result.txt", error.details().get("fileName"));
+            assertEquals(List.of(
+                    "POST /__fleet/api/mocks/orders/start",
+                    "DELETE /__fleet/api/mocks/orders"), fleet.requests());
+            assertEquals(2, transport.requestCount());
         }
     }
 
@@ -446,6 +555,27 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void stopRecordingMarksMalformedCandidateResponseAsPotentiallyChanged() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
+            assertEquals("orders", error.details().get("mockId"));
+        }
+    }
+
+    @Test
     void snapshotReturnsSanitizedCandidateIdsAndCount() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
@@ -468,13 +598,37 @@ class FleetMcpToolsTrafficTest {
     }
 
     private static FleetMcpTools tools(FleetApiClient fleetApi, FleetProxyTransport transport, ObjectMapper mapper) {
+        return tools(fleetApi, transport, mapper, config(false));
+    }
+
+    private static FleetMcpTools tools(FleetApiClient fleetApi, FleetProxyTransport transport, ObjectMapper mapper,
+            FleetMcpConfig config) {
         var registry = new SimpleMeterRegistry();
         var metrics = new McpMetrics(registry);
         var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
                 new WireMockVersion(3, 13, 2));
-        return new FleetMcpTools(fleetApi, wireMock, config(), mapper,
+        return new FleetMcpTools(fleetApi, wireMock, config, mapper,
                 new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
                 new McpToolExecutor(registry), metrics);
+    }
+
+    private static void assertInvalidRequestHeader(Map<String, Object> headers) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .sendRequest("orders", "GET", "/body", headers, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error =
+                    ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_ARGUMENT", error.code());
+            assertFalse(error.stateMayHaveChanged());
+            assertEquals(1, transport.requestCount());
+        }
     }
 
     private static String running() {
@@ -485,19 +639,28 @@ class FleetMcpToolsTrafficTest {
         return "{\"mockId\":\"orders\",\"status\":\"STARTING\",\"podName\":null,\"message\":null,\"retryAfterMs\":1000}";
     }
 
-    private static FleetMcpConfig config() {
+    private static String stopped() {
+        return "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"podName\":null,\"message\":null,\"retryAfterMs\":null}";
+    }
+
+    private static FleetMcpConfig config(boolean storageEnabled) {
+        return config(storageEnabled, 4096);
+    }
+
+    private static FleetMcpConfig config(boolean storageEnabled, int includedBodyBytes) {
         return new FleetMcpConfig() {
             @Override public URI apiBaseUrl() { return URI.create("http://api"); }
             @Override public URI proxyBaseUrl() { return URI.create("http://proxy"); }
             @Override public RoutingMode routingMode() { return RoutingMode.PATH; }
             @Override public Optional<String> fleetHost() { return Optional.empty(); }
             @Override public String wiremockImage() { return "wiremock/wiremock:3.13.2-2"; }
-            @Override public boolean storageEnabled() { return false; }
+            @Override public boolean storageEnabled() { return storageEnabled; }
             @Override public Duration timeout() { return Duration.ofSeconds(1); }
+            @Override public Duration lifecycleTimeout() { return Duration.ofSeconds(2); }
             @Override public int defaultPageSize() { return 50; }
             @Override public int maxPageSize() { return 200; }
             @Override public int maxPayloadBytes() { return 4096; }
-            @Override public int includedBodyBytes() { return 4096; }
+            @Override public int includedBodyBytes() { return includedBodyBytes; }
             @Override public Duration dependencyHealthTimeout() { return Duration.ofSeconds(1); }
             @Override public long maxCollectionScanBytes() { return 64 * 1024 * 1024; }
             @Override public int maxCollectionScanItems() { return 100_000; }

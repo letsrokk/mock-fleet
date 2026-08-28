@@ -63,7 +63,7 @@ paths:
       summary: Idempotently stop a RUNNING, STARTING, FAILED, or absent mock
       responses:
         "200":
-          description: The mock is STOPPED. Repeated calls return the same state.
+          description: The mock is STOPPED. Existing pods are removed before this response; repeated calls return the same state.
           content:
             application/json:
               schema:

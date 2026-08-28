@@ -27,18 +27,27 @@ class FleetApiClientTest {
     private FleetApiClient client;
     private int responseStatus;
     private String responseBody;
+    private long deleteDelayMillis;
 
     @BeforeEach
     void startServer() {
         responseStatus = 200;
         responseBody = "{}";
+        deleteDelayMillis = 0;
         vertx = Vertx.vertx();
         server = vertx.createHttpServer().requestHandler(request -> request.bodyHandler(body -> {
             requests.add(new CapturedRequest(request.method().name(), request.uri(), body.toString()));
             String response = request.uri().equals("/__fleet/api/mappings") ? "{\"enabled\":true}" : responseBody;
             int status = request.method().name().equals("DELETE")
                     && request.uri().startsWith("/__fleet/api/mocks/") ? 200 : responseStatus;
-            request.response().setStatusCode(status).putHeader("Content-Type", "application/json").end(response);
+            Runnable reply = () -> request.response().setStatusCode(status)
+                    .putHeader("Content-Type", "application/json").end(response);
+            if (deleteDelayMillis > 0 && request.method().name().equals("DELETE")
+                    && request.uri().startsWith("/__fleet/api/mocks/")) {
+                vertx.setTimer(deleteDelayMillis, ignored -> reply.run());
+            } else {
+                reply.run();
+            }
         })).listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
         client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
                 Duration.ofSeconds(2), 4096, mapper, new McpMetrics(new SimpleMeterRegistry()));
@@ -109,6 +118,87 @@ class FleetApiClientTest {
         assertTrue(error.retryable());
         assertFalse(error.stateMayHaveChanged());
         assertEquals("mock-orders-1", error.details().get("podName"));
+    }
+
+    @Test
+    void preservesExplicitMutationStateForStructuredUnavailableErrors() {
+        responseStatus = 503;
+        responseBody = """
+                {"code":"UPSTREAM_UNAVAILABLE","message":"Kubernetes API was unavailable","retryable":true,
+                 "stateMayHaveChanged":false,"details":{"mockId":"orders"}}
+                """;
+
+        McpOperationException error = assertThrows(McpOperationException.class, () -> client.startMock("orders"));
+
+        assertEquals("UPSTREAM_UNAVAILABLE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void usesTheLongerLifecycleTimeoutForPodDeletion() {
+        deleteDelayMillis = 100;
+        client.close();
+        client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
+                Duration.ofMillis(20), Duration.ofSeconds(1), 4096, mapper,
+                new McpMetrics(new SimpleMeterRegistry()));
+
+        client.stopMock("orders");
+
+        assertEquals(List.of("DELETE /__fleet/api/mocks/orders"),
+                requests.stream().map(CapturedRequest::summary).toList());
+    }
+
+    @Test
+    void marksTimedOutPodDeletionAsPotentiallyChanged() {
+        deleteDelayMillis = 200;
+        client.close();
+        client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
+                Duration.ofSeconds(1), Duration.ofMillis(20), 4096, mapper,
+                new McpMetrics(new SimpleMeterRegistry()));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("UPSTREAM_UNAVAILABLE", error.code());
+        assertTrue(error.retryable());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksMalformedPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "not-json";
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksEmptyPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "";
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksOversizedPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "{\"mockId\":\"orders\",\"status\":\"STOPPED\"}";
+        client.close();
+        client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
+                Duration.ofSeconds(1), Duration.ofSeconds(1), 8, mapper,
+                new McpMetrics(new SimpleMeterRegistry()));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertTrue(error.stateMayHaveChanged());
     }
 
     @Test

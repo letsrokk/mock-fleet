@@ -204,6 +204,16 @@ empty_bucket_probe_allows_ownership() {
   [[ $1 -eq 0 && "$2" == 0 ]]
 }
 
+write_bucket_ownership_marker() {
+  run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
+    --body /etc/hosts --metadata "ownershiptoken=${ownership_token}"
+}
+
+create_recording_target() {
+  kubectl create deployment recording-target --namespace "${namespace}" \
+    --image=hashicorp/http-echo:0.2.3 -- /http-echo --listen=:5678 --text=recorded
+}
+
 helm_deploy() {
   local selected_wiremock_image=$1
   local selected_pull_policy=$2
@@ -242,7 +252,9 @@ helm_deploy() {
     --set "storage.s3.mountOptions[0]=endpoint-url ${s3_endpoint}" \
     --set 'storage.s3.mountOptions[1]=force-path-style' \
     --set 'storage.s3.mountOptions[2]=allow-delete' \
-    --set 'storage.s3.mountOptions[3]=region us-east-1' \
+    --set 'storage.s3.mountOptions[3]=allow-overwrite' \
+    --set 'storage.s3.mountOptions[4]=metadata-ttl minimal' \
+    --set 'storage.s3.mountOptions[5]=region us-east-1' \
     --wait --timeout="${timeout_seconds}s"
 }
 
@@ -258,6 +270,10 @@ extract_mcp_json() {
   printf '%s\n' "${data}"
 }
 
+extract_mcp_session_id() {
+  awk 'tolower($1) == "mcp-session-id:" {gsub("\r", "", $2); print $2}' | tail -n 1
+}
+
 mcp_post() {
   local payload=$1
   local headers_file="${work_dir}/mcp-headers"
@@ -271,14 +287,29 @@ mcp_post() {
   extract_mcp_json "${body_file}"
 }
 
+mcp_notify() {
+  local payload=$1
+  local status
+  if ! status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+      -H "Mcp-Session-Id: ${mcp_session}" -H 'Mcp-Protocol-Version: 2025-11-25' \
+      --data "${payload}" "http://127.0.0.1:${mcp_port}/__fleet/mcp"); then
+    return 1
+  fi
+  if [[ "${status}" != 202 ]]; then
+    printf '[cluster-e2e] ERROR: MCP notification returned HTTP %s instead of 202.\n' "${status}" >&2
+    return 1
+  fi
+}
+
 initialize_mcp() {
   local payload response
   payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"cluster-e2e","version":"1"}}}'
   response=$(mcp_post "${payload}")
   assert_jq "${response}" '.result.protocolVersion == "2025-11-25"' "MCP initialization failed"
-  mcp_session=$(awk 'BEGIN{IGNORECASE=1} /^Mcp-Session-Id:/{gsub("\r", "", $2); print $2}' "${work_dir}/mcp-headers" | tail -n 1)
+  mcp_session=$(extract_mcp_session_id <"${work_dir}/mcp-headers")
   [[ -n "${mcp_session}" ]] || fail "MCP initialization did not return Mcp-Session-Id."
-  mcp_post '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
+  mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 }
 
 mcp_tool_raw() {
@@ -326,6 +357,20 @@ assert_mock_starting_contract() {
     "WireMock tool did not return the complete MOCK_STARTING contract"
 }
 
+mock_starting_retry_is_safe() {
+  local result=$1
+  local mock_id=$2
+  jq -e --arg mock_id "${mock_id}" '
+    .isError == true
+    and .structuredContent.error.code == "MOCK_STARTING"
+    and .structuredContent.error.retryable == true
+    and .structuredContent.error.stateMayHaveChanged == false
+    and .structuredContent.error.details.mockId == $mock_id
+    and .structuredContent.error.details.status == "STARTING"
+    and .structuredContent.error.details.retryAfterMs == 1000
+  ' >/dev/null <<<"${result}"
+}
+
 assert_persistent_restart_state() {
   local result=$1
   local surviving_stub_id=$2
@@ -344,11 +389,15 @@ poll_mcp_success() {
   cat "${result_file}"
 }
 
+create_stub_when_ready() {
+  poll_mcp_success create_stub "$1"
+}
+
 poll_mcp_attempt() {
   local tool=$1
   local arguments=$2
   local result_file=$3
-  local result code
+  local result code mock_id
   result=$(mcp_tool_raw "${tool}" "${arguments}") || return 1
   if [[ $(jq -r '.isError // false' <<<"${result}") == false ]]; then
     jq -c '.structuredContent' <<<"${result}" >"${result_file}"
@@ -359,6 +408,11 @@ poll_mcp_attempt() {
     printf '%s\n' "${result}" | jq . >&2
     fail "${tool} failed while polling with ${code}."
   }
+  mock_id=$(jq -r '.mockId // empty' <<<"${arguments}")
+  if [[ -z "${mock_id}" ]] || ! mock_starting_retry_is_safe "${result}" "${mock_id}"; then
+    printf '%s\n' "${result}" | jq . >&2
+    fail "${tool} returned an unsafe MOCK_STARTING retry contract."
+  fi
   return 1
 }
 
@@ -387,11 +441,62 @@ start_api_port_forward() {
     "http://127.0.0.1:${api_port}/__fleet/api/config"
 }
 
+api_replacement_ready() {
+  local old_pod=$1
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o json) || return 1
+  jq -e --arg old_pod "${old_pod}" '
+    [.items[]
+      | select(.metadata.deletionTimestamp == null)
+      | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+      | .metadata.name] as $ready
+    | ($ready | length) == 2 and ($ready | index($old_pod)) == null
+  ' >/dev/null <<<"${pods}"
+}
+
+restart_one_api_replica() {
+  local old_pod
+  old_pod=$(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
+  kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
+  poll_until "replacement of API pod ${old_pod}" api_replacement_ready "${old_pod}"
+  start_api_port_forward
+}
+
 api_mock_failed() {
   local mock_id=$1
   api_request GET /__fleet/api/mocks
   [[ "${api_status}" == 200 ]] || return 1
   jq -e --arg id "${mock_id}" '.[] | select(.mockId == $id and .status == "FAILED")' >/dev/null <<<"${api_body}"
+}
+
+ready_wiremock_pod_name_from_json() {
+  local mock_id=$1
+  local pods=$2
+  jq -er --arg id "${mock_id}" '
+    [.items[]
+      | select(.metadata.deletionTimestamp == null)
+      | select(.metadata.labels["mock-fleet/mock-id"] == $id)
+      | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+      | .metadata.name]
+    | if length == 1 then .[0] else empty end
+  ' <<<"${pods}"
+}
+
+ready_wiremock_pod_name() {
+  local mock_id=$1
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" -o json) || return 1
+  ready_wiremock_pod_name_from_json "${mock_id}" "${pods}"
+}
+
+wiremock_pod_was_replaced() {
+  local mock_id=$1
+  local old_pod=$2
+  local new_pod
+  new_pod=$(ready_wiremock_pod_name "${mock_id}") || return 1
+  [[ "${new_pod}" != "${old_pod}" ]]
 }
 
 verify_api_replicas() {
@@ -432,7 +537,7 @@ api_replicas_have_cpu_request() {
 }
 
 run_contracts() {
-  local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args
+  local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args body_file_pod
   local main_mock="m-${run_id:0:18}"
   local config_mock="cfg-${run_id:0:16}"
   local cold_mock="cold-${run_id:0:16}"
@@ -510,10 +615,7 @@ run_contracts() {
     "Config conflict omitted reconciliation versions"
 
   log "Restarting one API replica and checking fresh-replica config."
-  local old_pod
-  old_pod=$(kubectl get pods --namespace "${namespace}" -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
-  kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
-  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
+  restart_one_api_replica
   verify_api_replicas "${main_mock}" --disable-banner
 
   log "Checking deterministic cold-start retry and STARTING cleanup."
@@ -556,7 +658,7 @@ run_contracts() {
 
   log "Checking recoverable persistent update and restart survival."
   config=$(cat "${fixture_dir}/persistent-stub.json")
-  result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
+  result=$(create_stub_when_ready "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
   stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
   [[ -n "${stub_id}" && "${stub_id}" != null ]] || fail "create_stub did not return a stub ID: ${result}"
   mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${stub_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
@@ -584,16 +686,33 @@ run_contracts() {
     "Persistent update did not survive restart"
 
   log "Checking body files and encoded byte contracts."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the body-file write."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5}}')
   mcp_success put_body_file "${body_args}" >/dev/null
-  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
   assert_jq "${result}" '.body == {encoding:"utf8",data:"hello",sizeBytes:5}' "UTF-8 body file did not round-trip"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Persistent body-file write did not replace the WireMock pod."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the body-file overwrite."
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"world!",sizeBytes:6}}')
+  mcp_success put_body_file "${body_args}" >/dev/null
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
+  assert_jq "${result}" '.body == {encoding:"utf8",data:"world!",sizeBytes:6}' \
+    "UTF-8 body-file overwrite did not replace the stored bytes"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Persistent body-file overwrite did not replace the WireMock pod."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the binary body-file write."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2}}')
   mcp_success put_body_file "${body_args}" >/dev/null
-  result=$(mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
   assert_jq "${result}" '.body == {encoding:"base64",data:"AAE=",sizeBytes:2}' "Binary body file did not round-trip"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Repeated persistent body-file write did not replace the WireMock pod."
   result=$(mcp_success list_body_files "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
-  assert_jq "${result}" '.files | length == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
+  assert_jq "${result}" '(.files | length) == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
     "Body-file cursor page was incomplete"
 
   log "Checking matched/missed analysis, redaction, and Admin-path guards."
@@ -602,11 +721,11 @@ run_contracts() {
   config='{"request":{"method":"GET","urlPath":"/never-hit"},"response":{"status":204}}'
   result=$(mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')")
   unmatched_stub_id=$(jq -r '.stub.id // .stub.uuid' <<<"${result}")
-  config='{"request":{"method":"GET","urlPath":"/multi-header"},"response":{"status":200,"headers":{"Set-Cookie":["first=one","second=two"]}}}'
+  config='{"request":{"method":"GET","urlPath":"/multi-header"},"response":{"status":200,"headers":{"X-Duplicate-Response":["first","second"]}}}'
   mcp_success create_stub "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')" >/dev/null
   result=$(mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/multi-header",headers:{"X-Duplicate":["one","two"]}}')")
-  assert_jq "${result}" '.response.headers | to_entries | map(select((.key | ascii_downcase) == "set-cookie"))[0].value == ["first=one","second=two"]' \
-    "Fleet Proxy replaced duplicate Set-Cookie response headers"
+  assert_jq "${result}" '.response.headers | to_entries | map(select((.key | ascii_downcase) == "x-duplicate-response"))[0].value == ["first","second"]' \
+    "Fleet Proxy replaced duplicate response headers"
   result=$(mcp_success find_requests "$(jq -cn --arg id "${main_mock}" '{mockId:$id,requestPattern:{urlPath:"/multi-header"},limit:10}')")
   assert_jq "${result}" '.requests[0].request.headers."X-Duplicate" == ["one","two"] or .requests[0].headers."X-Duplicate" == ["one","two"]' \
     "Fleet Proxy replaced duplicate request headers"
@@ -696,10 +815,127 @@ self_test() {
     || fail "Cluster fixtures are missing."
   [[ "${namespace}" == mock-fleet-e2e-* && "${bucket}" == mock-fleet-e2e-* && "${namespace}" != "${bucket}" ]] \
     || fail "Run resources are not isolated."
+  local helm_command
+  helm_command=$(
+    kubectl() { printf '10.0.0.1\n'; }
+    helm() { printf '%s\n' "$*"; }
+    helm_deploy wiremock/wiremock:3.13.2-2 IfNotPresent
+  )
+  for mount_option in \
+    'storage.s3.mountOptions[3]=allow-overwrite' \
+    'storage.s3.mountOptions[4]=metadata-ttl minimal'; do
+    grep -Fq -- "${mount_option}" <<<"${helm_command}" \
+      || fail "Live S3 storage is missing its multi-writer mount option: ${mount_option}"
+  done
+  log "S3 multi-writer mount contract passed."
   local dry_output
   dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
   grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."
+  local marker_command
+  marker_command=$(
+    run_s3_cli() { printf '%s\n' "$*"; }
+    write_bucket_ownership_marker
+  )
+  grep -Fq -- '--body /etc/hosts' <<<"${marker_command}" \
+    || fail "Ownership marker upload does not pass a regular file to AWS CLI."
+  log "Ownership marker upload contract passed."
+  local recording_command
+  recording_command=$(
+    kubectl() { printf '%s\n' "$*"; }
+    create_recording_target
+  )
+  grep -Fq -- '-- /http-echo --listen=:5678 --text=recorded' <<<"${recording_command}" \
+    || fail "Recording target does not invoke the image binary explicitly."
+  log "Recording target command contract passed."
+  local parsed_session
+  parsed_session=$(printf 'mcp-session-id: self-test-session\r\n' | extract_mcp_session_id)
+  [[ "${parsed_session}" == self-test-session ]] \
+    || fail "MCP session parsing is not portable across HTTP header casing."
+  log "MCP session header contract passed."
+  if ! (
+    curl() { printf '202'; }
+    mcp_session=self-test-session
+    mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  ); then
+    fail "MCP notification helper rejected the protocol's empty 202 response."
+  fi
+  if (
+    curl() { printf '200'; }
+    mcp_session=self-test-session
+    mcp_notify '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null 2>&1
+  ); then
+    fail "MCP notification helper accepted a non-202 response."
+  fi
+  log "MCP notification response contract passed."
+  local ready_replacement='{"items":[
+    {"metadata":{"name":"api-new-1"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},
+    {"metadata":{"name":"api-new-2"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${ready_replacement}"; }
+    api_replacement_ready api-old
+  ); then
+    fail "API replacement readiness rejected two new ready pods."
+  fi
+  if (
+    kubectl() { printf '%s\n' "${ready_replacement/api-new-1/api-old}"; }
+    api_replacement_ready api-old
+  ); then
+    fail "API replacement readiness accepted the pod selected for deletion."
+  fi
+  log "API replacement readiness contract passed."
+  local wiremock_replacement='{"items":[
+    {"metadata":{"name":"wiremock-old","deletionTimestamp":"2026-08-28T00:00:00Z","labels":{"mock-fleet/mock-id":"self-test"}},"status":{"conditions":[{"type":"Ready","status":"True"}]}},
+    {"metadata":{"name":"wiremock-new","labels":{"mock-fleet/mock-id":"self-test"}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${wiremock_replacement}"; }
+    wiremock_pod_was_replaced self-test wiremock-old
+  ); then
+    fail "WireMock replacement assertion rejected a new ready pod."
+  fi
+  if (
+    kubectl() { printf '%s\n' "${wiremock_replacement}"; }
+    wiremock_pod_was_replaced self-test wiremock-new
+  ); then
+    fail "WireMock replacement assertion accepted the original ready pod."
+  fi
+  log "WireMock pod replacement contract passed."
+  local api_restart_commands
+  api_restart_commands=$(
+    kubectl() {
+      if [[ "$*" == *jsonpath=* ]]; then
+        printf 'api-self-test-pod\n'
+      elif [[ "$*" == *'-o json'* ]]; then
+        printf '%s\n' "${ready_replacement}"
+      else
+        printf 'kubectl %s\n' "$*"
+      fi
+    }
+    start_api_port_forward() { printf 'api-port-forward-restarted\n'; }
+    restart_one_api_replica
+  )
+  grep -Fq 'api-port-forward-restarted' <<<"${api_restart_commands}" \
+    || fail "API replica restart contract left a stale pod-bound port-forward."
+  log "API replica transport restart contract passed."
+  local cold_start_create_command
+  cold_start_create_command=$(
+    poll_mcp_success() { printf '%s\n' "$*"; }
+    create_stub_when_ready '{"mockId":"self-test","mapping":{}}'
+  )
+  grep -Fq 'create_stub {"mockId":"self-test","mapping":{}}' <<<"${cold_start_create_command}" \
+    || fail "Cold-start stub creation does not use the retryable MCP polling path."
+  log "Cold-start mutation retry contract passed."
   local starting_result='{"isError":true,"structuredContent":{"error":{"code":"MOCK_STARTING","message":"Mock self-test is still starting","retryable":true,"stateMayHaveChanged":false,"details":{"mockId":"self-test","status":"STARTING","retryAfterMs":1000}}}}'
+  mock_starting_retry_is_safe "${starting_result}" self-test \
+    || fail "Safe MOCK_STARTING result was not eligible for retry."
+  if mock_starting_retry_is_safe "$(jq -c '.structuredContent.error.retryable = false' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "$(jq -c '.structuredContent.error.stateMayHaveChanged = true' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "$(jq -c 'del(.structuredContent.error.details.status)' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "${starting_result}" other-mock; then
+    fail "Unsafe MOCK_STARTING result was eligible for retry."
+  fi
+  log "MOCK_STARTING retry safety contract passed."
   assert_mock_starting_contract "${starting_result}" self-test
   if ( assert_mock_starting_contract '{"isError":false}' self-test >/dev/null 2>&1 ); then
     fail "Cold-start assertion accepted a successful WireMock result."
@@ -825,14 +1061,12 @@ else
 fi
 empty_bucket_probe_allows_ownership "${bucket_empty_probe_status}" "${bucket_object_count}" \
   || fail "Cannot claim ownership of ${bucket}; the new bucket is not provably empty."
-run_s3_cli mark s3api put-object --bucket "${bucket}" --key "${bucket_owner_key}" \
-  --body /dev/null --metadata "ownershiptoken=${ownership_token}" >/dev/null 2>&1 \
+write_bucket_ownership_marker >/dev/null 2>&1 \
   || fail "Unable to write the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 bucket_ownership_marker_matches \
   || fail "Unable to verify the ownership marker for ${bucket}. Cleanup will refuse to delete it."
 
-kubectl create deployment recording-target --namespace "${namespace}" \
-  --image=hashicorp/http-echo:0.2.3 -- --listen=:5678 --text=recorded >/dev/null
+create_recording_target >/dev/null
 kubectl expose deployment recording-target --namespace "${namespace}" --port=5678 --target-port=5678 >/dev/null
 kubectl rollout status deployment/recording-target --namespace "${namespace}" --timeout="${timeout_seconds}s"
 

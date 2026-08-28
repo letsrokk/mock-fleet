@@ -69,7 +69,7 @@ Every collection returns `page` with the same metadata:
 }
 ```
 
-Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`, for running, starting, failed, already stopped, or absent pods. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
+Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and waits for an existing pod to be removed before it returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`. Already stopped or absent mocks return STOPPED directly. Pod deletion uses the longer `fleet.mcp.lifecycleTimeout` budget, which must exceed the Fleet API pod-creation timeout. If a mutating Fleet API request times out or loses its response, MCP reports `stateMayHaveChanged: true`; reconcile the lifecycle or config before retrying. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
 
 ## Configuration
 
@@ -102,6 +102,10 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 ```
 
 Responses and `get_body_file` use `{body:{encoding,data,sizeBytes}}`. The server emits `utf8` only for strictly decoded printable UTF-8; otherwise it emits base64. `send_request` wraps traffic as `{mockId,response:{status,headers,contentType,body}}`. Sensitive response and journal headers are replaced with `[REDACTED]`.
+
+With persistent S3 storage, `put_body_file` stops and starts the mock after a successful write so the replacement WireMock process reloads the shared persistent state. This replacement resets temporary stubs, the request journal, scenarios, and recording state; persistent stubs remain. The chart configures overwrite support and a minimal metadata TTL to reduce cross-mount staleness. S3 Mountpoint does not coordinate concurrent writes to the same key, so do not race MCP and dashboard mutations of one body file. The write result is successful once that restart has started. A following WireMock tool can temporarily return the normal retry-safe `MOCK_STARTING` error until the mock reaches RUNNING. Non-persistent mocks stay running after the write.
+
+If the replacement lifecycle fails after the file was stored, the tool preserves the lifecycle error code and reports `stateMayHaveChanged: true`, `details.bodyFileStored: true`, and the affected `mockId` and `fileName`. Treat that result as a partial success: retrying the same write is safe for the file content, but it can replace the pod again. The published tool annotation therefore does not claim idempotence.
 
 `delete_body_file` returns `{mockId,fileName,deleted,forced}`. The default reference check stops at the first mapping that uses the file and returns `BODY_FILE_REFERENCED` with its `stubId`. `force=true` skips the reference scan and deletes immediately.
 

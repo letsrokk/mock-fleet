@@ -40,6 +40,7 @@ mock-fleet:
     wiremock-image: ${FLEET_MCP_WIREMOCK_IMAGE:wiremock/wiremock:3.13.2-2}
     storage-enabled: ${FLEET_MCP_STORAGE_ENABLED:false}
     timeout: ${FLEET_MCP_TIMEOUT:10S}
+    lifecycle-timeout: ${FLEET_MCP_LIFECYCLE_TIMEOUT:70S}
     default-page-size: ${FLEET_MCP_DEFAULT_PAGE_SIZE:50}
     max-page-size: ${FLEET_MCP_MAX_PAGE_SIZE:200}
     max-payload-bytes: ${FLEET_MCP_MAX_PAYLOAD_BYTES:1048576}

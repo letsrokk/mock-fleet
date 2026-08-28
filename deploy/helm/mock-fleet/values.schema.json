@@ -119,6 +119,7 @@
                   "items": { "type": "string", "minLength": 1 }
                 },
                 "timeout": { "type": "string", "minLength": 1 },
+                "lifecycleTimeout": { "type": "string", "minLength": 1 },
                 "defaultPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
                 "maxPageSize": { "type": "integer", "minimum": 1, "maximum": 200 },
                 "maxPayloadBytes": { "type": "integer", "minimum": 1 },
@@ -136,6 +137,7 @@
                 "outbound",
                 "sensitiveHeaders",
                 "timeout",
+                "lifecycleTimeout",
                 "defaultPageSize",
                 "maxPageSize",
                 "maxPayloadBytes",
@@ -157,6 +159,7 @@
       "properties": {
         "podNamePrefix": { "type": "string", "minLength": 1 },
         "containerImage": { "type": "string", "minLength": 1 },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
         "serviceAccount": {
           "type": "object",
           "properties": {

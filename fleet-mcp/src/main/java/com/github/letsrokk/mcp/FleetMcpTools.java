@@ -22,9 +22,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 @Singleton
 public final class FleetMcpTools {
+
+    private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private final FleetApiClient fleetApi;
     private final WireMockAdminClient wireMock;
@@ -302,7 +305,7 @@ public final class FleetMcpTools {
             TransportResponse response = wireMock.sendRequest(mockId, parseMethod(method), path, headerMap(headers), requestBody);
             ObjectNode result = mapper.createObjectNode();
             result.put("mockId", mockId);
-            result.set("response", trafficResult(response));
+            result.set("response", trafficResult(mockId, response));
             return McpToolExecutor.ToolResult.of("Received HTTP " + response.status() + " from " + mockId + ".", result);
         });
     }
@@ -450,16 +453,32 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content. Persistent S3 storage replaces the pod and resets temporary stubs, requests, scenarios, and recording state.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse putBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName,
             @ToolArg(description = "Encoded file content") Map<String, Object> body) {
         return wireMock("put_body_file", mockId, () -> coordinator.serialized(mockId, () -> {
             byte[] content = decodeBody(body, true);
             wireMock.putBodyFile(mockId, fileName, content);
+            if (config.storageEnabled()) {
+                replacePersistentBodyFilePod(mockId, fileName);
+            }
             return McpToolExecutor.ToolResult.of("Stored body file " + fileName + ".",
                     Map.of("mockId", mockId, "fileName", fileName, "sizeBytes", content.length));
         }));
+    }
+
+    private void replacePersistentBodyFilePod(String mockId, String fileName) {
+        try {
+            requireStopLifecycleResponse(mockId);
+            requireLifecycleResponse(mockId);
+        } catch (McpOperationException failure) {
+            Map<String, Object> details = new LinkedHashMap<>(failure.details());
+            details.put("mockId", mockId);
+            details.put("fileName", fileName);
+            details.put("bodyFileStored", true);
+            throw new McpOperationException(failure.code(), failure.getMessage(), failure.retryable(), true, details);
+        }
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
@@ -539,15 +558,15 @@ public final class FleetMcpTools {
         MockIdValidator.requireValid(mockId);
         JsonNode response = request.get();
         if (!response.isObject() || !response.path("mockId").isTextual() || !response.path("status").isTextual()) {
-            throw invalidUpstreamResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
+            throw invalidMutationResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
         }
         if (!mockId.equals(response.path("mockId").asText())) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response mockId does not match the requested mock", mockId);
         }
         String status = response.path("status").asText();
         if (!allowedStatuses.contains(status)) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response contains unsupported status " + status, mockId);
         }
         requireNullableText(response, "podName", mockId, operation);
@@ -585,11 +604,11 @@ public final class FleetMcpTools {
     private void requireNullableText(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value == null) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " is required", mockId);
         }
         if (!value.isNull() && !value.isTextual()) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " must be a string or null", mockId);
         }
     }
@@ -597,11 +616,11 @@ public final class FleetMcpTools {
     private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value == null) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " is required", mockId);
         }
         if (!value.isNull() && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field
                             + " must be a non-negative integer or null",
                     mockId);
@@ -677,9 +696,11 @@ public final class FleetMcpTools {
         }
     }
 
-    private ObjectNode trafficResult(TransportResponse response) {
+    private ObjectNode trafficResult(String mockId, TransportResponse response) {
         if (response.body().length > config.includedBodyBytes()) {
-            throw tooLarge(response.body().length, config.includedBodyBytes());
+            throw new McpOperationException("RESULT_TOO_LARGE", "Body exceeds the configured inclusion limit", false,
+                    true, Map.of("mockId", mockId, "actualBytes", response.body().length,
+                            "limitBytes", config.includedBodyBytes()));
         }
         ObjectNode result = binaryResult(response.body(), firstHeader(response.headers(), "content-type"));
         result.put("status", response.status());
@@ -757,7 +778,7 @@ public final class FleetMcpTools {
     private ObjectNode recordingCandidates(String mockId, JsonNode response) {
         JsonNode ids = response.path("ids");
         if (!ids.isArray()) {
-            throw invalidUpstreamResponse("WireMock recorder response is missing candidate IDs", mockId);
+            throw invalidMutationResponse("WireMock recorder response is missing candidate IDs", mockId);
         }
         ObjectNode result = mapper.createObjectNode();
         result.put("mockId", mockId);
@@ -787,13 +808,25 @@ public final class FleetMcpTools {
         }
         Map<String, List<String>> result = new LinkedHashMap<>();
         headers.forEach((name, value) -> {
+            if (name == null || !HEADER_NAME.matcher(name).matches()) {
+                throw new IllegalArgumentException("Header name is invalid");
+            }
             if (value instanceof List<?> values) {
-                result.put(name, values.stream().map(String::valueOf).toList());
+                result.put(name, values.stream().map(String::valueOf).map(FleetMcpTools::requireHeaderValue).toList());
             } else {
-                result.put(name, List.of(String.valueOf(value)));
+                result.put(name, List.of(requireHeaderValue(String.valueOf(value))));
             }
         });
         return Map.copyOf(result);
+    }
+
+    private static String requireHeaderValue(String value) {
+        boolean invalid = value.chars().anyMatch(character -> character == '\r' || character == '\n'
+                || character == 0x7f || (character < 0x20 && character != '\t'));
+        if (invalid) {
+            throw new IllegalArgumentException("Header value contains prohibited control characters");
+        }
+        return value;
     }
 
     private byte[] decodeBody(Map<String, Object> body, boolean required) {
