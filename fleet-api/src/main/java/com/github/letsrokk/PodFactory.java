@@ -119,7 +119,7 @@ public class PodFactory {
 
         PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
                 .withContainers(container)
-                .withTerminationGracePeriodSeconds(1L)
+                .withTerminationGracePeriodSeconds(config.wiremockTerminationGracePeriodSeconds())
                 .withRestartPolicy("Never");
 
         config.wiremockServiceAccountName()

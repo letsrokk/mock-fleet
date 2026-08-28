@@ -87,7 +87,8 @@ public class PodState {
                 lastAccessTimeMap.remove(pod.podName());
             }
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle replacement = MockPodLifecycle.starting(attemptId, null, System.currentTimeMillis());
+            MockPodLifecycle replacement = MockPodLifecycle.starting(
+                    attemptId, previousPodName, System.currentTimeMillis());
             podLifecycleMap.put(mockId, replacement);
             return new RestartClaim(true, replacement, previousPodName);
         } finally {
@@ -108,6 +109,10 @@ public class PodState {
         } finally {
             podLifecycleMap.unlock(mockId);
         }
+    }
+
+    public boolean isCurrentStartingAttempt(String mockId, String attemptId) {
+        return isCurrentStartingAttempt(podLifecycleMap.get(mockId), attemptId);
     }
 
     public boolean completeStart(String mockId, String attemptId, MockPodRef pod) {

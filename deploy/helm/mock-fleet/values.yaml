@@ -232,6 +232,7 @@ wiremock:
   containerName: wiremock
   containerImage: wiremock/wiremock:3.13.2-2
   containerImagePullPolicy: IfNotPresent
+  terminationGracePeriodSeconds: 5
   serviceAccount:
     create: true
     name: ""

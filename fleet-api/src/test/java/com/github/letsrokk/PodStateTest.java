@@ -168,12 +168,38 @@ class PodStateTest {
 
         assertEquals(true, replacement.claimed());
         assertEquals(MockLifecycleStatus.STARTING, replacement.lifecycle().status());
+        assertEquals("mock-fleet-demo-1", replacement.lifecycle().podName());
         assertEquals("mock-fleet-demo-1", replacement.previousPodName());
         org.junit.jupiter.api.Assertions.assertNotEquals("attempt-1", replacement.lifecycle().attemptId());
         verify(lifecycleMap).put("demo", replacement.lifecycle());
         when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
         assertEquals(false, podState.completeStart("demo", "attempt-1",
                 new MockPodRef("mock-fleet-demo-1", "10.0.0.1")));
+    }
+
+    @Test
+    void failedRestartRetainsPreviousPodForTheNextStartAttempt() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap, lifecycleMap);
+        MockPodRef previousPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(podMap.get("demo")).thenReturn(previousPod);
+
+        PodState.RestartClaim restart = podState.claimRestart("demo");
+        when(lifecycleMap.get("demo")).thenReturn(restart.lifecycle());
+        podState.failStart("demo", restart.lifecycle().attemptId(),
+                new RuntimeException("deletion timed out"));
+
+        MockPodLifecycle failed = MockPodLifecycle.failed(
+                restart.lifecycle().attemptId(), previousPod.podName(), "deletion timed out");
+        when(podMap.get("demo")).thenReturn(null);
+        when(lifecycleMap.get("demo")).thenReturn(failed);
+
+        PodState.StartClaim retry = podState.claimStart("demo", 2_000L, 1_000L);
+
+        assertEquals(true, retry.claimed());
+        assertEquals(previousPod.podName(), retry.previousPodName());
+        assertEquals(previousPod.podName(), retry.lifecycle().podName());
     }
 
     @Test

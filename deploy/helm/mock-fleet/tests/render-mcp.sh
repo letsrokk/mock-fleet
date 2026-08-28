@@ -103,6 +103,17 @@ for fragment in \
   fi
 done
 
+grace_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set wiremock.terminationGracePeriodSeconds=12 \
+  --show-only templates/api-deployment.yaml)"
+grace_value="$(awk '/name: MOCK_FLEET_WIREMOCK_TERMINATION_GRACE_PERIOD_SECONDS/{getline; print $2; exit}' \
+  <<<"${grace_render}")"
+if [[ "${grace_value}" != '"12"' ]]; then
+  echo "Rendered API deployment omitted the WireMock termination grace period: ${grace_value}" >&2
+  exit 1
+fi
+
 mcp_ingress_line="$(grep -nE 'path: /__fleet/mcp$' <<<"${enabled_render}" | cut -d: -f1)"
 dash_ingress_line="$(grep -nE 'path: /__fleet$' <<<"${enabled_render}" | cut -d: -f1)"
 if [[ -z "${mcp_ingress_line}" || -z "${dash_ingress_line}" || ${mcp_ingress_line} -ge ${dash_ingress_line} ]]; then

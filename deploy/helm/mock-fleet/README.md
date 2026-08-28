@@ -142,7 +142,7 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 | `fleet.api.logging.json` | `false` | Enable JSON console logging for the API. |
 | `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
-| `fleet.api.terminationGracePeriodSeconds` | `300` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
+| `fleet.api.terminationGracePeriodSeconds` | `30` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
 | `fleet.api.updateStrategy.type` | `RollingUpdate` | API deployment update strategy. |
 | `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods during rollout. |
 | `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods during rollout. |
@@ -223,6 +223,7 @@ MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `reco
 | `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
 | `wiremock.containerImage` | `wiremock/wiremock:3.13.2-2` | Image used for spawned WireMock pods. MCP supports WireMock 3.0.0 and newer. |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
+| `wiremock.terminationGracePeriodSeconds` | `5` | Graceful shutdown window for spawned WireMock pods. Fleet waits for full pod removal before replacement. |
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
 | `wiremock.serviceAccount.name` | `""` | Service account name. A generated name is used when creation is enabled and this is empty. |
 | `wiremock.serviceAccount.annotations` | `{}` | Annotations for workload identity or other integrations. |

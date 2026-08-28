@@ -157,6 +157,7 @@
       "properties": {
         "podNamePrefix": { "type": "string", "minLength": 1 },
         "containerImage": { "type": "string", "minLength": 1 },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 },
         "serviceAccount": {
           "type": "object",
           "properties": {

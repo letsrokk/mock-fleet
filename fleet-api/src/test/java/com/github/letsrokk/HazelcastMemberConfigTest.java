@@ -27,6 +27,7 @@ class HazelcastMemberConfigTest {
         assertFalse(memberConfig.getNetworkConfig().getJoin().getKubernetesConfig().isEnabled());
         assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.POD_MAP_NAME).getBackupCount());
         assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME).getBackupCount());
+        assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.POD_TRANSITION_LOCK_MAP_NAME).getBackupCount());
         assertEquals(1, memberConfig.getMapConfig(HazelcastMemberConfig.LAST_ACCESS_MAP_NAME).getBackupCount());
         assertEquals("GRACEFUL", memberConfig.getProperty("hazelcast.shutdownhook.policy"));
         assertEquals("300", memberConfig.getProperty("hazelcast.graceful.shutdown.max.wait"));

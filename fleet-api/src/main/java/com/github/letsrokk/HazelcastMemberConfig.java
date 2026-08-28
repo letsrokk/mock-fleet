@@ -13,6 +13,7 @@ public class HazelcastMemberConfig {
 
     static final String POD_MAP_NAME = "mock-pod-name-map";
     static final String POD_LIFECYCLE_MAP_NAME = "mock-pod-lifecycle-map";
+    static final String POD_TRANSITION_LOCK_MAP_NAME = "mock-pod-transition-lock-map";
     static final String LAST_ACCESS_MAP_NAME = "last-access-time-map";
 
     private final MockFleetConfig config;
@@ -41,6 +42,7 @@ public class HazelcastMemberConfig {
                 Integer.toString(hazelcast.gracefulShutdownMaxWaitSeconds()));
         memberConfig.getMapConfig(POD_MAP_NAME).setBackupCount(hazelcast.backupCount());
         memberConfig.getMapConfig(POD_LIFECYCLE_MAP_NAME).setBackupCount(hazelcast.backupCount());
+        memberConfig.getMapConfig(POD_TRANSITION_LOCK_MAP_NAME).setBackupCount(hazelcast.backupCount());
         memberConfig.getMapConfig(LAST_ACCESS_MAP_NAME).setBackupCount(hazelcast.backupCount());
 
         var network = memberConfig.getNetworkConfig();
