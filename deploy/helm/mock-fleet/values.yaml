@@ -66,6 +66,14 @@ fleet:
       pullPolicy: IfNotPresent
     podInactivityThreshold: 1M
     podCreationTimeout: 1M
+    maxActiveMocks: 20
+    maxConcurrentStarts: 4
+    queuedStartCapacity: 16
+    mappings:
+      maxDepth: 32
+      maxEntries: 10000
+    networkPolicy:
+      enabled: true
     logging:
       json: false
       level: INFO
@@ -238,6 +246,13 @@ wiremock:
     create: true
     name: ""
     annotations: {}
+  resourcePolicy:
+    requestFloor:
+      cpu: "100m"
+      memory: 128Mi
+    limitCeiling:
+      cpu: "4"
+      memory: 4Gi
   config:
     default:
       options: []
@@ -290,6 +305,18 @@ serviceAccount:
 
 rbac:
   create: true
+
+# Size namespace quota with fleet.api.maxActiveMocks, API replicas, and the
+# requests/limits of every fixed workload. Quota is a second boundary and may
+# intentionally cap active WireMock pods below the application maximum.
+resourceQuota:
+  enabled: true
+  hard:
+    pods: 30
+    requests.cpu: "8"
+    requests.memory: 12Gi
+    limits.cpu: "16"
+    limits.memory: 24Gi
 
 hazelcast:
   clusterName: mock-fleet

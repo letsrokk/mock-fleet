@@ -41,5 +41,11 @@ storage:
       - region us-east-1
       - prefix mock-fleet/
 
+# Keep the namespace quota boundary enabled for local deployments. Size its
+# hard limits with fleet.api.maxActiveMocks, fleet.api.replicas, and the fixed
+# workload requests when changing the defaults in values.yaml.
+resourceQuota:
+  enabled: true
+
 #env:
 #  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005

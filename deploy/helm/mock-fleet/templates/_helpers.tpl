@@ -55,6 +55,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-wiremock-egress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.apiIngressNetworkPolicyName" -}}
+{{- printf "%s-api-ingress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "mock-fleet.apiServiceUrl" -}}
 {{- $host := printf "%s.%s.svc.%s" (include "mock-fleet.apiFullname" .) (include "mock-fleet.namespace" .) (required "clusterDomain is required" .Values.clusterDomain) -}}
 {{- $port := int .Values.fleet.api.service.ports.http -}}
@@ -179,5 +183,97 @@ app.kubernetes.io/component: mcp
 {{- if or (lt (int .Values.fleet.mcp.defaultPageSize) 1) (gt (int .Values.fleet.mcp.defaultPageSize) (int .Values.fleet.mcp.maxPageSize)) (gt (int .Values.fleet.mcp.maxPageSize) 200) -}}
 {{- fail "fleet.mcp page sizes must satisfy 1 <= defaultPageSize <= maxPageSize <= 200" -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.quantityValue" -}}
+{{- $field := .field -}}
+{{- $raw := trim (toString .value) -}}
+{{- $numberPattern := "(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)" -}}
+{{- $quantityPattern := printf "^%s(?:[eE][+-]?[0-9]+|[EPTGMK]i|[numkMGTPE])?$" $numberPattern -}}
+{{- if not (regexMatch $quantityPattern $raw) -}}
+{{- fail (printf "%s must be a positive Kubernetes resource quantity" $field) -}}
+{{- end -}}
+{{- $number := regexFind (printf "^%s" $numberPattern) $raw -}}
+{{- $suffix := trimPrefix $number $raw -}}
+{{- $value := float64 $number -}}
+{{- if regexMatch "^[eE][+-]?[0-9]+$" $suffix -}}
+{{- $value = float64 $raw -}}
+{{- else if eq $suffix "n" -}}
+{{- $value = mulf $value 0.000000001 -}}
+{{- else if eq $suffix "u" -}}
+{{- $value = mulf $value 0.000001 -}}
+{{- else if eq $suffix "m" -}}
+{{- $value = mulf $value 0.001 -}}
+{{- else if or (eq $suffix "k") (eq $suffix "K") -}}
+{{- $value = mulf $value 1000 -}}
+{{- else if eq $suffix "M" -}}
+{{- $value = mulf $value 1000000 -}}
+{{- else if eq $suffix "G" -}}
+{{- $value = mulf $value 1000000000 -}}
+{{- else if eq $suffix "T" -}}
+{{- $value = mulf $value 1000000000000 -}}
+{{- else if eq $suffix "P" -}}
+{{- $value = mulf $value 1000000000000000 -}}
+{{- else if eq $suffix "E" -}}
+{{- $value = mulf $value 1000000000000000000 -}}
+{{- else if eq $suffix "Ki" -}}
+{{- $value = mulf $value 1024 -}}
+{{- else if eq $suffix "Mi" -}}
+{{- $value = mulf $value 1048576 -}}
+{{- else if eq $suffix "Gi" -}}
+{{- $value = mulf $value 1073741824 -}}
+{{- else if eq $suffix "Ti" -}}
+{{- $value = mulf $value 1099511627776 -}}
+{{- else if eq $suffix "Pi" -}}
+{{- $value = mulf $value 1125899906842624 -}}
+{{- else if eq $suffix "Ei" -}}
+{{- $value = mulf $value 1152921504606846976 -}}
+{{- end -}}
+{{- if le $value (float64 0) -}}
+{{- fail (printf "%s must be a positive Kubernetes resource quantity" $field) -}}
+{{- end -}}
+{{- printf "%g" $value -}}
+{{- end -}}
+
+{{- define "mock-fleet.validateSecurityBoundaries" -}}
+{{- if gt (int .Values.fleet.api.maxConcurrentStarts) (int .Values.fleet.api.maxActiveMocks) -}}
+{{- fail "fleet.api.maxConcurrentStarts must not exceed fleet.api.maxActiveMocks" -}}
+{{- end -}}
+{{- $cpuFloor := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.requestFloor.cpu" "value" .Values.wiremock.resourcePolicy.requestFloor.cpu) | float64 -}}
+{{- $memoryFloor := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.requestFloor.memory" "value" .Values.wiremock.resourcePolicy.requestFloor.memory) | float64 -}}
+{{- $cpuCeiling := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.limitCeiling.cpu" "value" .Values.wiremock.resourcePolicy.limitCeiling.cpu) | float64 -}}
+{{- $memoryCeiling := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.limitCeiling.memory" "value" .Values.wiremock.resourcePolicy.limitCeiling.memory) | float64 -}}
+{{- $cpuRequest := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.requests.cpu" "value" .Values.wiremock.config.default.resources.requests.cpu) | float64 -}}
+{{- $memoryRequest := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.requests.memory" "value" .Values.wiremock.config.default.resources.requests.memory) | float64 -}}
+{{- $cpuLimit := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.limits.cpu" "value" .Values.wiremock.config.default.resources.limits.cpu) | float64 -}}
+{{- $memoryLimit := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.limits.memory" "value" .Values.wiremock.config.default.resources.limits.memory) | float64 -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.requests.cpu" "value" (index .Values.resourceQuota.hard "requests.cpu")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.requests.memory" "value" (index .Values.resourceQuota.hard "requests.memory")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.limits.cpu" "value" (index .Values.resourceQuota.hard "limits.cpu")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.limits.memory" "value" (index .Values.resourceQuota.hard "limits.memory")) -}}
+{{- if gt $cpuFloor $cpuCeiling -}}
+{{- fail "wiremock.resourcePolicy.requestFloor.cpu must not exceed wiremock.resourcePolicy.limitCeiling.cpu" -}}
+{{- end -}}
+{{- if gt $memoryFloor $memoryCeiling -}}
+{{- fail "wiremock.resourcePolicy.requestFloor.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory" -}}
+{{- end -}}
+{{- if lt $cpuRequest $cpuFloor -}}
+{{- fail "wiremock.config.default.resources.requests.cpu must not be below wiremock.resourcePolicy.requestFloor.cpu" -}}
+{{- end -}}
+{{- if lt $memoryRequest $memoryFloor -}}
+{{- fail "wiremock.config.default.resources.requests.memory must not be below wiremock.resourcePolicy.requestFloor.memory" -}}
+{{- end -}}
+{{- if gt $cpuLimit $cpuCeiling -}}
+{{- fail "wiremock.config.default.resources.limits.cpu must not exceed wiremock.resourcePolicy.limitCeiling.cpu" -}}
+{{- end -}}
+{{- if gt $memoryLimit $memoryCeiling -}}
+{{- fail "wiremock.config.default.resources.limits.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory" -}}
+{{- end -}}
+{{- if gt $cpuRequest $cpuLimit -}}
+{{- fail "wiremock.config.default.resources.requests.cpu must not exceed wiremock.config.default.resources.limits.cpu" -}}
+{{- end -}}
+{{- if gt $memoryRequest $memoryLimit -}}
+{{- fail "wiremock.config.default.resources.requests.memory must not exceed wiremock.config.default.resources.limits.memory" -}}
 {{- end -}}
 {{- end -}}

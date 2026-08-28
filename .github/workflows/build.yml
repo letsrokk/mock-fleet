@@ -51,6 +51,9 @@ jobs:
       - name: Test MCP rendering
         run: deploy/helm/mock-fleet/tests/render-mcp.sh
 
+      - name: Test security boundary rendering
+        run: deploy/helm/mock-fleet/tests/render-security.sh
+
       - name: Test local rebuild selection
         run: bin/local/tests/deploy-rebuild.sh
 
