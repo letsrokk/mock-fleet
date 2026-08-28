@@ -555,15 +555,15 @@ public final class FleetMcpTools {
         MockIdValidator.requireValid(mockId);
         JsonNode response = request.get();
         if (!response.isObject() || !response.path("mockId").isTextual() || !response.path("status").isTextual()) {
-            throw invalidUpstreamResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
+            throw invalidMutationResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
         }
         if (!mockId.equals(response.path("mockId").asText())) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response mockId does not match the requested mock", mockId);
         }
         String status = response.path("status").asText();
         if (!allowedStatuses.contains(status)) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response contains unsupported status " + status, mockId);
         }
         requireNullableText(response, "podName", mockId, operation);
@@ -601,11 +601,11 @@ public final class FleetMcpTools {
     private void requireNullableText(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value == null) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " is required", mockId);
         }
         if (!value.isNull() && !value.isTextual()) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " must be a string or null", mockId);
         }
     }
@@ -613,11 +613,11 @@ public final class FleetMcpTools {
     private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId, String operation) {
         JsonNode value = response.get(field);
         if (value == null) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field + " is required", mockId);
         }
         if (!value.isNull() && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
-            throw invalidUpstreamResponse(
+            throw invalidMutationResponse(
                     "Fleet " + operation + " response field " + field
                             + " must be a non-negative integer or null",
                     mockId);

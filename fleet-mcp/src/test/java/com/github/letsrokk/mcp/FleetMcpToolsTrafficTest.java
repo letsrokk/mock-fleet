@@ -176,6 +176,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(0, transport.requestCount());
         }
@@ -197,6 +198,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(0, transport.requestCount());
         }
@@ -251,6 +253,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
             assertEquals(0, transport.requestCount());
@@ -273,6 +276,7 @@ class FleetMcpToolsTrafficTest {
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(List.of("DELETE /__fleet/api/mocks/orders"), fleet.requests());
             assertEquals(0, transport.requestCount());

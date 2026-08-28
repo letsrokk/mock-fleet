@@ -122,12 +122,18 @@ public final class FleetApiClient {
     private JsonNode json(HttpMethod method, String path, JsonNode payload, long requestTimeoutMillis) {
         TransportResponse response = raw(method, path, payload, requestTimeoutMillis);
         if (response.body().length == 0) {
+            if (method != HttpMethod.GET) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API returned an empty mutation response", false, true,
+                        Map.of("status", response.status()));
+            }
             return mapper.createObjectNode();
         }
         try {
             return mapper.readTree(response.body());
         } catch (Exception e) {
             throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Fleet API returned invalid JSON", false,
+                    method != HttpMethod.GET,
                     Map.of("status", response.status()));
         }
     }
@@ -146,16 +152,21 @@ public final class FleetApiClient {
             if (payload != null) {
                 request.putHeader("Content-Type", "application/json");
             }
-            TransportResponse response = HttpTransportSupport.await(request, body, maxPayloadBytes);
+            TransportResponse response;
+            try {
+                response = HttpTransportSupport.await(request, body, maxPayloadBytes);
+            } catch (McpOperationException transportFailure) {
+                if (method != HttpMethod.GET && !transportFailure.stateMayHaveChanged()) {
+                    throw new McpOperationException(transportFailure.code(), transportFailure.getMessage(),
+                            transportFailure.retryable(), true, transportFailure.details());
+                }
+                throw transportFailure;
+            }
             if (response.status() < 200 || response.status() >= 300) {
                 throw apiError(response, method != HttpMethod.GET);
             }
             return response;
         } catch (McpOperationException e) {
-            if (method != HttpMethod.GET && "UPSTREAM_UNAVAILABLE".equals(e.code())
-                    && !e.stateMayHaveChanged()) {
-                throw new McpOperationException(e.code(), e.getMessage(), e.retryable(), true, e.details());
-            }
             throw e;
         } catch (Exception e) {
             throw new McpOperationException("INVALID_JSON", "Unable to serialize Fleet API request", false, Map.of());

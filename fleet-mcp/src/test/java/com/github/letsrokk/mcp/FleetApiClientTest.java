@@ -121,6 +121,20 @@ class FleetApiClientTest {
     }
 
     @Test
+    void preservesExplicitMutationStateForStructuredUnavailableErrors() {
+        responseStatus = 503;
+        responseBody = """
+                {"code":"UPSTREAM_UNAVAILABLE","message":"Kubernetes API was unavailable","retryable":true,
+                 "stateMayHaveChanged":false,"details":{"mockId":"orders"}}
+                """;
+
+        McpOperationException error = assertThrows(McpOperationException.class, () -> client.startMock("orders"));
+
+        assertEquals("UPSTREAM_UNAVAILABLE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+    }
+
+    @Test
     void usesTheLongerLifecycleTimeoutForPodDeletion() {
         deleteDelayMillis = 100;
         client.close();
@@ -147,6 +161,43 @@ class FleetApiClientTest {
 
         assertEquals("UPSTREAM_UNAVAILABLE", error.code());
         assertTrue(error.retryable());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksMalformedPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "not-json";
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksEmptyPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "";
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void marksOversizedPodDeletionResponseAsPotentiallyChanged() {
+        responseBody = "{\"mockId\":\"orders\",\"status\":\"STOPPED\"}";
+        client.close();
+        client = new FleetApiClient(vertx, URI.create("http://127.0.0.1:" + server.actualPort()),
+                Duration.ofSeconds(1), Duration.ofSeconds(1), 8, mapper,
+                new McpMetrics(new SimpleMeterRegistry()));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopMock("orders"));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
         assertTrue(error.stateMayHaveChanged());
     }
 
