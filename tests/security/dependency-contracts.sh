@@ -46,32 +46,44 @@ assert_quarkus_platform_version() {
 }
 
 hazelcast_version() {
+  local pom=$1
+
   awk '
     /<dependency>/ {
       in_dependency = 1
-      is_hazelcast = 0
+      is_hazelcast_group = 0
+      is_hazelcast_artifact = 0
+      version = ""
     }
     in_dependency && /<groupId>com\.hazelcast<\/groupId>/ {
-      is_hazelcast = 1
+      is_hazelcast_group = 1
     }
-    in_dependency && is_hazelcast && /<version>/ {
+    in_dependency && /<artifactId>hazelcast<\/artifactId>/ {
+      is_hazelcast_artifact = 1
+    }
+    in_dependency && /<version>/ {
       value = $0
       sub(/^.*<version>/, "", value)
       sub(/<\/version>.*$/, "", value)
-      print value
-      exit
+      version = value
     }
     /<\/dependency>/ {
+      if (is_hazelcast_group && is_hazelcast_artifact) {
+        print version
+        exit
+      }
       in_dependency = 0
-      is_hazelcast = 0
+      is_hazelcast_group = 0
+      is_hazelcast_artifact = 0
+      version = ""
     }
-  ' "${repo_root}/fleet-api/pom.xml"
+  ' "${pom}"
 }
 
 assert_hazelcast_version() {
   local actual
 
-  actual=$(hazelcast_version)
+  actual=$(hazelcast_version "${repo_root}/fleet-api/pom.xml")
   if [[ "${actual}" != "${expected_hazelcast_version}" ]]; then
     fail "fleet-api/pom.xml Hazelcast must be ${expected_hazelcast_version}, found ${actual:-missing}"
   fi
@@ -138,6 +150,25 @@ assert_runtime_dependency_tree() {
     fail "fleet-api runtime dependency tree does not contain Hazelcast"
   fi
 }
+
+run_self_test() {
+  local fixture="${script_dir}/fixtures/dependency-contracts/hazelcast-selector.xml"
+  local actual
+
+  actual=$(hazelcast_version "${fixture}")
+  if [[ "${actual}" != "5.8.0" ]]; then
+    printf '[dependency-contracts] ERROR: Hazelcast selector must return core hazelcast 5.8.0, found %s\n' \
+      "${actual:-missing}" >&2
+    return 1
+  fi
+
+  printf '[dependency-contracts] Hazelcast selector regression test passed.\n'
+}
+
+if [[ "${1:-}" == "--self-test" ]]; then
+  run_self_test
+  exit $?
+fi
 
 assert_quarkus_platform_version "${repo_root}/fleet-api/pom.xml"
 assert_quarkus_platform_version "${repo_root}/fleet-proxy/pom.xml"
