@@ -395,7 +395,7 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
-    void remountsConfiguredS3StorageAfterBodyFileWrite() {
+    void replacesPersistentMockPodAfterBodyFileWrite() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");
@@ -437,7 +437,7 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
-    void reportsStoredBodyFileWhenPersistentRemountFails() {
+    void reportsStoredBodyFileWhenPersistentPodReplacementFails() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");

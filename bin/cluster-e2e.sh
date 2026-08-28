@@ -252,7 +252,9 @@ helm_deploy() {
     --set "storage.s3.mountOptions[0]=endpoint-url ${s3_endpoint}" \
     --set 'storage.s3.mountOptions[1]=force-path-style' \
     --set 'storage.s3.mountOptions[2]=allow-delete' \
-    --set 'storage.s3.mountOptions[3]=region us-east-1' \
+    --set 'storage.s3.mountOptions[3]=allow-overwrite' \
+    --set 'storage.s3.mountOptions[4]=metadata-ttl minimal' \
+    --set 'storage.s3.mountOptions[5]=region us-east-1' \
     --wait --timeout="${timeout_seconds}s"
 }
 
@@ -693,6 +695,15 @@ run_contracts() {
   wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
     || fail "Persistent body-file write did not replace the WireMock pod."
   body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the body-file overwrite."
+  body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"world!",sizeBytes:6}}')
+  mcp_success put_body_file "${body_args}" >/dev/null
+  result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
+  assert_jq "${result}" '.body == {encoding:"utf8",data:"world!",sizeBytes:6}' \
+    "UTF-8 body-file overwrite did not replace the stored bytes"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Persistent body-file overwrite did not replace the WireMock pod."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
     || fail "Unable to identify the ready WireMock pod before the binary body-file write."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2}}')
   mcp_success put_body_file "${body_args}" >/dev/null
@@ -804,6 +815,19 @@ self_test() {
     || fail "Cluster fixtures are missing."
   [[ "${namespace}" == mock-fleet-e2e-* && "${bucket}" == mock-fleet-e2e-* && "${namespace}" != "${bucket}" ]] \
     || fail "Run resources are not isolated."
+  local helm_command
+  helm_command=$(
+    kubectl() { printf '10.0.0.1\n'; }
+    helm() { printf '%s\n' "$*"; }
+    helm_deploy wiremock/wiremock:3.13.2-2 IfNotPresent
+  )
+  for mount_option in \
+    'storage.s3.mountOptions[3]=allow-overwrite' \
+    'storage.s3.mountOptions[4]=metadata-ttl minimal'; do
+    grep -Fq -- "${mount_option}" <<<"${helm_command}" \
+      || fail "Live S3 storage is missing its multi-writer mount option: ${mount_option}"
+  done
+  log "S3 multi-writer mount contract passed."
   local dry_output
   dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
   grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."

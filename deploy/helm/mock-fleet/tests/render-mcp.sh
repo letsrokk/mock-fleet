@@ -25,6 +25,22 @@ network_policy_render="$(helm template unusual-release "${chart_dir}" \
   --set fleet.mcp.enabled=true \
   --show-only templates/wiremock-egress-networkpolicy.yaml)"
 
+storage_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set storage.persistent=true \
+  --set storage.s3.bucket=contract-bucket \
+  --show-only templates/wiremock-mappings-pv.yaml)"
+
+for fragment in \
+  '- allow-delete' \
+  '- allow-overwrite' \
+  '- metadata-ttl minimal'; do
+  if ! grep -Fq -- "${fragment}" <<<"${storage_render}"; then
+    echo "Persistent S3 storage is missing its multi-writer mount option: ${fragment}" >&2
+    exit 1
+  fi
+done
+
 required_fragments=(
   'name: custom-fleet-mcp'
   'type: Recreate'

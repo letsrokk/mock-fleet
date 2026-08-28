@@ -461,14 +461,14 @@ public final class FleetMcpTools {
             byte[] content = decodeBody(body, true);
             wireMock.putBodyFile(mockId, fileName, content);
             if (config.storageEnabled()) {
-                remountPersistentBodyFile(mockId, fileName);
+                replacePersistentBodyFilePod(mockId, fileName);
             }
             return McpToolExecutor.ToolResult.of("Stored body file " + fileName + ".",
                     Map.of("mockId", mockId, "fileName", fileName, "sizeBytes", content.length));
         }));
     }
 
-    private void remountPersistentBodyFile(String mockId, String fileName) {
+    private void replacePersistentBodyFilePod(String mockId, String fileName) {
         try {
             requireStopLifecycleResponse(mockId);
             requireLifecycleResponse(mockId);

@@ -264,6 +264,8 @@ storage:
     cacheSize: 1Gi
     mountOptions:
       - allow-delete
+      - allow-overwrite
+      - metadata-ttl minimal
 
 ingress:
   enabled: false
