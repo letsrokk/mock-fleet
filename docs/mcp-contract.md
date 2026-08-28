@@ -103,7 +103,9 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 
 Responses and `get_body_file` use `{body:{encoding,data,sizeBytes}}`. The server emits `utf8` only for strictly decoded printable UTF-8; otherwise it emits base64. `send_request` wraps traffic as `{mockId,response:{status,headers,contentType,body}}`. Sensitive response and journal headers are replaced with `[REDACTED]`.
 
-With persistent S3 storage, `put_body_file` stops and starts the mock after a successful write so the WireMock pod remounts the updated body-file volume. The write result is successful once that restart has started. A following WireMock tool can temporarily return the normal retry-safe `MOCK_STARTING` error until the mock reaches RUNNING. Non-persistent mocks stay running after the write.
+With persistent S3 storage, `put_body_file` stops and starts the mock after a successful write so a replacement WireMock pod remounts the updated body-file volume. This replacement resets temporary stubs, the request journal, scenarios, and recording state; persistent stubs remain. The write result is successful once that restart has started. A following WireMock tool can temporarily return the normal retry-safe `MOCK_STARTING` error until the mock reaches RUNNING. Non-persistent mocks stay running after the write.
+
+If the remount fails after the file was stored, the tool preserves the lifecycle error code and reports `stateMayHaveChanged: true`, `details.bodyFileStored: true`, and the affected `mockId` and `fileName`. Treat that result as a partial success: retrying the same write is safe for the file content, but it can replace the pod again. The published tool annotation therefore does not claim idempotence.
 
 `delete_body_file` returns `{mockId,fileName,deleted,forced}`. The default reference check stops at the first mapping that uses the file and returns `BODY_FILE_REFERENCED` with its `stubId`. `force=true` skips the reference scan and deletes immediately.
 

@@ -450,7 +450,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content. Persistent S3 storage remounts the mock after the write.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content. Persistent S3 storage replaces the pod and resets temporary stubs, requests, scenarios, and recording state.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse putBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName,
             @ToolArg(description = "Encoded file content") Map<String, Object> body) {

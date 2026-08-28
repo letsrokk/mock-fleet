@@ -469,6 +469,34 @@ api_mock_failed() {
   jq -e --arg id "${mock_id}" '.[] | select(.mockId == $id and .status == "FAILED")' >/dev/null <<<"${api_body}"
 }
 
+ready_wiremock_pod_name_from_json() {
+  local mock_id=$1
+  local pods=$2
+  jq -er --arg id "${mock_id}" '
+    [.items[]
+      | select(.metadata.deletionTimestamp == null)
+      | select(.metadata.labels["mock-fleet/mock-id"] == $id)
+      | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+      | .metadata.name]
+    | if length == 1 then .[0] else empty end
+  ' <<<"${pods}"
+}
+
+ready_wiremock_pod_name() {
+  local mock_id=$1
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" -o json) || return 1
+  ready_wiremock_pod_name_from_json "${mock_id}" "${pods}"
+}
+
+wiremock_pod_was_replaced() {
+  local mock_id=$1
+  local old_pod=$2
+  local new_pod
+  new_pod=$(ready_wiremock_pod_name "${mock_id}") || return 1
+  [[ "${new_pod}" != "${old_pod}" ]]
+}
+
 verify_api_replicas() {
   local mock_id=$1
   local expected_option=$2
@@ -507,7 +535,7 @@ api_replicas_have_cpu_request() {
 }
 
 run_contracts() {
-  local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args
+  local config rv mutation current_rv invalid_rv lifecycle result stub_id deleted_stub_id unmatched_stub_id candidate_id body_args body_file_pod
   local main_mock="m-${run_id:0:18}"
   local config_mock="cfg-${run_id:0:16}"
   local cold_mock="cold-${run_id:0:16}"
@@ -656,14 +684,22 @@ run_contracts() {
     "Persistent update did not survive restart"
 
   log "Checking body files and encoded byte contracts."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the body-file write."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",body:{encoding:"utf8",data:"hello",sizeBytes:5}}')
   mcp_success put_body_file "${body_args}" >/dev/null
   result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt"}')")
   assert_jq "${result}" '.body == {encoding:"utf8",data:"hello",sizeBytes:5}' "UTF-8 body file did not round-trip"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Persistent body-file write did not replace the WireMock pod."
+  body_file_pod=$(ready_wiremock_pod_name "${main_mock}") \
+    || fail "Unable to identify the ready WireMock pod before the binary body-file write."
   body_args=$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",body:{encoding:"base64",data:"AAE=",sizeBytes:2}}')
   mcp_success put_body_file "${body_args}" >/dev/null
   result=$(poll_mcp_success get_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin"}')")
   assert_jq "${result}" '.body == {encoding:"base64",data:"AAE=",sizeBytes:2}' "Binary body file did not round-trip"
+  wiremock_pod_was_replaced "${main_mock}" "${body_file_pod}" \
+    || fail "Repeated persistent body-file write did not replace the WireMock pod."
   result=$(mcp_success list_body_files "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:1}')")
   assert_jq "${result}" '.files | length == 1 and .page.hasMore == true and (.page.nextCursor | type == "string")' \
     "Body-file cursor page was incomplete"
@@ -824,6 +860,23 @@ self_test() {
     fail "API replacement readiness accepted the pod selected for deletion."
   fi
   log "API replacement readiness contract passed."
+  local wiremock_replacement='{"items":[
+    {"metadata":{"name":"wiremock-old","deletionTimestamp":"2026-08-28T00:00:00Z","labels":{"mock-fleet/mock-id":"self-test"}},"status":{"conditions":[{"type":"Ready","status":"True"}]}},
+    {"metadata":{"name":"wiremock-new","labels":{"mock-fleet/mock-id":"self-test"}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${wiremock_replacement}"; }
+    wiremock_pod_was_replaced self-test wiremock-old
+  ); then
+    fail "WireMock replacement assertion rejected a new ready pod."
+  fi
+  if (
+    kubectl() { printf '%s\n' "${wiremock_replacement}"; }
+    wiremock_pod_was_replaced self-test wiremock-new
+  ); then
+    fail "WireMock replacement assertion accepted the original ready pod."
+  fi
+  log "WireMock pod replacement contract passed."
   local api_restart_commands
   api_restart_commands=$(
     kubectl() {

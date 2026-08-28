@@ -232,6 +232,15 @@ class McpRegistrationTest {
     }
 
     @Test
+    void persistentBodyFileWriteDoesNotClaimIdempotence() {
+        var tool = toolManager.getTool("put_body_file");
+
+        assertTrue(tool.annotations().orElseThrow().destructiveHint());
+        assertFalse(tool.annotations().orElseThrow().idempotentHint());
+        assertTrue(tool.description().contains("resets temporary stubs, requests, scenarios, and recording state"));
+    }
+
+    @Test
     void collectionToolsPublishCursorArgumentsAndStandardPageSchema() throws Exception {
         String sessionId = initializeSession();
         initializeClient(sessionId);
