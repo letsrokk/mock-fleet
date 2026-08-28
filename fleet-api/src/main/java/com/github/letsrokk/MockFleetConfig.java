@@ -36,6 +36,8 @@ public interface MockFleetConfig {
 
     WireMockResourcePolicyConfig wiremockResourcePolicy();
 
+    MappingsConfig mappings();
+
     ProxyConfig proxy();
 
     StorageConfig storage();
@@ -56,6 +58,11 @@ public interface MockFleetConfig {
 
     interface ProxyConfig {
         RoutingConfig routing();
+    }
+
+    interface MappingsConfig {
+        int maxDepth();
+        int maxEntries();
     }
 
     interface RoutingConfig {

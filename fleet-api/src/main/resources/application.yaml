@@ -47,6 +47,9 @@ mock-fleet:
     routing:
       mode: ${MOCK_FLEET_PROXY_ROUTING_MODE:HOST}
       host: ${MOCK_FLEET_PROXY_ROUTING_HOST:mock-fleet.localhost}
+  mappings:
+    max-depth: ${MOCK_FLEET_MAPPINGS_MAX_DEPTH:32}
+    max-entries: ${MOCK_FLEET_MAPPINGS_MAX_ENTRIES:10000}
   hazelcast:
     cluster-name: ${MOCK_FLEET_HAZELCAST_CLUSTER_NAME:mock-fleet}
     service-dns: ${MOCK_FLEET_HAZELCAST_SERVICE_DNS:}
