@@ -27,9 +27,12 @@ spec:
         {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
+      automountServiceAccountToken: true
       terminationGracePeriodSeconds: {{ .Values.fleet.api.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        seccompProfile:
+          type: RuntimeDefault
         {{- if .Values.storage.persistent }}
         fsGroup: 185
         fsGroupChangePolicy: OnRootMismatch
@@ -38,6 +41,14 @@ spec:
         - name: api
           image: {{ printf "%s:%s" .Values.fleet.api.image.repository (.Values.fleet.api.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.api.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: KUBERNETES_NAMESPACE
               valueFrom:

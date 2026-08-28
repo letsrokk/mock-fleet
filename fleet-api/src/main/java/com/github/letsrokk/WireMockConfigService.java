@@ -66,7 +66,7 @@ public class WireMockConfigService {
 
     @PostConstruct
     void loadUserConfig() {
-        ConfigMap configMap = ensureUserConfigMap();
+        ConfigMap configMap = userConfigMap();
         wireMockOptions.setUserConfig(loadUserConfig(configMap));
         startUserConfigWatch();
     }
@@ -239,10 +239,15 @@ public class WireMockConfigService {
         if (name.isEmpty()) {
             return null;
         }
-        return kubernetesClient.configMaps()
-                .inNamespace(currentNamespace())
+        String namespace = currentNamespace();
+        ConfigMap configMap = kubernetesClient.configMaps()
+                .inNamespace(namespace)
                 .withName(name.get())
                 .get();
+        if (configMap == null) {
+            throw configUnavailable(namespace, name.get());
+        }
+        return configMap;
     }
 
     private WireMockConfigDocument loadUserConfig(ConfigMap configMap) {
@@ -250,40 +255,6 @@ public class WireMockConfigService {
             return WireMockConfigDocument.empty();
         }
         return WireMockConfigDocument.load(configMap.getData().get(config.wiremockConfigKey()));
-    }
-
-    private ConfigMap ensureUserConfigMap() {
-        Optional<String> name = userConfigMapName();
-        if (name.isEmpty()) {
-            wireMockOptions.setUserConfig(WireMockConfigDocument.empty());
-            return null;
-        }
-
-        String namespace = currentNamespace();
-        ConfigMap current = kubernetesClient.configMaps()
-                .inNamespace(namespace)
-                .withName(name.get())
-                .get();
-        if (current != null) {
-            LOG.infof("Loaded WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(current));
-            return current;
-        }
-
-        try {
-            ConfigMap created = createOrUpdateUserConfigMap(namespace, name.get(), null, WireMockConfigDocument.empty(), true);
-            LOG.infof("Created missing WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(created));
-            return created;
-        } catch (KubernetesClientException error) {
-            if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
-                throw error;
-            }
-            ConfigMap createdByAnotherPod = userConfigMap();
-            LOG.infof("Loaded WireMock user ConfigMap created by another API pod namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(createdByAnotherPod));
-            return createdByAnotherPod;
-        }
     }
 
     private void updateUserConfigMap(String mockId,
@@ -299,8 +270,11 @@ public class WireMockConfigService {
                 .inNamespace(namespace)
                 .withName(name)
                 .get();
+        if (current == null) {
+            throw configUnavailable(namespace, name);
+        }
 
-        if (current != null && expectedResourceVersion != null
+        if (expectedResourceVersion != null
                 && !Objects.equals(expectedResourceVersion, resourceVersion(current))) {
             throw configConflict(namespace, name, mockId, expectedResourceVersion, current);
         }
@@ -311,7 +285,7 @@ public class WireMockConfigService {
         WireMockConfigDocument nextConfig = update.apply(currentConfig);
         ConfigMap persisted;
         try {
-            persisted = createOrUpdateUserConfigMap(namespace, name, current, nextConfig, current == null);
+            persisted = persistUserConfigMap(namespace, name, current, nextConfig);
         } catch (KubernetesClientException error) {
             if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
                 throw error;
@@ -338,11 +312,11 @@ public class WireMockConfigService {
                         "currentVersion", currentResourceVersion == null ? "" : currentResourceVersion)));
     }
 
-    private ConfigMap createOrUpdateUserConfigMap(String namespace, String name, ConfigMap current,
-                                                  WireMockConfigDocument document, boolean create) {
+    private ConfigMap persistUserConfigMap(String namespace, String name, ConfigMap current,
+                                           WireMockConfigDocument document) {
         Map<String, String> data = new LinkedHashMap<>();
         data.put(config.wiremockConfigKey(), document.toYaml());
-        ConfigMapBuilder builder = new ConfigMapBuilder(current == null ? new ConfigMap() : current)
+        ConfigMapBuilder builder = new ConfigMapBuilder(current)
                 .editOrNewMetadata()
                 .withName(name)
                 .withNamespace(namespace)
@@ -352,11 +326,13 @@ public class WireMockConfigService {
                 .endMetadata()
                 .withData(data);
         ConfigMap next = builder.build();
-
-        if (create) {
-            return kubernetesClient.configMaps().inNamespace(namespace).resource(next).create();
-        }
         return kubernetesClient.configMaps().inNamespace(namespace).resource(next).update();
+    }
+
+    private ApiException configUnavailable(String namespace, String name) {
+        return new ApiException(Response.Status.SERVICE_UNAVAILABLE,
+                new ApiError("CONFIG_UNAVAILABLE", "User editable WireMock ConfigMap is missing.",
+                        true, false, Map.of("namespace", namespace, "name", name)));
     }
 
     private String currentNamespace() {

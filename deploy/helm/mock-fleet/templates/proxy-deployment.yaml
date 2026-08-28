@@ -17,12 +17,23 @@ spec:
       labels:
         {{- include "mock-fleet.proxySelectorLabels" . | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: proxy
           image: {{ printf "%s:%s" .Values.fleet.proxy.image.repository (.Values.fleet.proxy.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.proxy.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: MOCK_FLEET_ROUTING_MODE
               value: {{ .Values.fleet.proxy.routing.mode | quote }}

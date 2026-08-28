@@ -19,6 +19,154 @@ enabled_render="$(helm template unusual-release "${chart_dir}" \
   --set 'fleet.mcp.outbound.exceptions[0]=metadata.example' \
   --set 'fleet.mcp.outbound.allowedListeners[0]=webhook')"
 
+role_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/role.yaml)"
+
+api_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/api-deployment.yaml)"
+
+proxy_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/proxy-deployment.yaml)"
+
+dash_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/dash-deployment.yaml)"
+
+mcp_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --set fleet.mcp.enabled=true \
+  --show-only templates/mcp-deployment.yaml)"
+
+api_service_account_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --set serviceAccount.annotations.identity=api \
+  --show-only templates/serviceaccount.yaml)"
+
+wiremock_service_account_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --set wiremock.serviceAccount.annotations.identity=wiremock \
+  --show-only templates/wiremock-serviceaccount.yaml)"
+
+user_config_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/wiremock-user-configmap.yaml)"
+
+expected_configmap_rule=$'  - apiGroups:\n      - ""\n    resources:\n      - configmaps\n    resourceNames:\n      - custom-fleet-wiremock-user-config\n    verbs:\n      - get\n      - watch\n      - update\n      - patch'
+if ! grep -Fq "${expected_configmap_rule}" <<<"${role_render}"; then
+  echo "API role must limit user ConfigMap access to get/watch/update/patch by name" >&2
+  exit 1
+fi
+
+if [[ "$(grep -Fc -- '- configmaps' <<<"${role_render}")" -ne 1 ]]; then
+  echo "API role must have exactly one named ConfigMap rule" >&2
+  exit 1
+fi
+
+configmap_rule_render="$(awk '/^      - configmaps$/{found=1} found{print}' <<<"${role_render}")"
+for forbidden_verb in '- create' '- list' '- delete'; do
+  if grep -Fq -- "${forbidden_verb}" <<<"${configmap_rule_render}"; then
+    echo "API role must not grant ConfigMap verb: ${forbidden_verb}" >&2
+    exit 1
+  fi
+done
+
+if grep -Fq -- '- deployments' <<<"${role_render}"; then
+  echo "API role must not grant Deployment permissions" >&2
+  exit 1
+fi
+
+expected_pod_rule=$'    resources:\n      - pods\n    verbs:\n      - get\n      - list\n      - create\n      - delete'
+if ! grep -Fq "${expected_pod_rule}" <<<"${role_render}"; then
+  echo "API role must retain only the required pod lifecycle permissions" >&2
+  exit 1
+fi
+
+for workload in proxy dash mcp; do
+  case "${workload}" in
+    proxy) workload_render="${proxy_render}" ;;
+    dash) workload_render="${dash_render}" ;;
+    mcp) workload_render="${mcp_render}" ;;
+  esac
+  if ! grep -Fq 'automountServiceAccountToken: false' <<<"${workload_render}"; then
+    echo "${workload} must not mount the Kubernetes API token" >&2
+    exit 1
+  fi
+  if grep -Fq 'automountServiceAccountToken: true' <<<"${workload_render}"; then
+    echo "${workload} must not opt back into the Kubernetes API token" >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq 'automountServiceAccountToken: true' <<<"${api_render}"; then
+  echo "API must retain its Kubernetes API token" >&2
+  exit 1
+fi
+if grep -Fq 'automountServiceAccountToken: false' <<<"${api_render}"; then
+  echo "API must not disable its required Kubernetes API token" >&2
+  exit 1
+fi
+
+for workload in api proxy dash mcp; do
+  case "${workload}" in
+    api) workload_render="${api_render}" ;;
+    proxy) workload_render="${proxy_render}" ;;
+    dash) workload_render="${dash_render}" ;;
+    mcp) workload_render="${mcp_render}" ;;
+  esac
+  expected_pod_context=$'      securityContext:\n        runAsNonRoot: true\n        seccompProfile:\n          type: RuntimeDefault'
+  if ! grep -Fq "${expected_pod_context}" <<<"${workload_render}"; then
+    echo "${workload} deployment is missing its restricted pod context" >&2
+    exit 1
+  fi
+  expected_container_context=$'          securityContext:\n            runAsNonRoot: true\n            allowPrivilegeEscalation: false\n            capabilities:\n              drop:\n                - ALL\n            seccompProfile:\n              type: RuntimeDefault'
+  if ! grep -Fq "${expected_container_context}" <<<"${workload_render}"; then
+    echo "${workload} deployment is missing its restricted container context" >&2
+    exit 1
+  fi
+  if grep -Fq 'readOnlyRootFilesystem: true' <<<"${workload_render}"; then
+    echo "${workload} must retain its writable root filesystem" >&2
+    exit 1
+  fi
+done
+
+for fragment in \
+  'name: custom-fleet-wiremock-user-config' \
+  'helm.sh/resource-policy: keep' \
+  'wiremock-options.yaml: |-' \
+  'default:' \
+  'options: []' \
+  'mocks: []'; do
+  if ! grep -Fq "${fragment}" <<<"${user_config_render}"; then
+    echo "Release-owned user ConfigMap is missing: ${fragment}" >&2
+    exit 1
+  fi
+done
+
+for fragment in 'automountServiceAccountToken: true' 'identity: api'; do
+  if ! grep -Fq "${fragment}" <<<"${api_service_account_render}"; then
+    echo "API service account is missing: ${fragment}" >&2
+    exit 1
+  fi
+done
+
+for fragment in 'automountServiceAccountToken: false' 'identity: wiremock'; do
+  if ! grep -Fq "${fragment}" <<<"${wiremock_service_account_render}"; then
+    echo "WireMock service account is missing: ${fragment}" >&2
+    exit 1
+  fi
+done
+
 network_policy_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet \

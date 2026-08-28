@@ -14,7 +14,6 @@ import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InOrder;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -27,7 +26,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -180,7 +178,7 @@ class WireMockConfigServiceTest {
     }
 
     @Test
-    void loadUserConfigCreatesMissingUserConfigMapBeforeStartingWatch() {
+    void loadUserConfigRequiresTheReleaseOwnedUserConfigMapBeforeStartingWatch() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         @SuppressWarnings("unchecked")
         MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
@@ -189,36 +187,21 @@ class WireMockConfigServiceTest {
                 mock(NonNamespaceOperation.class);
         @SuppressWarnings("unchecked")
         Resource<ConfigMap> configMapResource = mock(Resource.class);
-        @SuppressWarnings("unchecked")
-        NamespaceableResource<ConfigMap> createdConfigMap = mock(NamespaceableResource.class);
-        Watch watch = mock(Watch.class);
-
         when(kubernetesClient.getNamespace()).thenReturn("test");
         when(kubernetesClient.configMaps()).thenReturn(configMaps);
         when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
         when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
         when(configMapResource.get()).thenReturn(null);
-        when(configMapResource.watch(any())).thenReturn(watch);
-        when(namespacedConfigMaps.resource(argThat(configMap ->
-                "user-config".equals(configMap.getMetadata().getName())
-                        && "test".equals(configMap.getMetadata().getNamespace())
-                        && configMap.getData().containsKey("wiremock-options.yaml"))))
-                .thenReturn(createdConfigMap);
-        ConfigMap created = configMap("user-config", "43", """
-                wiremock:
-                  default:
-                    options: []
-                  mocks: []
-                """);
-        when(createdConfigMap.create()).thenReturn(created);
         WireMockConfigService service = service(kubernetesClient, config());
 
-        service.loadUserConfig();
+        ApiException exception = assertThrows(ApiException.class, service::loadUserConfig);
 
-        InOrder inOrder = inOrder(createdConfigMap, configMapResource);
-        inOrder.verify(createdConfigMap).create();
-        inOrder.verify(configMapResource).watch(any());
-        assertEquals(List.of(), service.wireMockOptions.optionsFor("demo"));
+        assertEquals(503, exception.getResponse().getStatus());
+        assertEquals(new ApiError("CONFIG_UNAVAILABLE", "User editable WireMock ConfigMap is missing.",
+                        true, false, Map.of("namespace", "test", "name", "user-config")),
+                exception.getResponse().getEntity());
+        verify(namespacedConfigMaps, never()).resource(any());
+        verify(configMapResource, never()).watch(any());
     }
 
     @Test
@@ -251,6 +234,8 @@ class WireMockConfigServiceTest {
         service.loadUserConfig();
 
         verify(namespacedConfigMaps, never()).resource(any());
+        verify(namespacedConfigMaps, org.mockito.Mockito.times(2)).withName("user-config");
+        verify(configMapResource).watch(any());
         assertEquals(List.of("--verbose"), service.wireMockOptions.optionsFor("demo"));
     }
 
@@ -273,7 +258,7 @@ class WireMockConfigServiceTest {
     }
 
     @Test
-    void upsertWritesConfiguredUserConfigMapName() {
+    void upsertRequiresTheReleaseOwnedUserConfigMap() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         @SuppressWarnings("unchecked")
         MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
@@ -282,29 +267,25 @@ class WireMockConfigServiceTest {
                 mock(NonNamespaceOperation.class);
         @SuppressWarnings("unchecked")
         Resource<ConfigMap> configMapResource = mock(Resource.class);
-        @SuppressWarnings("unchecked")
-        NamespaceableResource<ConfigMap> createdConfigMap = mock(NamespaceableResource.class);
-
         when(kubernetesClient.getNamespace()).thenReturn("test");
         when(kubernetesClient.configMaps()).thenReturn(configMaps);
         when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
         when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
         when(configMapResource.get()).thenReturn(null);
-        when(namespacedConfigMaps.resource(argThat(configMap ->
-                "user-config".equals(configMap.getMetadata().getName())
-                        && "test".equals(configMap.getMetadata().getNamespace())
-                        && configMap.getData().get("wiremock-options.yaml").contains("id: demo")
-                        && configMap.getData().get("wiremock-options.yaml").contains("--verbose"))))
-                .thenReturn(createdConfigMap);
         WireMockConfigService service = service(kubernetesClient, config());
 
-        service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
-                null,
-                List.of("--verbose"),
-                null,
-                "futureOnly"));
+        ApiException exception = assertThrows(ApiException.class,
+                () -> service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        null,
+                        List.of("--verbose"),
+                        null,
+                        "futureOnly")));
 
-        verify(createdConfigMap).create();
+        assertEquals(503, exception.getResponse().getStatus());
+        assertEquals(new ApiError("CONFIG_UNAVAILABLE", "User editable WireMock ConfigMap is missing.",
+                        true, false, Map.of("namespace", "test", "name", "user-config")),
+                exception.getResponse().getEntity());
+        verify(namespacedConfigMaps, never()).resource(any());
     }
 
     @Test
