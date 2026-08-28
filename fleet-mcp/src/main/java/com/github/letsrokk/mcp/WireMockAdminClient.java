@@ -143,7 +143,7 @@ public final class WireMockAdminClient {
     public JsonNode createStub(String mockId, ObjectNode mapping) {
         ObjectNode payload = serverManagedCopy(mapping);
         payload.put("persistent", false);
-        return sendJson(mockId, HttpMethod.POST, "/__admin/mappings", payload);
+        return sendMutationJson(mockId, HttpMethod.POST, "/__admin/mappings", payload);
     }
 
     public JsonNode updateStub(String mockId, String stubId, ObjectNode mapping) {
@@ -160,7 +160,7 @@ public final class WireMockAdminClient {
             return persistentMutation(mockId, "update", id, (ObjectNode) current, payload, pending);
         }
         try {
-            return sendJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, payload);
+            return sendMutationJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, payload);
         } catch (RuntimeException updateFailure) {
             JsonNode verified = getStubAfterAmbiguousFailure(mockId, id, updateFailure);
             if (mappingMatches(verified, payload)) {
@@ -173,7 +173,7 @@ public final class WireMockAdminClient {
     public void deleteStub(String mockId, String stubId) {
         String id = requireIdentifier(stubId, "stubId");
         try {
-            send(mockId, new TransportRequest(HttpMethod.DELETE,
+            sendMutation(mockId, new TransportRequest(HttpMethod.DELETE,
                     "/__admin/mappings/" + id, Map.of(), new byte[0]));
         } catch (RuntimeException deleteFailure) {
             if (getStubAfterAmbiguousFailure(mockId, id, deleteFailure) == null) {
@@ -257,20 +257,24 @@ public final class WireMockAdminClient {
     }
 
     public void resetRequestJournal(String mockId) {
-        send(mockId, new TransportRequest(HttpMethod.DELETE, "/__admin/requests", Map.of(), new byte[0]));
+        sendMutation(mockId, new TransportRequest(HttpMethod.DELETE, "/__admin/requests", Map.of(), new byte[0]));
     }
 
     public JsonNode startRecording(String mockId, ObjectNode recordingSpec) {
         ObjectNode payload = recordingSpec.deepCopy();
         payload.put("persist", false);
         payload.put("outputFormat", "IDS");
-        sendJson(mockId, HttpMethod.POST, "/__admin/recordings/start", payload);
-        JsonNode status = recordingStatus(mockId);
-        if (!status.isObject() || !status.path("status").isTextual()) {
-            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
-                    "WireMock did not return a verifiable recording status", false, Map.of("mockId", mockId));
+        sendMutationJson(mockId, HttpMethod.POST, "/__admin/recordings/start", payload);
+        try {
+            JsonNode status = recordingStatus(mockId);
+            if (!status.isObject() || !status.path("status").isTextual()) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "WireMock did not return a verifiable recording status", false, Map.of("mockId", mockId));
+            }
+            return status;
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
         }
-        return status;
     }
 
     public JsonNode recordingStatus(String mockId) {
@@ -279,8 +283,12 @@ public final class WireMockAdminClient {
 
     public JsonNode stopRecording(String mockId) {
         Set<String> baseline = mappingIds(mockId);
-        JsonNode result = sendWithoutBodyJson(mockId, HttpMethod.POST, "/__admin/recordings/stop");
-        return sanitizeRecorderCandidates(mockId, result, baseline);
+        JsonNode result = sendMutationWithoutBodyJson(mockId, HttpMethod.POST, "/__admin/recordings/stop");
+        try {
+            return sanitizeRecorderCandidates(mockId, result, baseline);
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
+        }
     }
 
     public JsonNode snapshotRequests(String mockId, ObjectNode snapshotSpec) {
@@ -288,8 +296,12 @@ public final class WireMockAdminClient {
         ObjectNode payload = snapshotSpec.deepCopy();
         payload.put("persist", false);
         payload.put("outputFormat", "IDS");
-        return sanitizeRecorderCandidates(mockId,
-                sendJson(mockId, HttpMethod.POST, "/__admin/recordings/snapshot", payload), baseline);
+        JsonNode result = sendMutationJson(mockId, HttpMethod.POST, "/__admin/recordings/snapshot", payload);
+        try {
+            return sanitizeRecorderCandidates(mockId, result, baseline);
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
+        }
     }
 
     public JsonNode listBodyFiles(String mockId) {
@@ -320,12 +332,12 @@ public final class WireMockAdminClient {
 
     public void putBodyFile(String mockId, String fileName, byte[] content) {
         Map<String, List<String>> headers = Map.of("content-type", List.of("application/octet-stream"));
-        send(mockId, new TransportRequest(HttpMethod.PUT,
+        sendMutation(mockId, new TransportRequest(HttpMethod.PUT,
                 "/__admin/files/" + BodyFileName.toUrlPath(fileName), headers, content));
     }
 
     public void deleteBodyFile(String mockId, String fileName) {
-        send(mockId, new TransportRequest(HttpMethod.DELETE,
+        sendMutation(mockId, new TransportRequest(HttpMethod.DELETE,
                 "/__admin/files/" + BodyFileName.toUrlPath(fileName), Map.of(), new byte[0]));
     }
 
@@ -340,12 +352,13 @@ public final class WireMockAdminClient {
     }
 
     public void resetScenarios(String mockId) {
-        send(mockId, new TransportRequest(HttpMethod.POST, "/__admin/scenarios/reset", Map.of(), new byte[0]));
+        sendMutation(mockId,
+                new TransportRequest(HttpMethod.POST, "/__admin/scenarios/reset", Map.of(), new byte[0]));
     }
 
     public TransportResponse sendRequest(String mockId, HttpMethod method, String requestTarget,
             Map<String, List<String>> headers, byte[] body) {
-        return exchange(mockId, new TransportRequest(method,
+        return exchangeStateChanging(mockId, new TransportRequest(method,
                 RequestTargetValidator.requireMockTraffic(requestTarget), headers, body));
     }
 
@@ -374,25 +387,49 @@ public final class WireMockAdminClient {
         return parseJson(send(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body)));
     }
 
+    private JsonNode sendMutationJson(String mockId, HttpMethod method, String endpoint, JsonNode payload) {
+        byte[] body;
+        try {
+            body = mapper.writeValueAsBytes(payload);
+        } catch (JsonProcessingException e) {
+            throw new McpOperationException("INVALID_JSON", "Unable to serialize WireMock request JSON", false,
+                    Map.of());
+        }
+        try {
+            return parseJson(sendMutation(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body)), true);
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
+        }
+    }
+
     private JsonNode sendWithoutBodyJson(String mockId, HttpMethod method, String endpoint) {
         return parseJson(send(mockId, new TransportRequest(method, endpoint,
                 Map.of("accept", List.of("application/json")), new byte[0])));
     }
 
+    private JsonNode sendMutationWithoutBodyJson(String mockId, HttpMethod method, String endpoint) {
+        try {
+            return parseJson(sendMutation(mockId, new TransportRequest(method, endpoint,
+                    Map.of("accept", List.of("application/json")), new byte[0])), true);
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
+        }
+    }
+
     private JsonNode sanitizeRecorderCandidates(String mockId, JsonNode result, Set<String> baseline) {
         JsonNode ids = result.path("ids");
         Set<String> candidateIds = new LinkedHashSet<>();
-        McpOperationException invalidIds = ids.isArray() ? null : invalidRecorderCandidateIds();
+        McpOperationException invalidIds = ids.isArray() ? null : invalidRecorderCandidateIds(mockId);
         if (ids.isArray()) {
             for (JsonNode id : ids) {
                 if (!id.isTextual()) {
-                    invalidIds = invalidRecorderCandidateIds();
+                    invalidIds = invalidRecorderCandidateIds(mockId);
                     continue;
                 }
                 try {
                     candidateIds.add(requireIdentifier(id.asText(), "recorded stub ID"));
                 } catch (IllegalArgumentException e) {
-                    invalidIds = invalidRecorderCandidateIds();
+                    invalidIds = invalidRecorderCandidateIds(mockId);
                 }
             }
         }
@@ -420,11 +457,11 @@ public final class WireMockAdminClient {
             }
         }
         if (cleanupFailedIds.isEmpty()) {
-            return originalFailure;
+            return mutationFailure(mockId, originalFailure);
         }
         McpOperationException cleanupFailure = new McpOperationException("RECORDER_CLEANUP_FAILED",
-                "Recorder candidates could not all be removed or neutralized", true,
-                Map.of("candidateIds", candidateIds, "cleanupFailedIds", cleanupFailedIds));
+                "Recorder candidates could not all be removed or neutralized", true, true,
+                Map.of("mockId", mockId, "candidateIds", candidateIds, "cleanupFailedIds", cleanupFailedIds));
         cleanupFailure.addSuppressed(originalFailure);
         return cleanupFailure;
     }
@@ -471,9 +508,10 @@ public final class WireMockAdminClient {
         return tombstone;
     }
 
-    private static McpOperationException invalidRecorderCandidateIds() {
+    private static McpOperationException invalidRecorderCandidateIds(String mockId) {
         return new McpOperationException("INVALID_UPSTREAM_RESPONSE",
-                "WireMock recorder result did not contain only valid candidate IDs", false, Map.of());
+                "WireMock recorder result did not contain only valid candidate IDs", false, true,
+                Map.of("mockId", mockId));
     }
 
     private Set<String> candidatesCreatedSince(String mockId, Set<String> baseline) {
@@ -642,6 +680,16 @@ public final class WireMockAdminClient {
         return response;
     }
 
+    private TransportResponse sendMutation(String mockId, TransportRequest request) {
+        TransportResponse response = exchangeStateChanging(mockId, request);
+        if (response.status() < 200 || response.status() >= 300) {
+            throw new McpOperationException("WIREMOCK_ADMIN_ERROR", "WireMock returned HTTP " + response.status(),
+                    response.status() >= 500, response.status() >= 500,
+                    Map.of("mockId", mockId, "status", response.status(), "body", response.bodyAsString()));
+        }
+        return response;
+    }
+
     private TransportResponse exchange(String mockId, TransportRequest request) {
         MockIdValidator.requireValid(mockId);
         if (request.body().length > maxPayloadBytes) {
@@ -654,6 +702,37 @@ public final class WireMockAdminClient {
                     Map.of("limitBytes", maxPayloadBytes));
         }
         return response;
+    }
+
+    private TransportResponse exchangeStateChanging(String mockId, TransportRequest request) {
+        MockIdValidator.requireValid(mockId);
+        if (request.body().length > maxPayloadBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
+                    Map.of("limitBytes", maxPayloadBytes));
+        }
+        TransportResponse response;
+        try {
+            response = transport.execute(mockId, request);
+        } catch (RuntimeException failure) {
+            throw mutationFailure(mockId, failure);
+        }
+        if (response.body().length > maxPayloadBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
+                    true, Map.of("mockId", mockId, "limitBytes", maxPayloadBytes));
+        }
+        return response;
+    }
+
+    private static McpOperationException mutationFailure(String mockId, RuntimeException failure) {
+        if (failure instanceof McpOperationException operationFailure) {
+            Map<String, Object> details = new LinkedHashMap<>(operationFailure.details());
+            details.putIfAbsent("mockId", mockId);
+            return new McpOperationException(operationFailure.code(), operationFailure.getMessage(),
+                    operationFailure.retryable(), true, details);
+        }
+        return new McpOperationException("UPSTREAM_UNAVAILABLE",
+                "WireMock mutation result is uncertain: " + failure.getMessage(), true, true,
+                Map.of("mockId", mockId, "cause", failure.getClass().getSimpleName()));
     }
 
     private PersistentTransaction loadRecoveryTransaction(String mockId, String stubId) {
@@ -972,6 +1051,10 @@ public final class WireMockAdminClient {
     }
 
     private JsonNode parseJson(TransportResponse response) {
+        return parseJson(response, false);
+    }
+
+    private JsonNode parseJson(TransportResponse response, boolean stateMayHaveChanged) {
         if (response.body().length == 0) {
             return mapper.createObjectNode();
         }
@@ -979,7 +1062,7 @@ public final class WireMockAdminClient {
             return mapper.readTree(response.body());
         } catch (Exception e) {
             throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "WireMock returned invalid JSON", false,
-                    Map.of("status", response.status()));
+                    stateMayHaveChanged, Map.of("status", response.status()));
         }
     }
 

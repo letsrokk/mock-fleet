@@ -524,6 +524,27 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void stopRecordingMarksMalformedCandidateResponseAsPotentiallyChanged() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+            assertTrue(error.stateMayHaveChanged());
+            assertEquals("orders", error.details().get("mockId"));
+        }
+    }
+
+    @Test
     void snapshotReturnsSanitizedCandidateIdsAndCount() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();

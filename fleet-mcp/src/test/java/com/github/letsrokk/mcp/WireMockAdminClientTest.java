@@ -92,6 +92,42 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void createStubMarksInvalidSuccessResponseAsPotentiallyChanged() {
+        transport.respond(201, "not-json");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.createStub("orders", mapper.createObjectNode()));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
+    }
+
+    @Test
+    void mutationRequestRejectedBeforeDispatchDoesNotReportChangedState() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 1, Set.of("authorization"));
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.putBodyFile("orders", "payload.bin", new byte[] {0, 1}));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(0, transport.requestCount());
+    }
+
+    @Test
+    void resetRequestJournalMarksServerFailureAsPotentiallyChanged() {
+        transport.respond(500, "reset response lost");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.resetRequestJournal("orders"));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
     void updatePersistentStubUsesVerifiedRecoveryTransaction() throws Exception {
         String before = """
                 {"id":"server-id","uuid":"server-id","persistent":true,
@@ -715,6 +751,30 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void recorderStartMarksInvalidFollowUpStatusAsPotentiallyChanged() {
+        transport.respond(200, "{}");
+        transport.respond(200, "{}");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.startRecording("orders", mapper.createObjectNode()));
+
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void recorderStartMarksStatusLookupFailureAsPotentiallyChanged() {
+        transport.respond(200, "{}");
+        transport.respond(500, "status unavailable");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.startRecording("orders", mapper.createObjectNode()));
+
+        assertEquals("WIREMOCK_ADMIN_ERROR", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
     void recorderBaselineHonorsTheMappingScanItemBudget() {
         WireMockAdminClient limited = new WireMockAdminClient(transport, mapper, 1024 * 1024,
                 Set.of("cookie"), null, null, 1024 * 1024, 1);
@@ -777,6 +837,7 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.DELETE, transport.requestAt(3).method());
         assertEquals("/__admin/mappings/recorded-id", transport.requestAt(3).target());
         assertEquals(HttpMethod.GET, transport.requestAt(4).method());
@@ -816,6 +877,7 @@ class WireMockAdminClientTest {
                 () -> client.snapshotRequests("orders", mapper.createObjectNode()));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.POST, transport.requestAt(1).method());
         ObjectNode payload = transport.jsonAt(mapper, 1);
         assertFalse(payload.path("persist").asBoolean(true));
@@ -863,8 +925,10 @@ class WireMockAdminClientTest {
         transport.respond(204, "");
         transport.respond(404, "");
 
-        assertThrows(McpOperationException.class, () -> client.stopRecording("orders"));
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.stopRecording("orders"));
 
+        assertTrue(error.stateMayHaveChanged());
         assertEquals(HttpMethod.DELETE, transport.requestAt(5).method());
         assertEquals("/__admin/mappings/first-id", transport.requestAt(5).target());
         assertEquals(HttpMethod.GET, transport.requestAt(6).method());
@@ -889,6 +953,7 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
         assertEquals("/__admin/mappings/first-id", transport.requestAt(3).target());
         assertEquals("/__admin/mappings/second-id", transport.requestAt(5).target());
         assertEquals(7, transport.requestCount());
@@ -934,6 +999,8 @@ class WireMockAdminClientTest {
                 () -> client.stopRecording("orders"));
 
         assertEquals("RECORDER_CLEANUP_FAILED", error.code());
+        assertTrue(error.stateMayHaveChanged());
+        assertEquals("orders", error.details().get("mockId"));
         assertEquals(List.of("recorded-id"), error.details().get("cleanupFailedIds"));
     }
 
@@ -949,6 +1016,19 @@ class WireMockAdminClientTest {
         assertEquals("missing", notFound.bodyAsString());
         assertEquals(500, failed.status());
         assertEquals("failed", failed.bodyAsString());
+    }
+
+    @Test
+    void ordinaryTrafficMarksOversizedResponseAsPotentiallyChanged() {
+        WireMockAdminClient limited = new WireMockAdminClient(
+                transport, mapper, 8, Set.of("authorization"));
+        transport.respond(200, "response-too-large");
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> limited.sendRequest("orders", HttpMethod.GET, "/orders", Map.of(), new byte[0]));
+
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertTrue(error.stateMayHaveChanged());
     }
 
     @Test

@@ -773,7 +773,7 @@ public final class FleetMcpTools {
     private ObjectNode recordingCandidates(String mockId, JsonNode response) {
         JsonNode ids = response.path("ids");
         if (!ids.isArray()) {
-            throw invalidUpstreamResponse("WireMock recorder response is missing candidate IDs", mockId);
+            throw invalidMutationResponse("WireMock recorder response is missing candidate IDs", mockId);
         }
         ObjectNode result = mapper.createObjectNode();
         result.put("mockId", mockId);
