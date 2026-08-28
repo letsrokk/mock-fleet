@@ -5,6 +5,7 @@ import java.util.regex.Pattern;
 public final class MockIdValidator {
 
     private static final String DNS_LABEL_PATTERN = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+    private static final String DNS_LABEL_SCHEMA_PATTERN = "^" + DNS_LABEL_PATTERN + "$";
     private static final Pattern DNS_LABEL = Pattern.compile(DNS_LABEL_PATTERN);
 
     private MockIdValidator() {
@@ -18,7 +19,7 @@ public final class MockIdValidator {
     }
 
     public static String pattern() {
-        return DNS_LABEL_PATTERN;
+        return DNS_LABEL_SCHEMA_PATTERN;
     }
 
     public static int maxLength() {

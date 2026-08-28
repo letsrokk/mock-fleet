@@ -277,7 +277,7 @@ class McpRegistrationTest {
                     property.getValue().path("description").asText().isBlank(),
                     registeredTool.path("name").asText() + "." + property.getKey()));
             if (properties.has("mockId")) {
-                assertEquals("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+                assertEquals("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
                         properties.path("mockId").path("pattern").asText(),
                         registeredTool.path("name").asText());
                 assertEquals(63, properties.path("mockId").path("maxLength").asInt(),

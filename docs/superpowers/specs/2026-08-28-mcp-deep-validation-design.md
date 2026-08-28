@@ -48,4 +48,3 @@ The published input schemas are part of the user interface. Every closed top-lev
 - Material schema and tool-description UX gaps are fixed and regression-tested.
 - `make local-deploy REBUILD=all` completes, all workloads become ready, and version provenance identifies the rebuilt commit.
 - The entire live matrix passes again after that deployment from newly isolated state.
-

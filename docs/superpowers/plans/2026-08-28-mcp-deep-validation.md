@@ -163,4 +163,3 @@ Run the Task 2 command with a new run ID. Expected: all 32 tool contracts pass a
 - [ ] **Step 5: Audit completion against the design**
 
 Map each completion criterion in the design to fresh command output. Leave the goal active if any low-or-higher non-auth finding, material UX gap, unavailable live path, cleanup residue, or unverified post-deployment behavior remains.
-

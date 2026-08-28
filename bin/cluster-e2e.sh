@@ -355,6 +355,20 @@ assert_mock_starting_contract() {
     "WireMock tool did not return the complete MOCK_STARTING contract"
 }
 
+mock_starting_retry_is_safe() {
+  local result=$1
+  local mock_id=$2
+  jq -e --arg mock_id "${mock_id}" '
+    .isError == true
+    and .structuredContent.error.code == "MOCK_STARTING"
+    and .structuredContent.error.retryable == true
+    and .structuredContent.error.stateMayHaveChanged == false
+    and .structuredContent.error.details.mockId == $mock_id
+    and .structuredContent.error.details.status == "STARTING"
+    and .structuredContent.error.details.retryAfterMs == 1000
+  ' >/dev/null <<<"${result}"
+}
+
 assert_persistent_restart_state() {
   local result=$1
   local surviving_stub_id=$2
@@ -381,7 +395,7 @@ poll_mcp_attempt() {
   local tool=$1
   local arguments=$2
   local result_file=$3
-  local result code
+  local result code mock_id
   result=$(mcp_tool_raw "${tool}" "${arguments}") || return 1
   if [[ $(jq -r '.isError // false' <<<"${result}") == false ]]; then
     jq -c '.structuredContent' <<<"${result}" >"${result_file}"
@@ -392,6 +406,11 @@ poll_mcp_attempt() {
     printf '%s\n' "${result}" | jq . >&2
     fail "${tool} failed while polling with ${code}."
   }
+  mock_id=$(jq -r '.mockId // empty' <<<"${arguments}")
+  if [[ -z "${mock_id}" ]] || ! mock_starting_retry_is_safe "${result}" "${mock_id}"; then
+    printf '%s\n' "${result}" | jq . >&2
+    fail "${tool} returned an unsafe MOCK_STARTING retry contract."
+  fi
   return 1
 }
 
@@ -420,13 +439,26 @@ start_api_port_forward() {
     "http://127.0.0.1:${api_port}/__fleet/api/config"
 }
 
+api_replacement_ready() {
+  local old_pod=$1
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component=api' -o json) || return 1
+  jq -e --arg old_pod "${old_pod}" '
+    [.items[]
+      | select(.metadata.deletionTimestamp == null)
+      | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))
+      | .metadata.name] as $ready
+    | ($ready | length) == 2 and ($ready | index($old_pod)) == null
+  ' >/dev/null <<<"${pods}"
+}
+
 restart_one_api_replica() {
   local old_pod
   old_pod=$(kubectl get pods --namespace "${namespace}" \
     -l 'app.kubernetes.io/component=api' -o jsonpath='{.items[0].metadata.name}')
   kubectl delete pod "${old_pod}" --namespace "${namespace}" --wait=false >/dev/null
-  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" \
-    --timeout="${timeout_seconds}s"
+  poll_until "replacement of API pod ${old_pod}" api_replacement_ready "${old_pod}"
   start_api_port_forward
 }
 
@@ -775,11 +807,30 @@ self_test() {
     fail "MCP notification helper accepted a non-202 response."
   fi
   log "MCP notification response contract passed."
+  local ready_replacement='{"items":[
+    {"metadata":{"name":"api-new-1"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},
+    {"metadata":{"name":"api-new-2"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${ready_replacement}"; }
+    api_replacement_ready api-old
+  ); then
+    fail "API replacement readiness rejected two new ready pods."
+  fi
+  if (
+    kubectl() { printf '%s\n' "${ready_replacement/api-new-1/api-old}"; }
+    api_replacement_ready api-old
+  ); then
+    fail "API replacement readiness accepted the pod selected for deletion."
+  fi
+  log "API replacement readiness contract passed."
   local api_restart_commands
   api_restart_commands=$(
     kubectl() {
-      if [[ "$1 $2" == 'get pods' ]]; then
+      if [[ "$*" == *jsonpath=* ]]; then
         printf 'api-self-test-pod\n'
+      elif [[ "$*" == *'-o json'* ]]; then
+        printf '%s\n' "${ready_replacement}"
       else
         printf 'kubectl %s\n' "$*"
       fi
@@ -799,6 +850,15 @@ self_test() {
     || fail "Cold-start stub creation does not use the retryable MCP polling path."
   log "Cold-start mutation retry contract passed."
   local starting_result='{"isError":true,"structuredContent":{"error":{"code":"MOCK_STARTING","message":"Mock self-test is still starting","retryable":true,"stateMayHaveChanged":false,"details":{"mockId":"self-test","status":"STARTING","retryAfterMs":1000}}}}'
+  mock_starting_retry_is_safe "${starting_result}" self-test \
+    || fail "Safe MOCK_STARTING result was not eligible for retry."
+  if mock_starting_retry_is_safe "$(jq -c '.structuredContent.error.retryable = false' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "$(jq -c '.structuredContent.error.stateMayHaveChanged = true' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "$(jq -c 'del(.structuredContent.error.details.status)' <<<"${starting_result}")" self-test \
+      || mock_starting_retry_is_safe "${starting_result}" other-mock; then
+    fail "Unsafe MOCK_STARTING result was eligible for retry."
+  fi
+  log "MOCK_STARTING retry safety contract passed."
   assert_mock_starting_contract "${starting_result}" self-test
   if ( assert_mock_starting_contract '{"isError":false}' self-test >/dev/null 2>&1 ); then
     fail "Cold-start assertion accepted a successful WireMock result."
