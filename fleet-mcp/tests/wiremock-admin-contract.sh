@@ -165,23 +165,51 @@ run_contract() {
 
     local stored_mapping
     stored_mapping="$(curl --fail --silent "${base_url}/__admin/mappings/${mapping_id}")"
+    local updated_mapping
+    updated_mapping="$(jq --compact-output '.response.status = 203' <<<"${stored_mapping}")"
     local recovery_marker
     recovery_marker="$(jq --null-input --compact-output --arg stub_id "${mapping_id}" \
-        --argjson mapping "${stored_mapping}" \
-        '{persistent:true,request:{method:"OPTIONS",urlPath:("/__mock_fleet_mcp/recovery/" + $stub_id)},response:{status:503},metadata:{_mockFleetMcpRecovery:{operation:"unpersist",stubId:$stub_id,mapping:$mapping}}}' \
+        --argjson before "${stored_mapping}" --argjson after "${updated_mapping}" \
+        '{persistent:true,request:{method:"OPTIONS",urlPath:("/__mock_fleet_mcp/recovery/" + $stub_id)},response:{status:503},metadata:{_mockFleetMcpRecovery:{operation:"update",stubId:$stub_id,before:$before,after:$after}}}' \
         | curl --fail --silent --request POST --header 'Content-Type: application/json' --data-binary @- \
             "${base_url}/__admin/mappings")"
     local recovery_marker_id
     recovery_marker_id="$(jq --exit-status --raw-output '.id' <<<"${recovery_marker}")"
-    curl --fail --silent --request DELETE "${base_url}/__admin/mappings/${mapping_id}" >/dev/null
     restart_wiremock "${image}"
-    local recovered_mapping
-    recovered_mapping="$(curl --fail --silent "${base_url}/__admin/mappings/${recovery_marker_id}" \
-        | jq --exit-status '.metadata._mockFleetMcpRecovery.mapping')"
-    jq --exit-status --arg id "${mapping_id}" '.id == $id and .persistent == true' <<<"${recovered_mapping}" >/dev/null
-    jq --compact-output '.persistent = false' <<<"${recovered_mapping}" \
+    local recovered_after
+    recovered_after="$(curl --fail --silent "${base_url}/__admin/mappings/${recovery_marker_id}" \
+        | jq --exit-status --arg id "${mapping_id}" \
+            '.metadata._mockFleetMcpRecovery | select(.operation == "update" and .stubId == $id and .before.id == $id) | .after')"
+    curl --fail --silent --request DELETE "${base_url}/__admin/mappings/${mapping_id}" >/dev/null
+    curl --fail --silent --request POST --header 'Content-Type: application/json' --data-binary "${recovered_after}" \
+        "${base_url}/__admin/mappings" | jq --exit-status '.persistent == true and .response.status == 203' >/dev/null
+    local verified_updated_mapping
+    verified_updated_mapping="$(curl --fail --silent "${base_url}/__admin/mappings/${mapping_id}")"
+    jq --exit-status --argjson expected "${recovered_after}" \
+        '. == $expected and .persistent == true and .response.status == 203' \
+        <<<"${verified_updated_mapping}" >/dev/null
+    curl --fail --silent --request DELETE "${base_url}/__admin/mappings/${recovery_marker_id}" >/dev/null
+    restart_wiremock "${image}"
+    curl --fail --silent "${base_url}/__admin/mappings/${mapping_id}" \
+        | jq --exit-status '.persistent == true and .response.status == 203' >/dev/null
+
+    stored_mapping="$(curl --fail --silent "${base_url}/__admin/mappings/${mapping_id}")"
+    local temporary_mapping
+    temporary_mapping="$(jq --compact-output '.persistent = false' <<<"${stored_mapping}")"
+    recovery_marker="$(jq --null-input --compact-output --arg stub_id "${mapping_id}" \
+        --argjson before "${stored_mapping}" --argjson after "${temporary_mapping}" \
+        '{persistent:true,request:{method:"OPTIONS",urlPath:("/__mock_fleet_mcp/recovery/" + $stub_id)},response:{status:503},metadata:{_mockFleetMcpRecovery:{operation:"unpersist",stubId:$stub_id,before:$before,after:$after}}}' \
         | curl --fail --silent --request POST --header 'Content-Type: application/json' --data-binary @- \
-            "${base_url}/__admin/mappings" | jq --exit-status '.persistent == false' >/dev/null
+            "${base_url}/__admin/mappings")"
+    recovery_marker_id="$(jq --exit-status --raw-output '.id' <<<"${recovery_marker}")"
+    restart_wiremock "${image}"
+    local recovered_temporary
+    recovered_temporary="$(curl --fail --silent "${base_url}/__admin/mappings/${recovery_marker_id}" \
+        | jq --exit-status --arg id "${mapping_id}" \
+            '.metadata._mockFleetMcpRecovery | select(.operation == "unpersist" and .stubId == $id and .before.id == $id) | .after')"
+    curl --fail --silent --request DELETE "${base_url}/__admin/mappings/${mapping_id}" >/dev/null
+    curl --fail --silent --request POST --header 'Content-Type: application/json' --data-binary "${recovered_temporary}" \
+        "${base_url}/__admin/mappings" | jq --exit-status '.persistent == false' >/dev/null
     curl --fail --silent --request DELETE "${base_url}/__admin/mappings/${recovery_marker_id}" >/dev/null
     restart_wiremock "${image}"
     [[ "$(curl --silent --output /dev/null --write-out '%{http_code}' "${base_url}/__admin/mappings/${mapping_id}")" == "404" ]]

@@ -220,43 +220,7 @@ final class WireMockConfigDocument {
     }
 
     private static List<String> normalizeOptions(List<String> options) {
-        List<String> normalized = new ArrayList<>();
-        for (String option : options) {
-            String trimmed = option.trim();
-            if (trimmed.startsWith("--")) {
-                normalized.addAll(splitOptionString(trimmed));
-            } else {
-                normalized.add(option);
-            }
-        }
-        return normalized;
-    }
-
-    private static List<String> splitOptionString(String value) {
-        List<String> tokens = new ArrayList<>();
-        StringBuilder token = new StringBuilder();
-        boolean quoted = false;
-
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (current == '"') {
-                quoted = !quoted;
-                continue;
-            }
-            if (Character.isWhitespace(current) && !quoted) {
-                if (!token.isEmpty()) {
-                    tokens.add(token.toString());
-                    token.setLength(0);
-                }
-                continue;
-            }
-            token.append(current);
-        }
-
-        if (!token.isEmpty()) {
-            tokens.add(token.toString());
-        }
-        return tokens;
+        return WireMockOptionCatalog.tokenize(options);
     }
 
     private static String optionName(String token) {

@@ -9,6 +9,9 @@ import io.quarkiverse.mcp.server.ToolResponse;
 import io.vertx.core.http.HttpMethod;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -47,15 +50,15 @@ public final class FleetMcpTools {
                 .map(value -> value.toLowerCase(Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
-    @Tool(name = "list_mocks", description = "List active Mock Fleet mocks without starting any mock pod.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_mocks", description = "List active Mock Fleet mocks without starting any mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMocks.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listMocks(
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return fleet("list_mocks", () -> McpToolExecutor.ToolResult.of("Listed active mocks.",
-                page(fleetApi.listMocks(), "mocks", limit, offset)));
+                collectionResult(null, page(fleetApi.listMocks(), "mocks", limit, offset), "mocks", "mocks")));
     }
 
-    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMockConfigs.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listMockConfigs(
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
@@ -65,11 +68,11 @@ public final class FleetMcpTools {
             result.set("resourceVersion", view.path("resourceVersion"));
             result.set("mockIds", view.path("savedMockIds"));
             return McpToolExecutor.ToolResult.of("Listed saved mock configurations.",
-                    page(result, "mockIds", limit, offset));
+                    collectionResult(null, page(result, "mockIds", limit, offset), "mockIds", "mockIds"));
         });
     }
 
-    @Tool(name = "get_mock_config", description = "Get one mock's configuration and Fleet routing metadata.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_mock_config", description = "Get one mock's configuration and Fleet routing metadata.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.GetMockConfig.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getMockConfig(@ToolArg(description = "Mock ID") String mockId) {
         return fleet("get_mock_config", () -> {
             MockIdValidator.requireValid(mockId);
@@ -82,7 +85,7 @@ public final class FleetMcpTools {
         });
     }
 
-    @Tool(name = "list_option_definitions", description = "List supported WireMock CLI option definitions.", annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_option_definitions", description = "List supported WireMock CLI option definitions.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listOptionDefinitions() {
         return fleet("list_option_definitions", () -> {
             JsonNode view = fleetApi.getConfig();
@@ -94,13 +97,14 @@ public final class FleetMcpTools {
 
     @Tool(name = "update_mock_config", description = "Create or replace a mock's complete saved options and resources using optimistic concurrency.",
             inputSchema = @Tool.InputSchema(generator = UpdateMockConfigInputSchemaGenerator.class),
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.UpdateMockConfig.class, generator = ToolOutputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
             @ToolArg(description = "Complete mock-specific WireMock CLI option override list") List<String> options,
             @ToolArg(description = "Kubernetes requests and limits override; omit to inherit baseline resources", required = false) MockResources resources,
-            @ToolArg(description = "How to apply the saved configuration") ConfigApplyMode applyMode) {
+            @ToolArg(description = "How to apply the saved configuration") String applyMode) {
         return fleet("update_mock_config", () -> {
             if (resources != null && resources.requests() == null) {
                 throw new IllegalArgumentException("resources.requests is required when resources are provided");
@@ -108,24 +112,28 @@ public final class FleetMcpTools {
             if (resources != null && resources.limits() == null) {
                 throw new IllegalArgumentException("resources.limits is required when resources are provided");
             }
-            JsonNode view = fleetApi.updateConfig(mockId, resourceVersion, options, resources, applyMode);
+            ConfigApplyMode parsedApplyMode = parseApplyMode(applyMode);
+            JsonNode view = fleetApi.updateConfig(mockId, resourceVersion, options, resources, parsedApplyMode);
+            JsonNode configView = view.path("config");
             ObjectNode result = mapper.createObjectNode();
-            result.set("resourceVersion", view.path("resourceVersion"));
-            result.set("mock", requireMockConfig(view.path("mocks"), mockId, "INVALID_UPSTREAM_RESPONSE"));
-            result.put("applyMode", applyMode.name());
+            result.set("resourceVersion", configView.path("resourceVersion"));
+            result.set("mock", requireMockConfig(configView.path("mocks"), mockId, "INVALID_UPSTREAM_RESPONSE"));
+            result.set("apply", view.path("apply"));
             return McpToolExecutor.ToolResult.of("Updated configuration for " + mockId + ".", result);
         });
     }
 
     @Tool(name = "delete_mock_config", description = "Delete a mock-specific configuration using optimistic concurrency.",
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.DeleteMockConfig.class, generator = ToolOutputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse deleteMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
-            @ToolArg(description = "How to apply the deletion") ConfigApplyMode applyMode) {
+            @ToolArg(description = "How to apply the deletion") String applyMode) {
         return fleet("delete_mock_config", () -> {
-            JsonNode view = fleetApi.deleteConfig(mockId, resourceVersion, applyMode);
-            JsonNode mocks = view.get("mocks");
+            JsonNode view = fleetApi.deleteConfig(mockId, resourceVersion, parseApplyMode(applyMode));
+            JsonNode configView = view.path("config");
+            JsonNode mocks = configView.get("mocks");
             if (mocks == null || !mocks.isArray()) {
                 throw invalidUpstreamResponse("Fleet API response does not contain a mocks array", mockId);
             }
@@ -133,60 +141,76 @@ public final class FleetMcpTools {
                 throw invalidUpstreamResponse("Deleted mock is still present", mockId);
             }
             ObjectNode result = mapper.createObjectNode();
-            result.set("resourceVersion", view.path("resourceVersion"));
+            result.set("resourceVersion", configView.path("resourceVersion"));
             result.put("mockId", mockId);
             result.put("deleted", true);
-            result.put("applyMode", applyMode.name());
+            result.set("apply", view.path("apply"));
             return McpToolExecutor.ToolResult.of("Deleted configuration for " + mockId + ".", result);
         });
     }
 
-    @Tool(name = "stop_mock", description = "Stop an active mock pod. The next proxied request may start it again.",
-            annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
-    public ToolResponse stopMock(@ToolArg(description = "Mock ID") String mockId) {
-        return fleet("stop_mock", () -> {
-            fleetApi.stopMock(mockId);
-            return McpToolExecutor.ToolResult.of("Stopped mock " + mockId + ".", Map.of("mockId", mockId, "stopped", true));
+    @Tool(name = "start_mock", description = "Start a mock pod or report that startup is still in progress.",
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.StartMock.class, generator = ToolOutputSchemaGenerator.class),
+            annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse startMock(@ToolArg(description = "Mock ID") String mockId) {
+        return fleet("start_mock", () -> {
+            ObjectNode lifecycle = requireLifecycleResponse(mockId);
+            String summary = "RUNNING".equals(lifecycle.path("status").asText())
+                    ? "Mock " + mockId + " is running."
+                    : "Mock " + mockId + " is starting.";
+            return McpToolExecutor.ToolResult.of(summary, lifecycle);
         });
     }
 
-    @Tool(name = "list_stubs", description = "List WireMock stubs. This may start an inactive mock pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "stop_mock", description = "Stop an active mock pod. The next proxied request may start it again.",
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.StopMock.class, generator = ToolOutputSchemaGenerator.class),
+            annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    public ToolResponse stopMock(@ToolArg(description = "Mock ID") String mockId) {
+        return fleet("stop_mock", () -> {
+            ObjectNode lifecycle = requireStopLifecycleResponse(mockId);
+            return McpToolExecutor.ToolResult.of("Stopped mock " + mockId + ".", lifecycle);
+        });
+    }
+
+    @Tool(name = "list_stubs", description = "List WireMock stubs. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listStubs(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("list_stubs", mockId, () -> McpToolExecutor.ToolResult.of("Listed stubs for " + mockId + ".",
-                wireMock.listStubs(mockId, pageSize(limit), pageOffset(offset))));
+                collectionResult(mockId, wireMock.listStubs(mockId, pageSize(limit), pageOffset(offset)),
+                        "mappings", "stubs")));
     }
 
-    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests. Requires WireMock 3.13+ and may start the pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests. Requires WireMock 3.13+ and may start the pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listUnmatchedStubs(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("list_unmatched_stubs", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed unmatched stubs for " + mockId + ".",
-                page(wireMock.listUnmatchedStubs(mockId), "mappings", limit, offset)));
+                collectionResult(mockId, page(wireMock.listUnmatchedStubs(mockId), "mappings", limit, offset),
+                        "mappings", "stubs")));
     }
 
-    @Tool(name = "get_stub", description = "Get a WireMock stub by ID. This may start an inactive mock pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_stub", description = "Get a WireMock stub by ID. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId) {
         return wireMock("get_stub", mockId, () -> McpToolExecutor.ToolResult.of(
-                "Loaded stub " + stubId + ".", wireMock.getStub(mockId, stubId)));
+                "Loaded stub " + stubId + ".", wrapped(mockId, "stub", wireMock.getStub(mockId, stubId))));
     }
 
-    @Tool(name = "create_stub", description = "Create a temporary WireMock stub. Client-supplied id, uuid, and persistent fields are ignored.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "create_stub", description = "Create a temporary WireMock stub. Client-supplied id, uuid, and persistent fields are ignored.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse createStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
         return wireMock("create_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Created a temporary stub for " + mockId + ".",
-                    wireMock.createStub(mockId, payload));
+                    wrapped(mockId, "stub", wireMock.createStub(mockId, payload)));
         }));
     }
 
-    @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse updateStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
@@ -194,11 +218,11 @@ public final class FleetMcpTools {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Updated stub " + stubId + ".",
-                    wireMock.updateStub(mockId, stubId, payload));
+                    wrapped(mockId, "stub", wireMock.updateStub(mockId, stubId, payload)));
         }));
     }
 
-    @Tool(name = "delete_stub", description = "Delete a WireMock stub without deleting referenced body files.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "delete_stub", description = "Delete a WireMock stub without deleting referenced body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.DeleteStub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse deleteStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId) {
         return wireMock("delete_stub", mockId, () -> coordinator.serialized(mockId, () -> {
@@ -208,7 +232,7 @@ public final class FleetMcpTools {
         }));
     }
 
-    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse persistStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId) {
         return wireMock("persist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
@@ -216,71 +240,80 @@ public final class FleetMcpTools {
             JsonNode stub = wireMock.getStub(mockId, stubId);
             verifyBodyFiles(mockId, stub);
             JsonNode updated = wireMock.setPersistent(mockId, stubId, true);
-            return McpToolExecutor.ToolResult.of("Stub " + stubId + " is persistent.", updated);
+            return McpToolExecutor.ToolResult.of("Stub " + stubId + " is persistent.", wrapped(mockId, "stub", updated));
         }));
     }
 
-    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse unpersistStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId) {
         return wireMock("unpersist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             requireStorage();
             return McpToolExecutor.ToolResult.of("Stub " + stubId + " is temporary.",
-                    wireMock.setPersistent(mockId, stubId, false));
+                    wrapped(mockId, "stub", wireMock.setPersistent(mockId, stubId, false)));
         }));
     }
 
-    @Tool(name = "send_request", description = "Send ordinary traffic through Fleet Proxy. Admin paths are rejected and the request may start the pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "send_request", description = "Send ordinary traffic through Fleet Proxy. Admin paths are rejected and the request may start the pod.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.SendRequest.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse sendRequest(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "HTTP method") String method,
             @ToolArg(description = "Relative path and optional query") String path,
             @ToolArg(description = "Request headers", required = false) Map<String, Object> headers,
-            @ToolArg(description = "UTF-8 request body", required = false) String body,
-            @ToolArg(description = "Base64 request body for binary content", required = false) String bodyBase64) {
+            @ToolArg(description = "Encoded request body", required = false) Map<String, Object> body) {
         return wireMock("send_request", mockId, () -> {
-            byte[] requestBody = decodeBody(body, bodyBase64);
+            byte[] requestBody = decodeBody(body, false);
             TransportResponse response = wireMock.sendRequest(mockId, parseMethod(method), path, headerMap(headers), requestBody);
-            return McpToolExecutor.ToolResult.of("Received HTTP " + response.status() + " from " + mockId + ".",
-                    trafficResult(response));
+            ObjectNode result = mapper.createObjectNode();
+            result.put("mockId", mockId);
+            result.set("response", trafficResult(response));
+            return McpToolExecutor.ToolResult.of("Received HTTP " + response.status() + " from " + mockId + ".", result);
         });
     }
 
-    @Tool(name = "find_requests", description = "Find journaled requests matching a native WireMock request pattern. Sensitive headers are redacted.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "find_requests", description = "Find journaled requests matching a native WireMock request pattern. Sensitive headers are redacted.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RequestPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse findRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock request-pattern JSON") Map<String, Object> requestPattern,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("find_requests", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Found matching requests for " + mockId + ".",
-                page(wireMock.findRequests(mockId, json(requestPattern)), "requests", limit, offset)));
+                collectionResult(mockId, page(wireMock.findRequests(mockId, json(requestPattern)), "requests", limit, offset),
+                        "requests", "requests")));
     }
 
-    @Tool(name = "count_requests", description = "Count journaled requests matching a native WireMock request pattern.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "count_requests", description = "Count journaled requests matching a native WireMock request pattern.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.CountRequests.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse countRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock request-pattern JSON") Map<String, Object> requestPattern) {
-        return wireMock("count_requests", mockId, () -> McpToolExecutor.ToolResult.of(
-                "Counted matching requests for " + mockId + ".", wireMock.countRequests(mockId, json(requestPattern))));
+        return wireMock("count_requests", mockId, () -> {
+            JsonNode response = wireMock.countRequests(mockId, json(requestPattern));
+            ObjectNode result = mapper.createObjectNode();
+            result.put("mockId", mockId);
+            result.set("count", response.path("count"));
+            return McpToolExecutor.ToolResult.of("Counted matching requests for " + mockId + ".", result);
+        });
     }
 
-    @Tool(name = "list_unmatched_requests", description = "List unmatched journal requests with sensitive headers redacted.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_unmatched_requests", description = "List unmatched journal requests with sensitive headers redacted.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RequestPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listUnmatchedRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("list_unmatched_requests", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed unmatched requests for " + mockId + ".",
-                page(wireMock.listUnmatchedRequests(mockId), "requests", limit, offset)));
+                collectionResult(mockId, page(wireMock.listUnmatchedRequests(mockId), "requests", limit, offset),
+                        "requests", "requests")));
     }
 
-    @Tool(name = "get_near_misses", description = "Get near misses for unmatched requests or an optional request pattern.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_near_misses", description = "Get near misses for unmatched requests or an optional request pattern.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.NearMisses.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getNearMisses(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Optional native WireMock request-pattern JSON", required = false) Map<String, Object> requestPattern) {
         return wireMock("get_near_misses", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Loaded near misses for " + mockId + ".",
-                wireMock.getNearMisses(mockId, requestPattern == null ? null : json(requestPattern))));
+                wrapped(mockId, "response",
+                        wireMock.getNearMisses(mockId, requestPattern == null ? null : json(requestPattern)))));
     }
 
-    @Tool(name = "reset_request_journal", description = "Delete all entries from the WireMock request journal.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "reset_request_journal", description = "Delete all entries from the WireMock request journal.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Reset.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse resetRequestJournal(@ToolArg(description = "Mock ID") String mockId) {
         return wireMock("reset_request_journal", mockId, () -> {
             wireMock.resetRequestJournal(mockId);
@@ -289,50 +322,52 @@ public final class FleetMcpTools {
         });
     }
 
-    @Tool(name = "start_recording", description = "Start WireMock recording with persist=false and outputFormat=IDS. The target is checked against the outbound policy.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "start_recording", description = "Start WireMock recording with persist=false and outputFormat=IDS. The target is checked against the outbound policy.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingStatus.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse startRecording(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock recorder JSON") Map<String, Object> recording) {
         return wireMock("start_recording", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(recording, "recording");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Started recording for " + mockId + ".",
-                    wireMock.startRecording(mockId, payload));
+                    wrapped(mockId, "status", wireMock.startRecording(mockId, payload)));
         }));
     }
 
-    @Tool(name = "recording_status", description = "Get WireMock recorder status. This may start an inactive mock pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_recording_status", description = "Get WireMock recorder status. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingStatus.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse recordingStatus(@ToolArg(description = "Mock ID") String mockId) {
-        return wireMock("recording_status", mockId, () -> McpToolExecutor.ToolResult.of(
-                "Loaded recorder status for " + mockId + ".", wireMock.recordingStatus(mockId)));
+        return wireMock("get_recording_status", mockId, () -> McpToolExecutor.ToolResult.of(
+                "Loaded recorder status for " + mockId + ".", wrapped(mockId, "status", wireMock.recordingStatus(mockId))));
     }
 
-    @Tool(name = "stop_recording", description = "Stop recording and return sanitized temporary candidate IDs for review.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "stop_recording", description = "Stop recording and return sanitized temporary candidate IDs for review.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse stopRecording(@ToolArg(description = "Mock ID") String mockId) {
         return wireMock("stop_recording", mockId, () -> coordinator.serialized(mockId, () -> McpToolExecutor.ToolResult.of(
-                "Stopped recording for " + mockId + ". Review candidates with get_stub.", wireMock.stopRecording(mockId))));
+                "Stopped recording for " + mockId + ". Review candidates with get_stub.",
+                recordingCandidates(mockId, wireMock.stopRecording(mockId)))));
     }
 
-    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse snapshotRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock snapshot JSON") Map<String, Object> snapshot) {
         return wireMock("snapshot_requests", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(snapshot, "snapshot");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Created temporary recorder candidates for " + mockId + ".",
-                    wireMock.snapshotRequests(mockId, payload));
+                    recordingCandidates(mockId, wireMock.snapshotRequests(mockId, payload)));
         }));
     }
 
-    @Tool(name = "list_body_files", description = "List WireMock body-file names. This may start an inactive mock pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_body_files", description = "List WireMock body-file names. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.BodyFilePage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listBodyFiles(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("list_body_files", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed body files for " + mockId + ".",
-                page(wireMock.listBodyFiles(mockId), "files", limit, offset)));
+                collectionResult(mockId, page(wireMock.listBodyFiles(mockId), "files", limit, offset),
+                        "files", "files")));
     }
 
-    @Tool(name = "get_body_file", description = "Get a WireMock body file as text or base64 within the configured body limit.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_body_file", description = "Get a WireMock body file as text or base64 within the configured body limit.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.GetBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName) {
         return wireMock("get_body_file", mockId, () -> {
@@ -341,25 +376,26 @@ public final class FleetMcpTools {
                 throw tooLarge(response.body().length, config.includedBodyBytes());
             }
             ObjectNode result = binaryResult(response.body(), firstHeader(response.headers(), "content-type"));
+            result.put("mockId", mockId);
             result.put("fileName", fileName);
             return McpToolExecutor.ToolResult.of("Loaded body file " + fileName + ".", result);
         });
     }
 
-    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from base64 content.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "put_body_file", description = "Create or replace a WireMock body file from encoded content.", inputSchema = @Tool.InputSchema(generator = BodyInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.PutBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse putBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName,
-            @ToolArg(description = "Base64 file content") String contentBase64,
+            @ToolArg(description = "Encoded file content") Map<String, Object> body,
             @ToolArg(description = "Media type", required = false, defaultValue = "application/octet-stream") String contentType) {
         return wireMock("put_body_file", mockId, () -> coordinator.serialized(mockId, () -> {
-            byte[] content = decodeBase64(contentBase64, "contentBase64");
+            byte[] content = decodeBody(body, true);
             wireMock.putBodyFile(mockId, fileName, content, contentType);
             return McpToolExecutor.ToolResult.of("Stored body file " + fileName + ".",
-                    Map.of("mockId", mockId, "fileName", fileName, "size", content.length));
+                    Map.of("mockId", mockId, "fileName", fileName, "sizeBytes", content.length));
         }));
     }
 
-    @Tool(name = "delete_body_file", description = "Delete a body file. Referencing stubs are reported and require force=true; stubs are never deleted.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "delete_body_file", description = "Delete a body file. Referencing stubs are reported and require force=true; stubs are never deleted.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.DeleteBodyFile.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse deleteBodyFile(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Relative body-file name") String fileName,
             @ToolArg(description = "Delete even when stubs reference the file", required = false, defaultValue = "false") boolean force) {
@@ -377,16 +413,17 @@ public final class FleetMcpTools {
         }));
     }
 
-    @Tool(name = "list_scenarios", description = "List WireMock scenario state. This may start an inactive mock pod.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_scenarios", description = "List WireMock scenario state. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ScenarioPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listScenarios(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Zero-based offset", required = false) Integer offset) {
         return wireMock("list_scenarios", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed scenarios for " + mockId + ".",
-                page(wireMock.listScenarios(mockId), "scenarios", limit, offset)));
+                collectionResult(mockId, page(wireMock.listScenarios(mockId), "scenarios", limit, offset),
+                        "scenarios", "scenarios")));
     }
 
-    @Tool(name = "reset_scenarios", description = "Reset all WireMock scenarios to their initial state.", annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "reset_scenarios", description = "Reset all WireMock scenarios to their initial state.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Reset.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse resetScenarios(@ToolArg(description = "Mock ID") String mockId) {
         return wireMock("reset_scenarios", mockId, () -> {
             wireMock.resetScenarios(mockId);
@@ -402,6 +439,7 @@ public final class FleetMcpTools {
     private ToolResponse wireMock(String toolName, String mockId, Supplier<McpToolExecutor.ToolResult> action) {
         return executor.execute(toolName, () -> {
             MockIdValidator.requireValid(mockId);
+            requireRunning(mockId);
             WireMockVersion runtimeVersion = wireMock.version(mockId);
             if (!ToolCapabilityRegistry.supports(toolName, runtimeVersion)) {
                 throw new McpOperationException("WIREMOCK_VERSION_UNSUPPORTED",
@@ -411,6 +449,94 @@ public final class FleetMcpTools {
             }
             return action.get();
         });
+    }
+
+    private ObjectNode requireLifecycleResponse(String mockId) {
+        return requireLifecycleResponse(mockId, "start", Set.of("RUNNING", "STARTING"),
+                () -> fleetApi.startMock(mockId));
+    }
+
+    private ObjectNode requireStopLifecycleResponse(String mockId) {
+        return requireLifecycleResponse(mockId, "stop", Set.of("STOPPED"), () -> fleetApi.stopMock(mockId));
+    }
+
+    private ObjectNode requireLifecycleResponse(String mockId, String operation, Set<String> allowedStatuses,
+            Supplier<JsonNode> request) {
+        MockIdValidator.requireValid(mockId);
+        JsonNode response = request.get();
+        if (!response.isObject() || !response.path("mockId").isTextual() || !response.path("status").isTextual()) {
+            throw invalidUpstreamResponse("Fleet " + operation + " response is missing lifecycle fields", mockId);
+        }
+        if (!mockId.equals(response.path("mockId").asText())) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response mockId does not match the requested mock", mockId);
+        }
+        String status = response.path("status").asText();
+        if (!allowedStatuses.contains(status)) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response contains unsupported status " + status, mockId);
+        }
+        requireNullableText(response, "podName", mockId, operation);
+        requireNullableText(response, "message", mockId, operation);
+        requireNullableNonNegativeInteger(response, "retryAfterMs", mockId, operation);
+        ObjectNode result = mapper.createObjectNode();
+        result.put("mockId", mockId);
+        result.put("status", status);
+        copyNullable(result, response, "podName");
+        copyNullable(result, response, "message");
+        copyNullable(result, response, "retryAfterMs");
+        return result;
+    }
+
+    private void requireRunning(String mockId) {
+        ObjectNode lifecycle = requireLifecycleResponse(mockId);
+        if (!"STARTING".equals(lifecycle.path("status").asText())) {
+            return;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("mockId", mockId);
+        details.put("status", "STARTING");
+        if (!lifecycle.path("podName").isNull()) {
+            details.put("podName", lifecycle.path("podName").asText());
+        }
+        if (!lifecycle.path("message").isNull()) {
+            details.put("message", lifecycle.path("message").asText());
+        }
+        if (!lifecycle.path("retryAfterMs").isNull()) {
+            details.put("retryAfterMs", lifecycle.path("retryAfterMs").asInt());
+        }
+        throw new McpOperationException("MOCK_STARTING", "Mock " + mockId + " is still starting", true, false, details);
+    }
+
+    private void requireNullableText(JsonNode response, String field, String mockId, String operation) {
+        JsonNode value = response.get(field);
+        if (value == null) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " is required", mockId);
+        }
+        if (!value.isNull() && !value.isTextual()) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " must be a string or null", mockId);
+        }
+    }
+
+    private void requireNullableNonNegativeInteger(JsonNode response, String field, String mockId, String operation) {
+        JsonNode value = response.get(field);
+        if (value == null) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field + " is required", mockId);
+        }
+        if (!value.isNull() && (!value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 0)) {
+            throw invalidUpstreamResponse(
+                    "Fleet " + operation + " response field " + field
+                            + " must be a non-negative integer or null",
+                    mockId);
+        }
+    }
+
+    private void copyNullable(ObjectNode target, JsonNode source, String field) {
+        JsonNode value = source.get(field);
+        target.set(field, value == null ? mapper.getNodeFactory().nullNode() : value);
     }
 
     private void requireStorage() {
@@ -471,13 +597,58 @@ public final class FleetMcpTools {
 
     private ObjectNode binaryResult(byte[] body, String contentType) {
         ObjectNode result = mapper.createObjectNode();
-        result.put("size", body.length);
-        result.put("contentType", contentType == null ? "application/octet-stream" : contentType);
-        if (isText(contentType)) {
-            result.put("body", new String(body, StandardCharsets.UTF_8));
+        String normalizedContentType = contentType == null || contentType.isBlank()
+                ? "application/octet-stream" : contentType;
+        result.put("contentType", normalizedContentType);
+        ObjectNode encoded = result.putObject("body");
+        String printable = printableUtf8(body);
+        boolean inferText = contentType == null || contentType.isBlank()
+                || normalizedContentType.toLowerCase(Locale.ROOT).startsWith("application/octet-stream");
+        if ((isText(normalizedContentType) || inferText) && printable != null) {
+            encoded.put("encoding", "utf8");
+            encoded.put("data", printable);
         } else {
-            result.put("bodyBase64", Base64.getEncoder().encodeToString(body));
+            encoded.put("encoding", "base64");
+            encoded.put("data", Base64.getEncoder().encodeToString(body));
         }
+        encoded.put("sizeBytes", body.length);
+        return result;
+    }
+
+    private ObjectNode wrapped(String mockId, String field, JsonNode value) {
+        ObjectNode result = mapper.createObjectNode();
+        result.put("mockId", mockId);
+        result.set(field, value);
+        return result;
+    }
+
+    private ObjectNode collectionResult(String mockId, JsonNode source, String sourceField, String resultField) {
+        if (!source.path(sourceField).isArray() || !source.path("meta").isObject()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Paginated result is missing collection or metadata",
+                    false, Map.of("field", sourceField));
+        }
+        ObjectNode result = mapper.createObjectNode();
+        if (source.path("resourceVersion").isValueNode()) {
+            result.set("resourceVersion", source.path("resourceVersion"));
+        }
+        if (mockId != null) {
+            result.put("mockId", mockId);
+        }
+        result.set(resultField, source.path(sourceField));
+        result.set("page", source.path("meta"));
+        return result;
+    }
+
+    private ObjectNode recordingCandidates(String mockId, JsonNode response) {
+        JsonNode ids = response.path("ids");
+        if (!ids.isArray()) {
+            throw invalidUpstreamResponse("WireMock recorder response is missing candidate IDs", mockId);
+        }
+        ObjectNode result = mapper.createObjectNode();
+        result.put("mockId", mockId);
+        result.set("candidateIds", ids);
+        result.put("candidateCount", ids.size());
+        result.put("matchedRequests", !ids.isEmpty());
         return result;
     }
 
@@ -510,12 +681,30 @@ public final class FleetMcpTools {
         return Map.copyOf(result);
     }
 
-    private byte[] decodeBody(String body, String bodyBase64) {
-        if (body != null && bodyBase64 != null) {
-            throw new IllegalArgumentException("Specify either body or bodyBase64, not both");
+    private byte[] decodeBody(Map<String, Object> body, boolean required) {
+        if (body == null) {
+            if (required) {
+                throw new IllegalArgumentException("body is required");
+            }
+            return new byte[0];
         }
-        byte[] decoded = bodyBase64 != null ? decodeBase64(bodyBase64, "bodyBase64")
-                : body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
+        ObjectNode value = object(body, "body");
+        String encoding = value.path("encoding").isTextual() ? value.path("encoding").asText() : null;
+        String data = value.path("data").isTextual() ? value.path("data").asText() : null;
+        if (data == null) {
+            throw new IllegalArgumentException("body.data is required");
+        }
+        byte[] decoded = switch (encoding == null ? "" : encoding) {
+            case "utf8" -> data.getBytes(StandardCharsets.UTF_8);
+            case "base64" -> decodeBase64(data, "body.data");
+            default -> throw new IllegalArgumentException("Unsupported body.encoding: " + encoding);
+        };
+        if (!value.path("sizeBytes").canConvertToInt() || value.path("sizeBytes").asInt() < 0) {
+            throw new IllegalArgumentException("body.sizeBytes must be a non-negative integer");
+        }
+        if (value.path("sizeBytes").asInt() != decoded.length) {
+            throw new IllegalArgumentException("body.sizeBytes does not match decoded data");
+        }
         if (decoded.length > config.maxPayloadBytes()) {
             throw tooLarge(decoded.length, config.maxPayloadBytes());
         }
@@ -558,6 +747,14 @@ public final class FleetMcpTools {
             return HttpMethod.valueOf(value.toUpperCase(Locale.ROOT));
         } catch (Exception e) {
             throw new IllegalArgumentException("Unsupported HTTP method: " + value);
+        }
+    }
+
+    private ConfigApplyMode parseApplyMode(String value) {
+        try {
+            return ConfigApplyMode.valueOf(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Unsupported applyMode: " + value);
         }
     }
 
@@ -631,6 +828,20 @@ public final class FleetMcpTools {
         String normalized = contentType.toLowerCase(Locale.ROOT);
         return normalized.startsWith("text/") || normalized.contains("json") || normalized.contains("xml")
                 || normalized.contains("yaml") || normalized.contains("javascript") || normalized.contains("form-urlencoded");
+    }
+
+    private static String printableUtf8(byte[] bytes) {
+        try {
+            String value = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes)).toString();
+            boolean printable = value.codePoints().allMatch(codePoint -> codePoint == '\n' || codePoint == '\r'
+                    || codePoint == '\t' || (codePoint >= 0x20 && codePoint != 0x7f && !Character.isISOControl(codePoint)));
+            return printable ? value : null;
+        } catch (CharacterCodingException e) {
+            return null;
+        }
     }
 
     private static McpOperationException tooLarge(int actual, int limit) {

@@ -42,15 +42,79 @@ class FleetResourceTest {
 
     @Test
     void deletesActiveMock() {
-        when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.DELETED);
+        when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.NOT_FOUND);
 
         given()
         .when()
                 .delete("/__fleet/api/mocks/demo")
         .then()
-                .statusCode(204);
+                .statusCode(200)
+                .body("mockId", is("demo"))
+                .body("status", is("STOPPED"));
 
         verify(podManager).deleteMock("demo");
+    }
+
+    @Test
+    void startsMissingMockAsynchronously() {
+        when(podManager.startMock("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", null, MockLifecycleStatus.STARTING, null));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(202)
+                .body("mockId", is("demo"))
+                .body("status", is("STARTING"))
+                .body("retryAfterMs", is(1000));
+
+        verify(podManager).startMock("demo");
+    }
+
+    @Test
+    void returnsRunningImmediatelyForAnExistingMock() {
+        when(podManager.startMock("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", "mock-fleet-demo-1", MockLifecycleStatus.RUNNING, null));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(200)
+                .body("mockId", is("demo"))
+                .body("status", is("RUNNING"))
+                .body("podName", is("mock-fleet-demo-1"));
+    }
+
+    @Test
+    void returnsStructuredRetryableErrorForTerminalStartupFailure() {
+        when(podManager.startMock("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", "mock-fleet-demo-1", MockLifecycleStatus.FAILED, "ImagePullBackOff: denied"));
+
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo/start")
+        .then()
+                .statusCode(503)
+                .body("code", is("MOCK_START_FAILED"))
+                .body("message", is("ImagePullBackOff: denied"))
+                .body("retryable", is(true))
+                .body("stateMayHaveChanged", is(false))
+                .body("details.mockId", is("demo"))
+                .body("details.podName", is("mock-fleet-demo-1"));
+    }
+
+    @Test
+    void rejectsInvalidMockIdWithStructuredError() {
+        given()
+        .when()
+                .post("/__fleet/api/mocks/demo_1/start")
+        .then()
+                .statusCode(400)
+                .body("code", is("INVALID_MOCK_ID"))
+                .body("retryable", is(false))
+                .body("stateMayHaveChanged", is(false));
     }
 
     @Test

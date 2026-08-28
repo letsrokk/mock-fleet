@@ -100,48 +100,9 @@ export function optionsFromDraft(draft: DraftConfig, definitions: OptionDefiniti
       }
     }
   });
-  const rawArgs = splitArgs(draft.rawArgs);
-  validateAdvancedArgs(rawArgs, definitions);
-  const effectiveOptions = [...options, ...rawArgs];
-  return baseline ? overrideOptions(effectiveOptions, baseline.options) : effectiveOptions;
-}
-
-export function validateAdvancedArgs(rawArgs: string[], definitions: OptionDefinition[]) {
-  const definitionsByName = new Map(definitions.map((definition) => [definition.name, definition]));
-
-  for (let index = 0; index < rawArgs.length; index += 1) {
-    const token = rawArgs[index];
-    if (!token.startsWith("--")) {
-      throw new Error(`Advanced args contains '${token}' without an option name.`);
-    }
-
-    const equalsIndex = token.indexOf("=");
-    const optionName = equalsIndex > 0 ? token.slice(0, equalsIndex) : token;
-    const definition = definitionsByName.get(optionName);
-    if (!definition) {
-      throw new Error(`Advanced args contains unsupported WireMock option '${optionName}'.`);
-    }
-
-    if (definition.kind === "flag") {
-      if (equalsIndex > 0) {
-        throw new Error(`Advanced args option '${optionName}' does not accept a value.`);
-      }
-      continue;
-    }
-
-    if (equalsIndex > 0) {
-      if (!token.slice(equalsIndex + 1).trim()) {
-        throw new Error(`Advanced args option '${optionName}' requires a value.`);
-      }
-      continue;
-    }
-
-    const nextValue = rawArgs[index + 1];
-    if (!nextValue || nextValue.startsWith("--")) {
-      throw new Error(`Advanced args option '${optionName}' requires a value.`);
-    }
-    index += 1;
-  }
+  const rawArgs = draft.rawArgs.trim() ? [draft.rawArgs.trim()] : [];
+  const overrides = baseline ? overrideOptions(options, baseline.options) : options;
+  return [...overrides, ...rawArgs];
 }
 
 export function resourcesFromDraft(draft: DraftConfig, baseline?: ConfigData): ResourceData | null {

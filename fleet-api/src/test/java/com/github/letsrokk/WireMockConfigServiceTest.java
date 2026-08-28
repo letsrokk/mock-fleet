@@ -4,6 +4,7 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
@@ -22,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
@@ -108,8 +110,9 @@ class WireMockConfigServiceTest {
                       options:
                         - --disable-banner
                 """.getBytes(StandardCharsets.UTF_8)));
-        when(service.podManager.listActiveMocks()).thenReturn(List.of(
-                new PodManager.ActiveMockPod("active-only", "mock-fleet-active-only-1")));
+        when(service.podManager.listMocks()).thenReturn(List.of(
+                new PodManager.MockPodStatus("active-only", "mock-fleet-active-only-1",
+                        MockLifecycleStatus.RUNNING, null)));
 
         WireMockConfigService.ConfigView view = service.view();
 
@@ -330,13 +333,148 @@ class WireMockConfigServiceTest {
         verify(updatedConfigMap).update();
     }
 
+    @Test
+    void deleteRejectsInvalidApplyModeBeforeReadingOrMutatingConfig() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        WireMockConfigService service = service(kubernetesClient, config());
+        service.wireMockOptions.setUserConfig(WireMockConfigDocument.of(
+                List.of(), null, Map.of("demo", new WireMockPodConfig(List.of("--verbose"), null))));
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> service.deleteMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        "42", null, null, "now")));
+
+        assertEquals(400, exception.getResponse().getStatus());
+        assertEquals(new ApiError("INVALID_APPLY_MODE", "Unsupported config apply mode: now",
+                        false, false, Map.of("applyMode", "now")),
+                exception.getResponse().getEntity());
+        assertEquals(List.of("--verbose"), service.wireMockOptions.optionsFor("demo"));
+        verify(kubernetesClient, never()).configMaps();
+    }
+
+    @Test
+    void configConflictIncludesExpectedAndCurrentVersions() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """));
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        "41", List.of(), null, "futureOnly")));
+
+        assertEquals(409, exception.getResponse().getStatus());
+        assertEquals(new ApiError("CONFIG_CONFLICT", "WireMock config was modified by another writer.",
+                        true, false, Map.of("expectedVersion", "41", "currentVersion", "42")),
+                exception.getResponse().getEntity());
+    }
+
+    @Test
+    void updateRaceConflictRereadsCurrentVersionAndReturnsConfigConflict() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<ConfigMap> updatedConfigMap = mock(NamespaceableResource.class);
+        ConfigMap expected = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        ConfigMap winner = configMap("user-config", "43", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: other
+                      options: []
+                """);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(expected, winner);
+        when(namespacedConfigMaps.resource(any())).thenReturn(updatedConfigMap);
+        when(updatedConfigMap.update()).thenThrow(new KubernetesClientException("conflict", 409, null));
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        "42", List.of(), null, "futureOnly")));
+
+        assertEquals(409, exception.getResponse().getStatus());
+        assertEquals(new ApiError("CONFIG_CONFLICT", "WireMock config was modified by another writer.",
+                        true, false, Map.of("expectedVersion", "42", "currentVersion", "43")),
+                exception.getResponse().getEntity());
+        verify(configMapResource, org.mockito.Mockito.times(2)).get();
+    }
+
+    @Test
+    void updateDoesNotTranslateUnrelatedKubernetesFailureAsConflict() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<ConfigMap> updatedConfigMap = mock(NamespaceableResource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        KubernetesClientException forbidden = new KubernetesClientException("forbidden", 403, null);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        when(namespacedConfigMaps.resource(any())).thenReturn(updatedConfigMap);
+        when(updatedConfigMap.update()).thenThrow(forbidden);
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        KubernetesClientException thrown = assertThrows(KubernetesClientException.class,
+                () -> service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        "42", List.of(), null, "futureOnly")));
+
+        assertEquals(forbidden, thrown);
+        verify(configMapResource).get();
+    }
+
     private WireMockConfigService service(KubernetesClient kubernetesClient, MockFleetConfig config) {
         WireMockConfigService service = new WireMockConfigService();
         service.config = config;
         service.kubernetesClient = kubernetesClient;
         service.wireMockOptions = new WireMockOptions();
         service.podManager = mock(PodManager.class);
-        when(service.podManager.listActiveMocks()).thenReturn(List.of());
+        when(service.podManager.listMocks()).thenReturn(List.of());
+        when(service.podManager.status(any())).thenAnswer(invocation -> new PodManager.MockPodStatus(
+                invocation.getArgument(0), null, MockLifecycleStatus.STOPPED, null));
         return service;
     }
 

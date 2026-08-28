@@ -23,11 +23,11 @@ class McpRegistrationTest {
 
     private static final Set<String> EXPECTED_TOOLS = Set.of(
             "list_mocks", "list_mock_configs", "get_mock_config", "list_option_definitions", "update_mock_config",
-            "delete_mock_config", "stop_mock",
+            "delete_mock_config", "start_mock", "stop_mock",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "delete_stub",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
-            "recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
+            "get_recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
             "put_body_file", "delete_body_file", "list_scenarios", "reset_scenarios");
 
     @Inject
@@ -84,6 +84,80 @@ class McpRegistrationTest {
             assertEquals("object", argument.path("type").asText(), toolName + "." + argumentName);
             assertFalse(argument.path("properties").has("map"), toolName + "." + argumentName);
         });
+
+        assertTrue(tool(tools, "create_stub").path("inputSchema").path("properties").path("mapping")
+                .path("examples").isArray());
+        assertTrue(tool(tools, "find_requests").path("inputSchema").path("properties").path("requestPattern")
+                .path("examples").isArray());
+        assertTrue(tool(tools, "start_recording").path("inputSchema").path("properties").path("recording")
+                .path("examples").isArray());
+        assertTrue(tool(tools, "snapshot_requests").path("inputSchema").path("properties").path("snapshot")
+                .path("examples").isArray());
+
+        for (String toolName : List.of("send_request", "put_body_file")) {
+            JsonNode body = tool(tools, toolName).path("inputSchema").path("properties").path("body");
+            assertEquals("object", body.path("type").asText(), toolName);
+            assertEquals(List.of("utf8", "base64"), textValues(body.path("properties").path("encoding").path("enum")));
+            assertEquals(Set.of("encoding", "data", "sizeBytes"), Set.copyOf(textValues(body.path("required"))));
+            assertFalse(tool(tools, toolName).path("inputSchema").path("properties").has("bodyBase64"));
+            assertFalse(tool(tools, toolName).path("inputSchema").path("properties").has("contentBase64"));
+        }
+    }
+
+    @Test
+    void everyToolPublishesTypedSuccessAndStrictErrorOutputSchema() throws Exception {
+        String sessionId = initializeSession();
+        initializeClient(sessionId);
+        String response = given()
+                .header("Mcp-Session-Id", sessionId)
+                .header("Mcp-Protocol-Version", "2025-11-25")
+                .contentType("application/json")
+                .accept("application/json, text/event-stream")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")
+        .when()
+                .post("/__fleet/mcp")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+
+        JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
+        assertEquals(32, tools.size());
+        for (JsonNode tool : tools) {
+            JsonNode schema = tool.path("outputSchema");
+            assertEquals(2, schema.path("oneOf").size(), tool.path("name").asText() + ": " + schema);
+            JsonNode success = schema.path("oneOf").get(0);
+            JsonNode failure = schema.path("oneOf").get(1);
+            assertEquals("object", success.path("type").asText(), tool.path("name").asText());
+            assertFalse(success.path("properties").isEmpty(), tool.path("name").asText());
+            assertFalse(success.path("additionalProperties").asBoolean(true), tool.path("name").asText());
+            assertEquals(List.of("error"), textValues(failure.path("required")), tool.path("name").asText());
+            JsonNode error = failure.path("properties").path("error");
+            assertEquals(Set.of("code", "message", "retryable", "stateMayHaveChanged", "details"),
+                    Set.copyOf(textValues(error.path("required"))), tool.path("name").asText());
+            assertFalse(error.path("additionalProperties").asBoolean(true), tool.path("name").asText());
+            assertFalse(failure.path("additionalProperties").asBoolean(true), tool.path("name").asText());
+        }
+
+        JsonNode getStub = tool(tools, "get_stub").path("outputSchema").path("oneOf").get(0);
+        assertEquals(Set.of("mockId", "stub"), Set.copyOf(textValues(getStub.path("required"))));
+        assertTrue(getStub.path("properties").path("stub").path("additionalProperties").asBoolean());
+        JsonNode sendRequest = tool(tools, "send_request").path("outputSchema").path("oneOf").get(0);
+        assertEquals("object", sendRequest.path("properties").path("response").path("type").asText());
+        assertEquals(List.of("utf8", "base64"), textValues(sendRequest.path("properties").path("response")
+                .path("properties").path("body").path("properties").path("encoding").path("enum")));
+
+        for (String toolName : List.of(
+                "list_mock_configs", "get_mock_config", "update_mock_config", "delete_mock_config")) {
+            JsonNode resourceVersion = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("resourceVersion");
+            assertEquals(List.of("string", "null"), textValues(resourceVersion.path("type")), toolName);
+        }
+
+        JsonNode stopMock = tool(tools, "stop_mock").path("outputSchema").path("oneOf").get(0);
+        assertEquals(List.of("STOPPED"), textValues(stopMock.path("properties").path("status").path("enum")));
+        assertEquals(0, stopMock.path("properties").path("retryAfterMs").path("minimum").asInt(-1));
+        assertEquals(Set.of("mockId", "status", "podName", "message", "retryAfterMs"),
+                Set.copyOf(textValues(stopMock.path("required"))));
     }
 
     @Test

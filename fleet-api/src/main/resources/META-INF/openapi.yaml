@@ -1,0 +1,426 @@
+openapi: 3.1.0
+info:
+  title: Mock Fleet API
+  version: 1.5.1
+  description: REST contract for mock lifecycle, configuration, and persisted mapping files.
+paths:
+  /__fleet/api/mocks:
+    get:
+      operationId: listMocks
+      summary: List STARTING, RUNNING, and FAILED mocks
+      responses:
+        "200":
+          description: Current mock lifecycle rows.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MockRow"
+  /__fleet/api/mocks/stream:
+    get:
+      operationId: streamMocks
+      summary: Stream complete mock lifecycle snapshots
+      responses:
+        "200":
+          description: Server-sent events whose data is a complete array of mock rows.
+          content:
+            text/event-stream:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MockRow"
+  /__fleet/api/mocks/{mockId}/start:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    post:
+      operationId: startMock
+      summary: Idempotently start a mock
+      responses:
+        "200":
+          description: The mock is already RUNNING.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockLifecycleResponse"
+        "202":
+          description: The mock is STARTING. Poll this operation after retryAfterMs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockLifecycleResponse"
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "409":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/mocks/{mockId}:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    delete:
+      operationId: stopMock
+      summary: Idempotently stop a RUNNING, STARTING, FAILED, or absent mock
+      responses:
+        "200":
+          description: The mock is STOPPED. Repeated calls return the same state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockLifecycleResponse"
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "500":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/config:
+    get:
+      operationId: getConfig
+      summary: Get baseline, user, and effective configuration with mock lifecycle
+      responses:
+        "200":
+          description: Current configuration view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigView"
+  /__fleet/api/config/{mockId}:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    put:
+      operationId: updateMockConfig
+      summary: Replace a mock configuration override
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigUpdateRequest"
+      responses:
+        "200":
+          description: Saved configuration and its lifecycle apply result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigMutationResult"
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "409":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+    delete:
+      operationId: deleteMockConfig
+      summary: Delete a mock configuration override
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfigDeleteRequest"
+      responses:
+        "200":
+          description: Updated configuration and its lifecycle apply result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfigMutationResult"
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "409":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/mappings:
+    get:
+      operationId: listMappingFolders
+      responses:
+        "200":
+          description: Mapping storage status and folders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MappingsView"
+  /__fleet/api/mappings/{mockId}/tree:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    get:
+      operationId: getMappingTree
+      responses:
+        "200":
+          description: Persisted mapping file tree.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileNode"
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "404":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/mappings/{mockId}:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    delete:
+      operationId: deleteMappingFolder
+      responses:
+        "204":
+          description: Folder absent or deleted.
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "404":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/mappings/{mockId}/files:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getMappingFile
+      responses:
+        "200":
+          description: Stored file with a content type derived from its extension.
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+            application/xml:
+              schema:
+                type: string
+                format: binary
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            text/plain:
+              schema:
+                type: string
+                format: binary
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "404":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+    delete:
+      operationId: deleteMappingFile
+      responses:
+        "204":
+          description: File absent or deleted.
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "503":
+          $ref: "#/components/responses/ApiError"
+  /__fleet/api/version:
+    get:
+      operationId: getApiVersion
+      responses:
+        "200":
+          description: API component version.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [component, version]
+                properties:
+                  component: { type: string, const: api }
+                  version: { type: string }
+components:
+  parameters:
+    MockId:
+      name: mockId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+  responses:
+    ApiError:
+      description: Structured API failure.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    MockLifecycle:
+      type: string
+      enum: [STOPPED, STARTING, RUNNING, FAILED]
+    MockRow:
+      type: object
+      required: [mockId, podName, status, message]
+      properties:
+        mockId: { type: string }
+        podName: { type: [string, "null"] }
+        status:
+          $ref: "#/components/schemas/MockLifecycle"
+        message: { type: [string, "null"] }
+    MockLifecycleResponse:
+      type: object
+      required: [mockId, status, podName, message, retryAfterMs]
+      properties:
+        mockId: { type: string }
+        status:
+          $ref: "#/components/schemas/MockLifecycle"
+        podName: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        retryAfterMs:
+          type: [integer, "null"]
+          minimum: 0
+    ApiError:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, stateMayHaveChanged, details]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        retryable: { type: boolean }
+        stateMayHaveChanged: { type: boolean }
+        details:
+          type: object
+          additionalProperties: true
+    ResourceData:
+      type: object
+      properties:
+        requests:
+          type: object
+          additionalProperties: { type: string }
+        limits:
+          type: object
+          additionalProperties: { type: string }
+    ResolvedConfigData:
+      type: object
+      required: [options, resources]
+      properties:
+        options:
+          type: array
+          items: { type: string }
+        resources:
+          $ref: "#/components/schemas/ResourceData"
+    UserConfigData:
+      type: object
+      required: [options, resources]
+      properties:
+        options:
+          type: array
+          items: { type: string }
+        resources:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceData"
+            - type: "null"
+    MockConfigView:
+      type: object
+      required: [mockId, lifecycle, baseline, user, effective]
+      properties:
+        mockId: { type: string }
+        lifecycle:
+          $ref: "#/components/schemas/MockLifecycle"
+        baseline:
+          $ref: "#/components/schemas/ResolvedConfigData"
+        user:
+          $ref: "#/components/schemas/UserConfigData"
+        effective:
+          $ref: "#/components/schemas/ResolvedConfigData"
+    OptionDefinition:
+      type: object
+      required: [name, label, kind, group, description, values]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [flag, input, number, select] }
+        group: { type: string }
+        description: { type: string }
+        values:
+          type: array
+          items: { type: string }
+    RoutingView:
+      type: object
+      required: [mode, host]
+      properties:
+        mode: { type: string, enum: [HOST, PATH] }
+        host: { type: string }
+    ConfigView:
+      type: object
+      required: [resourceVersion, mockIds, savedMockIds, mocks, options, routing]
+      properties:
+        resourceVersion: { type: [string, "null"] }
+        mockIds:
+          type: array
+          items: { type: string }
+        savedMockIds:
+          type: array
+          items: { type: string }
+        mocks:
+          type: array
+          items:
+            $ref: "#/components/schemas/MockConfigView"
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptionDefinition"
+        routing:
+          $ref: "#/components/schemas/RoutingView"
+    ConfigUpdateRequest:
+      type: object
+      properties:
+        resourceVersion: { type: [string, "null"] }
+        options:
+          type: array
+          items: { type: string }
+        resources:
+          oneOf:
+            - $ref: "#/components/schemas/ResourceData"
+            - type: "null"
+        applyMode: { type: string, enum: [futureOnly, restartActive] }
+    ConfigDeleteRequest:
+      type: object
+      properties:
+        resourceVersion: { type: [string, "null"] }
+        applyMode: { type: string, enum: [futureOnly, restartActive] }
+    ApplyResult:
+      type: object
+      required: [mockId, mode, lifecycle]
+      properties:
+        mockId: { type: string }
+        mode: { type: string, enum: [futureOnly, restartActive] }
+        lifecycle:
+          $ref: "#/components/schemas/MockLifecycle"
+    ConfigMutationResult:
+      type: object
+      required: [config, apply]
+      properties:
+        config:
+          $ref: "#/components/schemas/ConfigView"
+        apply:
+          $ref: "#/components/schemas/ApplyResult"
+    MappingsView:
+      type: object
+      required: [enabled, mockIds, error, routing]
+      properties:
+        enabled: { type: boolean }
+        mockIds:
+          type: array
+          items: { type: string }
+        error: { type: [string, "null"] }
+        routing:
+          $ref: "#/components/schemas/RoutingView"
+    FileNode:
+      type: object
+      required: [name, path, directory, children]
+      properties:
+        name: { type: string }
+        path: { type: string }
+        directory: { type: boolean }
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileNode"

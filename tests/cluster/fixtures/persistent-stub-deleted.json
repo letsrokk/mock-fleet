@@ -1,0 +1,8 @@
+{
+  "request": {"method": "GET", "urlPath": "/persistent-deleted"},
+  "response": {
+    "status": 200,
+    "headers": {"Content-Type": "text/plain"},
+    "body": "must-not-return-after-restart"
+  }
+}

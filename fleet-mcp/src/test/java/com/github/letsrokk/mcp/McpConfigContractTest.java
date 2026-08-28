@@ -35,6 +35,9 @@ class McpConfigContractTest {
 
     @BeforeEach
     void initialize() {
+        when(fleetApi.startMock(any())).thenReturn(mapper.createObjectNode()
+                .put("mockId", "catalog").put("status", "RUNNING").putNull("podName")
+                .putNull("message").putNull("retryAfterMs"));
         when(wireMock.version(any())).thenReturn(new WireMockVersion(3, 13, 2));
         sessionId = given()
                 .contentType("application/json")
@@ -85,24 +88,24 @@ class McpConfigContractTest {
         JsonNode result = callTool("get_mock_config", "{\"mockId\":\"missing\"}");
 
         assertTrue(result.path("isError").asBoolean());
-        assertEquals("NOT_FOUND", result.path("structuredContent").path("code").asText());
-        assertEquals("missing", result.path("structuredContent").path("details").path("mockId").asText());
+        assertEquals("NOT_FOUND", result.path("structuredContent").path("error").path("code").asText());
+        assertEquals("missing", result.path("structuredContent").path("error").path("details").path("mockId").asText());
     }
 
     @Test
     void returnsCompactUpdateAndDeleteResponses() throws Exception {
         JsonNode view = configView(true);
         when(fleetApi.updateConfig("catalog", "41", List.of("--verbose"), null, ConfigApplyMode.futureOnly))
-                .thenReturn(view);
+                .thenReturn(mutation(view, "futureOnly"));
         when(fleetApi.deleteConfig("catalog", "42", ConfigApplyMode.restartActive))
-                .thenReturn(configView(false));
+                .thenReturn(mutation(configView(false), "restartActive"));
 
         JsonNode update = structured(callTool("update_mock_config", """
                 {"mockId":"catalog","resourceVersion":"41","options":["--verbose"],"applyMode":"futureOnly"}
                 """));
         assertEquals("42", update.path("resourceVersion").asText());
         assertEquals("catalog", update.path("mock").path("mockId").asText());
-        assertEquals("futureOnly", update.path("applyMode").asText());
+        assertEquals("futureOnly", update.path("apply").path("mode").asText());
         assertFalse(update.has("mocks"));
         assertFalse(update.has("options"));
         assertFalse(update.has("mockIds"));
@@ -112,7 +115,7 @@ class McpConfigContractTest {
                 """));
         assertEquals("catalog", deletion.path("mockId").asText());
         assertTrue(deletion.path("deleted").asBoolean());
-        assertEquals("restartActive", deletion.path("applyMode").asText());
+        assertEquals("restartActive", deletion.path("apply").path("mode").asText());
         assertFalse(deletion.has("mocks"));
     }
 
@@ -124,16 +127,16 @@ class McpConfigContractTest {
                 """);
 
         assertTrue(result.path("isError").asBoolean());
-        assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("code").asText());
+        assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("error").path("code").asText());
         assertEquals("resources.limits is required when resources are provided",
-                result.path("structuredContent").path("message").asText());
+                result.path("structuredContent").path("error").path("message").asText());
     }
 
     @Test
     void keepsExplicitEmptyResourcesDistinctFromInheritance() throws Exception {
         MockResources emptyOverride = new MockResources(Map.of(), Map.of());
         when(fleetApi.updateConfig("catalog", "41", List.of(), emptyOverride, ConfigApplyMode.futureOnly))
-                .thenReturn(configView(true));
+                .thenReturn(mutation(configView(true), "futureOnly"));
 
         JsonNode update = structured(callTool("update_mock_config", """
                 {"mockId":"catalog","resourceVersion":"41","options":[],
@@ -146,11 +149,11 @@ class McpConfigContractTest {
     @Test
     void rejectsInconsistentUpstreamMutationResponses() throws Exception {
         when(fleetApi.updateConfig("catalog", "41", List.of(), null, ConfigApplyMode.futureOnly))
-                .thenReturn(configView(false));
+                .thenReturn(mutation(configView(false), "futureOnly"));
         when(fleetApi.deleteConfig("catalog", "42", ConfigApplyMode.futureOnly))
-                .thenReturn(configView(true));
+                .thenReturn(mutation(configView(true), "futureOnly"));
         when(fleetApi.deleteConfig("catalog", "43", ConfigApplyMode.futureOnly))
-                .thenReturn(mapper.readTree("{\"resourceVersion\":\"44\"}"));
+                .thenReturn(mapper.readTree("{\"config\":{\"resourceVersion\":\"44\"},\"apply\":{}}"));
 
         JsonNode missingUpdate = callTool("update_mock_config", """
                 {"mockId":"catalog","resourceVersion":"41","options":[],"applyMode":"futureOnly"}
@@ -163,11 +166,23 @@ class McpConfigContractTest {
                 """);
 
         assertEquals("INVALID_UPSTREAM_RESPONSE",
-                missingUpdate.path("structuredContent").path("code").asText());
+                missingUpdate.path("structuredContent").path("error").path("code").asText());
         assertEquals("INVALID_UPSTREAM_RESPONSE",
-                lingeringDelete.path("structuredContent").path("code").asText());
+                lingeringDelete.path("structuredContent").path("error").path("code").asText());
         assertEquals("INVALID_UPSTREAM_RESPONSE",
-                malformedDelete.path("structuredContent").path("code").asText());
+                malformedDelete.path("structuredContent").path("error").path("code").asText());
+    }
+
+    @Test
+    void malformedApplyModeReturnsStructuredInvalidArgument() throws Exception {
+        JsonNode result = callTool("update_mock_config", """
+                {"mockId":"catalog","resourceVersion":"41","options":[],"applyMode":"restartEverything"}
+                """);
+
+        assertTrue(result.path("isError").asBoolean(), result.toPrettyString());
+        assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("error").path("code").asText());
+        assertEquals("Unsupported applyMode: restartEverything",
+                result.path("structuredContent").path("error").path("message").asText());
     }
 
     @Test
@@ -222,5 +237,13 @@ class McpConfigContractTest {
                  "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging","description":"Log details","values":[]}],
                  "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
                 """.formatted(includeCatalog ? "[\"catalog\"]" : "[]", mocks));
+    }
+
+    private JsonNode mutation(JsonNode config, String mode) {
+        var result = mapper.createObjectNode();
+        result.set("config", config);
+        result.set("apply", mapper.createObjectNode().put("mockId", "catalog").put("mode", mode)
+                .put("lifecycle", "STOPPED"));
+        return result;
     }
 }

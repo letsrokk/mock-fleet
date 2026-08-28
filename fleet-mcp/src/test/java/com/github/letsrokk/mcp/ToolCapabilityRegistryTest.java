@@ -24,4 +24,11 @@ class ToolCapabilityRegistryTest {
         assertFalse(ToolCapabilityRegistry.supports("get_body_file", new WireMockVersion(3, 6, 9)));
         assertTrue(ToolCapabilityRegistry.supports("get_body_file", new WireMockVersion(3, 7, 0)));
     }
+
+    @Test
+    void capabilityFilteringUsesOnlyThePublishedRecorderStatusName() {
+        assertTrue(ToolCapabilityRegistry.isWireMockTool("get_recording_status"));
+        assertFalse(ToolCapabilityRegistry.isWireMockTool("recording_status"));
+        assertFalse(ToolCapabilityRegistry.isWireMockTool("start_mock"));
+    }
 }

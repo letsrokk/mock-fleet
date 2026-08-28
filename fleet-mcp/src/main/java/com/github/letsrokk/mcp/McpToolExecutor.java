@@ -26,13 +26,13 @@ public final class McpToolExecutor {
             return new ToolResponse(false, List.of(new TextContent(result.summary())), result.structuredContent(), Map.of());
         } catch (McpOperationException e) {
             outcome = "error";
-            return error(e.code(), e.getMessage(), e.retryable(), e.details());
+            return error(e.code(), e.getMessage(), e.retryable(), e.stateMayHaveChanged(), e.details());
         } catch (IllegalArgumentException e) {
             outcome = "error";
-            return error("INVALID_ARGUMENT", e.getMessage(), false, Map.of());
+            return error("INVALID_ARGUMENT", e.getMessage(), false, false, Map.of());
         } catch (Exception e) {
             outcome = "error";
-            return error("INTERNAL_ERROR", "Unexpected MCP tool failure", false,
+            return error("INTERNAL_ERROR", "Unexpected MCP tool failure", false, false,
                     Map.of("cause", e.getClass().getSimpleName()));
         } finally {
             sample.stop(registry.timer("mock_fleet_mcp_tool_duration", "tool", toolName, "outcome", outcome));
@@ -40,9 +40,10 @@ public final class McpToolExecutor {
         }
     }
 
-    private ToolResponse error(String code, String message, boolean retryable, Map<String, Object> details) {
-        ErrorContent error = new ErrorContent(code, message, retryable, details);
-        return new ToolResponse(true, List.of(new TextContent(message)), error, Map.of());
+    private ToolResponse error(String code, String message, boolean retryable, boolean stateMayHaveChanged,
+            Map<String, Object> details) {
+        ErrorContent error = new ErrorContent(code, message, retryable, stateMayHaveChanged, details);
+        return new ToolResponse(true, List.of(new TextContent(message)), new ErrorEnvelope(error), Map.of());
     }
 
     public record ToolResult(String summary, Object structuredContent) {
@@ -51,6 +52,10 @@ public final class McpToolExecutor {
         }
     }
 
-    public record ErrorContent(String code, String message, boolean retryable, Map<String, Object> details) {
+    public record ErrorEnvelope(ErrorContent error) {
+    }
+
+    public record ErrorContent(String code, String message, boolean retryable, boolean stateMayHaveChanged,
+            Map<String, Object> details) {
     }
 }

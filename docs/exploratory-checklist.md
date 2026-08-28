@@ -1,0 +1,24 @@
+# Contract-reset exploratory checklist
+
+Use a disposable namespace and unique mock IDs. Record the build SHA, WireMock image, Minikube version, Kubernetes version, S3 CSI driver version, and SeaweedFS version with the result.
+
+- [ ] The chart runs two ready API replicas, one MCP replica, and persistent S3 storage on SeaweedFS.
+- [ ] A configuration saved through the API service is visible from each API pod's direct endpoint, including a newly restarted API replica.
+- [ ] Invalid options return `ApiError` with `INVALID_OPTIONS`; `resourceVersion` and saved config remain unchanged.
+- [ ] A stale config write returns `CONFIG_CONFLICT` with exact `expectedVersion` and `currentVersion` details.
+- [ ] First `start_mock` on a cold mock returns RUNNING or STARTING. When STARTING, a WireMock tool returns retryable `MOCK_STARTING`, sends no Admin traffic, and succeeds after polling.
+- [ ] DELETE stops STARTING, RUNNING, and FAILED mocks. Repeated DELETE returns STOPPED.
+- [ ] A terminal image-pull/container failure becomes FAILED promptly and includes pod/container diagnostics.
+- [ ] `restartActive` returns STARTING for an active mock and never starts an already STOPPED or FAILED mock.
+- [ ] A persistent stub can be updated, the mock can be stopped and restarted, and the updated response still matches.
+- [ ] Persistent mutation recovery markers never appear in lists, requests, snapshots, or analysis.
+- [ ] UTF-8 and binary body files round-trip with correct encoding, data, and decoded `sizeBytes`.
+- [ ] Recording start reports active status. Stop and snapshot return candidate IDs/count plus an explicit zero-match result.
+- [ ] Matched counts, unmatched requests/stubs, and near misses distinguish the expected requests.
+- [ ] Authorization and configured sensitive headers are `[REDACTED]` in traffic, journal, recorder, and analysis results.
+- [ ] Private/loopback/metadata recorder and mapping targets return a structured SSRF-policy error.
+- [ ] `send_request` rejects literal, encoded, and slash-normalized `/__admin` paths.
+- [ ] Every error has `{error:{code,message,retryable,stateMayHaveChanged,details}}` and `isError: true`.
+- [ ] Cleanup removes the namespace, namespaced test data, cluster-scoped PV, port-forward process, and temporary files. A second cleanup and a full rerun both succeed.
+
+The automated opt-in suite covers these paths where the cluster can make them deterministic. Treat timing-sensitive FAILED/STARTING observations as polling assertions with bounded timeouts, not sleeps. Do not mark unavailable checks as passed; record the prerequisite or environment gap.

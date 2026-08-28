@@ -53,6 +53,14 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 
 Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary mock URLs without authentication. MCP uses the same external access boundary as the Fleet API and does not change that behavior.
 
+## Lifecycle and API contracts
+
+`fleet-api` initializes its editable ConfigMap before it becomes ready, so either API replica can serve a fresh configuration view. Config rows contain `lifecycle` (`STOPPED`, `STARTING`, `RUNNING`, or `FAILED`) rather than a boolean active flag. Config PUT and DELETE responses are `{config,apply:{mockId,mode,lifecycle}}`. The `restartActive` mode restarts only a STARTING or RUNNING mock and normally returns STARTING while replacement continues.
+
+`POST /__fleet/api/mocks/{mockId}/start` is idempotent. It returns 200 for RUNNING or 202 for STARTING with `retryAfterMs: 1000`. Poll the same endpoint until RUNNING. DELETE is also idempotent and returns STOPPED for running, starting, failed, already stopped, and absent mocks. Lifecycle and config failures use `ApiError {code,message,retryable,stateMayHaveChanged,details}`. Optimistic config conflicts use `CONFIG_CONFLICT` and include `expectedVersion` and `currentVersion`.
+
+The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/openapi.yaml` and is served by the running API at `/__fleet/api/openapi?format=json`.
+
 ## Persistent Mappings
 
 Persistent mappings are disabled by default. To enable them, set `storage.persistent=true`, use `storage.type=s3`, and provide `storage.s3.bucket`.
@@ -63,6 +71,8 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 - `fleet-api` at `storage.mappingsPath`
 
 `storage.s3.mountOptions` includes `allow-delete` by default because the dashboard can delete mapping files and folders.
+
+For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live suite requires a prepared SeaweedFS-compatible S3 CSI driver and explicit S3 credentials. It creates a unique namespace and bucket, validates two API replicas and the REST/MCP recovery paths, and removes all owned resources through an EXIT trap. `--dry-run` prints the resolved scope, `--self-test` performs static harness checks, and `--keep` retains failed-run resources for investigation. The `Cluster E2E` GitHub Actions workflow runs only through `workflow_dispatch` on a prepared runner; normal push checks stay unchanged.
 
 ## Values
 
@@ -199,6 +209,8 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.service.ports.targetHttp` | `8080` | MCP container HTTP port. |
 
 The MCP pod does not receive Kubernetes RBAC or a mounted service-account token. Only HTTP and HTTPS targets are accepted. MCP validates target hostnames before configuration, and the enabled-by-default WireMock egress NetworkPolicy enforces the public-address boundary again when WireMock connects. Private, loopback, link-local, multicast, metadata, and special-use destinations remain blocked unless both the host is listed in `outbound.exceptions` and its address range is listed in `outbound.networkPolicy.allowedCidrs`. Configure the DNS namespace and pod selector for clusters that do not label CoreDNS as `k8s-app=kube-dns`; disable this policy only when another connection-time egress control provides the same boundary.
+
+MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `recording_status` is not an alias. Every WireMock Admin and traffic tool starts or checks the mock first. STARTING becomes a structured, retryable `MOCK_STARTING` result without proxying Admin traffic. Tool successes use strict tool-specific wrappers, and every failure uses `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Byte-bearing inputs and results use `{body:{encoding:utf8|base64,data,sizeBytes}}`. Recording stop/snapshot returns candidate IDs, count, and explicit match status. See `docs/mcp-contract.md` for examples and recovery behavior.
 
 ### WireMock
 

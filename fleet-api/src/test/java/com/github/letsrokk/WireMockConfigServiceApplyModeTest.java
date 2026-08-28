@@ -1,6 +1,5 @@
 package com.github.letsrokk;
 
-import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,15 +14,20 @@ class WireMockConfigServiceApplyModeTest {
     @Test
     void futureOnlyDoesNotDeleteActivePod() {
         PodManager podManager = mock(PodManager.class);
+        when(podManager.status("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", null, MockLifecycleStatus.STOPPED, null));
 
-        WireMockConfigService.ApplyMode.from("futureOnly").apply("demo", podManager);
+        MockLifecycleStatus lifecycle = WireMockConfigService.ApplyMode.from("futureOnly").apply("demo", podManager);
 
         verify(podManager, never()).deleteMock("demo");
+        assertEquals(MockLifecycleStatus.STOPPED, lifecycle);
     }
 
     @Test
     void missingModeDefaultsToFutureOnly() {
         PodManager podManager = mock(PodManager.class);
+        when(podManager.status("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", null, MockLifecycleStatus.STOPPED, null));
 
         WireMockConfigService.ApplyMode.from(null).apply("demo", podManager);
 
@@ -31,39 +35,31 @@ class WireMockConfigServiceApplyModeTest {
     }
 
     @Test
-    void restartActiveDeletesActivePod() {
+    void restartActiveReplacesAnActivePodAsynchronously() {
         PodManager podManager = mock(PodManager.class);
-        when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.DELETED);
+        when(podManager.restartActive("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", null, MockLifecycleStatus.STARTING, null));
 
-        WireMockConfigService.ApplyMode.from("restartActive").apply("demo", podManager);
+        MockLifecycleStatus lifecycle = WireMockConfigService.ApplyMode.from("restartActive").apply("demo", podManager);
 
-        verify(podManager).deleteMock("demo");
+        verify(podManager).restartActive("demo");
+        assertEquals(MockLifecycleStatus.STARTING, lifecycle);
     }
 
     @Test
-    void restartActiveIgnoresMissingActivePod() {
+    void restartActiveReturnsStoppedWhenMockWasNotActive() {
         PodManager podManager = mock(PodManager.class);
-        when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.NOT_FOUND);
+        when(podManager.restartActive("demo")).thenReturn(new PodManager.MockPodStatus(
+                "demo", null, MockLifecycleStatus.STOPPED, null));
 
-        WireMockConfigService.ApplyMode.from("restartActive").apply("demo", podManager);
+        MockLifecycleStatus lifecycle = WireMockConfigService.ApplyMode.from("restartActive").apply("demo", podManager);
 
-        verify(podManager).deleteMock("demo");
-    }
-
-    @Test
-    void restartActiveFailsWhenPodDeletionFails() {
-        PodManager podManager = mock(PodManager.class);
-        when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.FAILED);
-
-        WebApplicationException exception = assertThrows(WebApplicationException.class,
-                () -> WireMockConfigService.ApplyMode.from("restartActive").apply("demo", podManager));
-
-        assertEquals(500, exception.getResponse().getStatus());
+        assertEquals(MockLifecycleStatus.STOPPED, lifecycle);
     }
 
     @Test
     void rejectsUnknownApplyMode() {
-        WebApplicationException exception = assertThrows(WebApplicationException.class,
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
                 () -> WireMockConfigService.ApplyMode.from("now"));
 
         assertEquals(400, exception.getResponse().getStatus());

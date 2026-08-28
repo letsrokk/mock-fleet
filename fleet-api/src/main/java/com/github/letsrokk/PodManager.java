@@ -7,6 +7,7 @@ import io.fabric8.kubernetes.api.model.StatusDetails;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -18,6 +19,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @ApplicationScoped
 public class PodManager {
@@ -45,10 +49,129 @@ public class PodManager {
     @ConfigProperty(name = "mock-fleet.pod-creation-timeout")
     Duration podCreationTimeout;
 
+    Executor startExecutor = Executors.newCachedThreadPool(task -> {
+        Thread thread = new Thread(task, "mock-pod-start");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     public String getUpstreamBaseUrl(String mockId) {
-        MockPodRef pod = podState.getPod(mockId, this::spawnPod);
+        MockPodRef pod = getOrStartPod(mockId);
         podState.setLastAccessTime(pod.podName(), Instant.now().toEpochMilli());
         return buildPodBaseUrl(pod);
+    }
+
+    public MockPodStatus startMock(String mockId) {
+        PodState.StartClaim claim = claimStart(mockId);
+        if (claim.claimed()) {
+            startExecutor.execute(() -> startClaimedMock(
+                    mockId, claim.lifecycle().attemptId(), claim.previousPodName()));
+        }
+        return status(mockId);
+    }
+
+    public MockPodStatus restartActive(String mockId) {
+        PodState.RestartClaim claim = podState.claimRestart(mockId);
+        if (!claim.claimed()) {
+            MockPodLifecycle lifecycle = claim.lifecycle();
+            return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
+        }
+        startExecutor.execute(() -> replaceClaimedMock(mockId, claim));
+        MockPodLifecycle lifecycle = claim.lifecycle();
+        return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
+    }
+
+    private void replaceClaimedMock(String mockId, PodState.RestartClaim claim) {
+        String previousPodName = claim.previousPodName();
+        if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
+            PodCreationException failure = new PodCreationException(
+                    "Failed to delete previous pod '" + previousPodName + "' before replacement startup.");
+            podState.failStart(mockId, claim.lifecycle().attemptId(), failure);
+            LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
+            return;
+        }
+        try {
+            startClaimedMock(mockId, claim.lifecycle().attemptId());
+        } catch (RuntimeException failure) {
+            LOG.warnf(failure, "Failed to replace active pod for mock id '%s'.", mockId);
+        }
+    }
+
+    public MockPodStatus status(String mockId) {
+        MockPodLifecycle lifecycle = podState.lifecycle(mockId);
+        return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
+    }
+
+    private MockPodRef getOrStartPod(String mockId) {
+        MockPodRef existing = podState.getPod(mockId);
+        if (existing != null) {
+            return existing;
+        }
+        PodState.StartClaim claim = claimStart(mockId);
+        if (claim.pod() != null) {
+            return claim.pod();
+        }
+        if (claim.claimed()) {
+            return startClaimedMock(mockId, claim.lifecycle().attemptId(), claim.previousPodName());
+        }
+        long deadline = System.nanoTime() + podCreationTimeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            MockPodRef pod = podState.getPod(mockId);
+            if (pod != null) {
+                return pod;
+            }
+            MockPodLifecycle lifecycle = podState.lifecycle(mockId);
+            if (lifecycle.status() == MockLifecycleStatus.FAILED) {
+                throw new PodCreationException(lifecycle.message());
+            }
+            if (lifecycle.status() == MockLifecycleStatus.STOPPED) {
+                throw new PodCreationException("Pod startup was stopped.");
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new PodCreationException("Interrupted while waiting for pod startup.");
+            }
+        }
+        throw new PodCreationException("Mock '" + mockId + "' did not become running before timeout.");
+    }
+
+    private MockPodRef startClaimedMock(String mockId, String attemptId) {
+        return startClaimedMock(mockId, attemptId, null);
+    }
+
+    private MockPodRef startClaimedMock(String mockId, String attemptId, String previousPodName) {
+        try {
+            if (previousPodName != null && !previousPodName.isBlank() && !deletePod(previousPodName)) {
+                throw new PodCreationException(
+                        "Failed to delete stale startup pod '" + previousPodName + "' before retry.");
+            }
+            MockPodRef pod = spawnPod(mockId, attemptId);
+            if (!podState.completeStart(mockId, attemptId, pod)) {
+                deletePod(pod);
+                throw new PodCreationException("Pod startup was superseded or stopped.");
+            }
+            return pod;
+        } catch (RuntimeException error) {
+            podState.failStart(mockId, attemptId, error);
+            throw error;
+        }
+    }
+
+    private PodState.StartClaim claimStart(String mockId) {
+        long configuredTimeoutMillis = Math.max(1L, podCreationTimeout.toMillis());
+        long startupLeaseMillis = configuredTimeoutMillis > Long.MAX_VALUE / 2L
+                ? Long.MAX_VALUE
+                : configuredTimeoutMillis * 2L;
+        return podState.claimStart(mockId, System.currentTimeMillis(), startupLeaseMillis);
+    }
+
+    @PreDestroy
+    void closeStartExecutor() {
+        if (startExecutor instanceof ExecutorService executorService) {
+            executorService.shutdownNow();
+        }
     }
 
     public List<ActiveMockPod> listActiveMocks() {
@@ -62,6 +185,9 @@ public class PodManager {
         Map<String, MockPodStatus> mocks = new HashMap<>();
         podState.getPodLifecycles().entrySet().forEach(entry -> {
             MockPodLifecycle lifecycle = entry.getValue();
+            if (lifecycle.status() == MockLifecycleStatus.STOPPED) {
+                return;
+            }
             mocks.put(entry.getKey(), new MockPodStatus(
                     entry.getKey(), lifecycle.podName(), lifecycle.status(), lifecycle.message()));
         });
@@ -73,16 +199,16 @@ public class PodManager {
     }
 
     public DeleteMockResult deleteMock(String mockId) {
-        MockPodRef pod = podState.getPod(mockId);
-        if (pod == null) {
-            return DeleteMockResult.NOT_FOUND;
+        PodState.StopClaim stopped = podState.stop(mockId);
+        if (stopped.podName() == null || stopped.podName().isBlank()) {
+            return DeleteMockResult.STOPPED;
         }
-        if (!deletePod(pod)) {
+        if (!deletePod(stopped.podName())) {
             return DeleteMockResult.FAILED;
         }
 
-        LOG.infof("Pod '%s' deleted manually for mock id '%s'.", pod.podName(), mockId);
-        podState.removePod(mockId);
+        podState.confirmStopped(mockId, stopped.podName());
+        LOG.infof("Pod '%s' deleted manually for mock id '%s'.", stopped.podName(), mockId);
         return DeleteMockResult.DELETED;
     }
 
@@ -92,6 +218,10 @@ public class PodManager {
      * @return mock pod reference
      */
     public MockPodRef spawnPod(String mockId) {
+        return spawnPod(mockId, null);
+    }
+
+    MockPodRef spawnPod(String mockId, String attemptId) {
         LOG.infof("Creating pod for mock id '%s'...", mockId);
 
         String podNamePrefix = String.format("%s-%s-", config.wiremockPodNamePrefix(), mockId);
@@ -103,7 +233,12 @@ public class PodManager {
         pod = kubernetesClient.resource(pod)
                 .inNamespace(namespace)
                 .create();
-        podState.markStartupPodName(mockId, pod.getMetadata().getName());
+        if (attemptId == null) {
+            podState.markStartupPodName(mockId, pod.getMetadata().getName());
+        } else if (!podState.markStartupPodName(mockId, attemptId, pod.getMetadata().getName())) {
+            deletePod(pod);
+            throw new PodCreationException("Pod startup was superseded or stopped.");
+        }
 
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
         LOG.infof("Created pod '%s' for mock id '%s' in namespace '%s'.",
@@ -154,10 +289,17 @@ public class PodManager {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             Pod currentPod = kubernetesClient.resource(pod).get();
+            if (currentPod == null) {
+                throw new PodCreationException("Pod '" + pod.getMetadata().getName()
+                        + "' disappeared while starting.");
+            }
             if (isPodReady(currentPod)) {
                 LOG.infof("Pod '%s' is Running and Ready.", currentPod.getMetadata().getName());
                     return currentPod;
             }
+            terminalPodFailure(currentPod).ifPresent(message -> {
+                throw new PodCreationException(message);
+            });
 
             try {
                 Thread.sleep(100);
@@ -168,6 +310,57 @@ public class PodManager {
         }
 
         throw new PodCreationException("Pod '" + pod.getMetadata().getName() + "' did not become running before timeout.");
+    }
+
+    private java.util.Optional<String> terminalPodFailure(Pod pod) {
+        if (pod == null || pod.getStatus() == null) {
+            return java.util.Optional.empty();
+        }
+        String podName = pod.getMetadata() == null ? null : pod.getMetadata().getName();
+        String prefix = "Pod '" + podName + "' failed: ";
+        if ("Failed".equalsIgnoreCase(pod.getStatus().getPhase())) {
+            return java.util.Optional.of(prefix + diagnostic(
+                    pod.getStatus().getReason(), pod.getStatus().getMessage(), "terminal pod phase"));
+        }
+        if (pod.getStatus().getContainerStatuses() == null) {
+            return java.util.Optional.empty();
+        }
+        for (var containerStatus : pod.getStatus().getContainerStatuses()) {
+            if (containerStatus.getState() == null) {
+                continue;
+            }
+            var terminated = containerStatus.getState().getTerminated();
+            if (terminated != null) {
+                String fallback = "container " + containerStatus.getName() + " exited with code " + terminated.getExitCode();
+                return java.util.Optional.of(prefix + diagnostic(
+                        terminated.getReason(), terminated.getMessage(), fallback));
+            }
+            var waiting = containerStatus.getState().getWaiting();
+            if (waiting != null && isTerminalWaitingReason(waiting.getReason())) {
+                return java.util.Optional.of(prefix + diagnostic(
+                        waiting.getReason(), waiting.getMessage(), "container could not start"));
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private boolean isTerminalWaitingReason(String reason) {
+        return reason != null && List.of(
+                "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull", "CreateContainerConfigError",
+                "InvalidImageName", "RunContainerError").contains(reason);
+    }
+
+    private String diagnostic(String reason, String message, String fallback) {
+        if (reason != null && !reason.isBlank() && message != null && !message.isBlank()) {
+            return reason + ": " + message;
+        }
+        if (reason != null && !reason.isBlank()) {
+            return reason;
+        }
+        if (message != null && !message.isBlank()) {
+            return message;
+        }
+        return fallback;
     }
 
     boolean isPodReady(Pod pod) {
@@ -229,11 +422,20 @@ public class PodManager {
                 .withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)
                 .list();
 
-        List<String> ownedPods = podState.getPods().values().stream().map(MockPodRef::podName).toList();
+        java.util.Set<String> ownedPods = new java.util.HashSet<>();
+        podState.getPods().values().stream()
+                .map(MockPodRef::podName)
+                .filter(Objects::nonNull)
+                .forEach(ownedPods::add);
+        podState.getPodLifecycles().values().stream()
+                .map(MockPodLifecycle::podName)
+                .filter(Objects::nonNull)
+                .filter(podName -> !podName.isBlank())
+                .forEach(ownedPods::add);
 
         podList.getItems().forEach(p -> {
             String podName = p.getMetadata().getName();
-            boolean isOrphaned = ownedPods.stream().noneMatch(v -> v.equals(podName));
+            boolean isOrphaned = !ownedPods.contains(podName);
             if (isOrphaned) {
                 boolean deleted = deletePod(p);
                 if (deleted) {
@@ -250,10 +452,15 @@ public class PodManager {
     }
 
     boolean deletePod(MockPodRef pod) {
-        return wasDeleteSuccessful(kubernetesClient.pods()
+        return deletePod(pod.podName());
+    }
+
+    boolean deletePod(String podName) {
+        var podResource = kubernetesClient.pods()
                 .inNamespace(currentNamespace())
-                .withName(pod.podName())
-                .delete());
+                .withName(podName);
+        List<StatusDetails> details = podResource.delete();
+        return wasDeleteSuccessful(details) || podResource.get() == null;
     }
 
     boolean wasDeleteSuccessful(List<StatusDetails> details) {
@@ -269,6 +476,7 @@ public class PodManager {
     public enum DeleteMockResult {
         DELETED,
         NOT_FOUND,
+        STOPPED,
         FAILED
     }
 

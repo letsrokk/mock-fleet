@@ -30,10 +30,24 @@ class McpToolExecutorTest {
         });
 
         assertTrue(response.isError());
-        var error = assertInstanceOf(McpToolExecutor.ErrorContent.class, response.structuredContent());
+        var envelope = assertInstanceOf(McpToolExecutor.ErrorEnvelope.class, response.structuredContent());
+        var error = envelope.error();
         assertEquals("UPSTREAM_UNAVAILABLE", error.code());
         assertEquals("Proxy is unavailable", error.message());
         assertTrue(error.retryable());
+        assertFalse(error.stateMayHaveChanged());
         assertEquals(Map.of("service", "proxy"), error.details());
+    }
+
+    @Test
+    void preservesWhetherAFailedMutationMayHaveChangedState() {
+        var response = executor.execute("update_stub", () -> {
+            throw new McpOperationException("PERSISTENT_UPDATE_INCOMPLETE", "Recovery is required", true, true,
+                    Map.of("stubId", "server-id"));
+        });
+
+        var error = assertInstanceOf(McpToolExecutor.ErrorEnvelope.class, response.structuredContent()).error();
+        assertTrue(response.isError());
+        assertTrue(error.stateMayHaveChanged());
     }
 }

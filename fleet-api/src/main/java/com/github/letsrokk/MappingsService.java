@@ -2,7 +2,6 @@ package com.github.letsrokk;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
@@ -13,6 +12,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -68,7 +68,8 @@ public class MappingsService {
         Path mockRoot = mappingsRoot().resolve(mockId).normalize();
         ensureInside(mappingsRoot(), mockRoot);
         if (!Files.isDirectory(mockRoot)) {
-            throw error("Mappings folder not found.", Response.Status.NOT_FOUND);
+            throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
+                    false, false, Map.of("mockId", mockId));
         }
         return node(mockRoot, mockRoot);
     }
@@ -76,7 +77,8 @@ public class MappingsService {
     Path file(String mockId, String relativePath) {
         Path file = resolveFile(mockId, relativePath);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-            throw error("Mapping file not found.", Response.Status.NOT_FOUND);
+            throw error(Response.Status.NOT_FOUND, "MAPPING_FILE_NOT_FOUND", "Mapping file not found.",
+                    false, false, mappingDetails(mockId, relativePath));
         }
         return file;
     }
@@ -88,13 +90,16 @@ public class MappingsService {
                 if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
                     return;
                 }
-                throw error("Mapping file not found.", Response.Status.NOT_FOUND);
+                throw error(Response.Status.NOT_FOUND, "MAPPING_FILE_NOT_FOUND", "Mapping file not found.",
+                        false, false, mappingDetails(mockId, relativePath));
             }
         } catch (IOException e) {
             if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
                 return;
             }
-            throw error("Unable to delete mapping file: " + ioErrorMessage(e), Response.Status.SERVICE_UNAVAILABLE);
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Unable to delete mapping file: " + ioErrorMessage(e), true, false,
+                    mappingDetails(mockId, relativePath));
         }
     }
 
@@ -108,7 +113,8 @@ public class MappingsService {
             return;
         }
         if (!Files.isDirectory(mockRoot, LinkOption.NOFOLLOW_LINKS)) {
-            throw error("Mappings folder not found.", Response.Status.NOT_FOUND);
+            throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
+                    false, false, Map.of("mockId", mockId));
         }
 
         try (Stream<Path> paths = Files.walk(mockRoot)) {
@@ -124,7 +130,9 @@ public class MappingsService {
             if (!Files.exists(mockRoot, LinkOption.NOFOLLOW_LINKS)) {
                 return;
             }
-            throw error("Unable to delete mappings folder: " + ioErrorMessage(e), Response.Status.SERVICE_UNAVAILABLE);
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Unable to delete mappings folder: " + ioErrorMessage(e), true, true,
+                    Map.of("mockId", mockId));
         }
     }
 
@@ -162,7 +170,9 @@ public class MappingsService {
                     .toList();
             return new FileNode(name, relativePath, true, childNodes);
         } catch (IOException e) {
-            throw error("Unable to list mappings folder: " + ioErrorMessage(e), Response.Status.SERVICE_UNAVAILABLE);
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Unable to list mappings folder: " + ioErrorMessage(e), true, false,
+                    Map.of("mockId", mockRoot.getFileName().toString(), "path", relativePath));
         }
     }
 
@@ -170,23 +180,26 @@ public class MappingsService {
         ensureEnabled();
         validateMockId(mockId);
         if (relativePath == null || relativePath.isBlank()) {
-            throw error("Mapping file path is required.", Response.Status.BAD_REQUEST);
+            throw error(Response.Status.BAD_REQUEST, "INVALID_MAPPING_PATH", "Mapping file path is required.",
+                    false, false, Map.of("mockId", mockId));
         }
         Path requestedPath = Path.of(relativePath);
         if (requestedPath.isAbsolute()) {
-            throw error("Mapping file path must be relative.", Response.Status.BAD_REQUEST);
+            throw error(Response.Status.BAD_REQUEST, "INVALID_MAPPING_PATH", "Mapping file path must be relative.",
+                    false, false, mappingDetails(mockId, relativePath));
         }
 
         Path mockRoot = mappingsRoot().resolve(mockId).normalize();
         ensureInside(mappingsRoot(), mockRoot);
         Path file = mockRoot.resolve(requestedPath).normalize();
-        ensureInside(mockRoot, file);
+        ensureInside(mockRoot, file, mockId, relativePath);
         return file;
     }
 
     private void ensureEnabled() {
         if (!enabled()) {
-            throw error("Persistent mappings storage is disabled.", Response.Status.SERVICE_UNAVAILABLE);
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_DISABLED",
+                    "Persistent mappings storage is disabled.", false, false, Map.of());
         }
     }
 
@@ -205,21 +218,37 @@ public class MappingsService {
 
     private void validateMockId(String mockId) {
         if (mockId == null || !VALID_MOCK_ID.matcher(mockId).matches()) {
-            throw error(MOCK_ID_VALIDATION_MESSAGE, Response.Status.BAD_REQUEST);
+            Map<String, Object> details = mockId == null ? Map.of() : Map.of("mockId", mockId);
+            throw error(Response.Status.BAD_REQUEST, "INVALID_MOCK_ID", MOCK_ID_VALIDATION_MESSAGE,
+                    false, false, details);
         }
     }
 
     private void ensureInside(Path root, Path path) {
+        ensureInside(root, path, null, null);
+    }
+
+    private void ensureInside(Path root, Path path, String mockId, String relativePath) {
         if (!path.normalize().startsWith(root.normalize())) {
-            throw error("Mapping file path escapes mappings root.", Response.Status.BAD_REQUEST);
+            throw error(Response.Status.BAD_REQUEST, "INVALID_MAPPING_PATH",
+                    "Mapping file path escapes mappings root.", false, false,
+                    mappingDetails(mockId, relativePath));
         }
     }
 
-    private WebApplicationException error(String message, Response.Status status) {
-        return new WebApplicationException(Response.status(status)
-                .type("text/plain")
-                .entity(message)
-                .build());
+    private Map<String, Object> mappingDetails(String mockId, String relativePath) {
+        if (mockId == null) {
+            return Map.of();
+        }
+        if (relativePath == null) {
+            return Map.of("mockId", mockId);
+        }
+        return Map.of("mockId", mockId, "path", relativePath);
+    }
+
+    private ApiException error(Response.Status status, String code, String message, boolean retryable,
+                               boolean stateMayHaveChanged, Map<String, Object> details) {
+        return new ApiException(status, new ApiError(code, message, retryable, stateMayHaveChanged, details));
     }
 
     private String ioErrorMessage(IOException e) {

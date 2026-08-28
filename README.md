@@ -64,13 +64,13 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
 
 The MCP service uses stateful Streamable HTTP and therefore runs one replica. Enabling it requires a pinned WireMock 3.x image; the default is `wiremock/wiremock:3.13.2-2`.
 
-MCP tools that accept native WireMock JSON, including `mapping`, `headers`, `requestPattern`, `recording`, and `snapshot`, accept ordinary JSON objects directly. Do not wrap them in a `map` property.
+The REST lifecycle is asynchronous and idempotent. `POST /__fleet/api/mocks/{mockId}/start` returns 200 for RUNNING or 202 for STARTING with `retryAfterMs`; poll the same endpoint until RUNNING. DELETE returns STOPPED even when the mock is starting, failed, already stopped, or absent. Config rows expose `lifecycle`, and config mutations return `{config,apply:{mockId,mode,lifecycle}}`. All lifecycle/config errors use `ApiError {code,message,retryable,stateMayHaveChanged,details}`; `CONFIG_CONFLICT` includes expected and current versions.
 
-`get_mock_config` returns only `resourceVersion`, the selected `mock`, and `routing`. It returns a structured `NOT_FOUND` error with `details.mockId` when the mock has no configuration. `list_option_definitions` returns the option metadata separately as `{ "optionDefinitions": [...] }`.
+The checked-in [OpenAPI contract](fleet-api/src/main/resources/META-INF/openapi.yaml) documents the exact REST shapes. The running API serves the merged document at `/__fleet/api/openapi?format=json` and Swagger UI at `/__fleet/api/swagger-ui`.
 
-`update_mock_config` accepts `applyMode` as `futureOnly` or `restartActive`. Its optional `resources` value has required `requests` and `limits` string maps. Omit `resources` to inherit the baseline; provide both maps, including two empty maps, to replace the inherited values. The response contains only `resourceVersion`, the updated `mock`, and `applyMode`. `delete_mock_config` returns only `resourceVersion`, `mockId`, `deleted`, and `applyMode`.
+MCP publishes 32 schema-backed tools. It includes `start_mock` and `get_recording_status`; the old `recording_status` name is absent. WireMock tools preflight the lifecycle and return retryable `MOCK_STARTING` while a cold pod starts. Successes use tool-specific structured objects. Failures use `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Native WireMock JSON stays native, while byte inputs and outputs use `{body:{encoding:utf8|base64,data,sizeBytes}}`.
 
-Configuration views use `null` for inherited `user.resources`. The `baseline.resources` and `effective.resources` fields always contain resolved request and limit maps.
+See the [MCP contract and examples](docs/mcp-contract.md) for tool names, lifecycle polling, config application, body encoding, recording candidates, matched/missed analysis, redaction, SSRF controls, Admin-path guards, and persistent mutation recovery. The [exploratory checklist](docs/exploratory-checklist.md) covers cluster verification.
 
 The existing Fleet Proxy still forwards direct `/__admin` requests from normal mock URLs without authentication. Enabling MCP does not add an authorization boundary to those routes. Protect the ingress at the platform layer when public Admin API access is not acceptable.
 
@@ -101,6 +101,8 @@ make local-destroy DELETE_NAMESPACE=true
 ```
 
 `DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
+
+The full Minikube/SeaweedFS contract suite is opt-in because it creates a namespace, cluster-scoped PV, WireMock pods, and S3 data. Run its static self-test anywhere with `bin/cluster-e2e.sh --self-test`. For a live run, provide the SeaweedFS endpoint and credentials plus the CSI driver and StorageClass described by `bin/cluster-e2e.sh --help`. The script adds a short per-execution suffix to each generated run-specific bucket name, proves the bucket does not exist, creates it, and verifies that it is empty. It then writes the full hidden ownership token to a marker and recursively empties or deletes the bucket only when that marker reads back with the exact token. Existing, forbidden, ambiguous, non-empty, or unowned buckets are never reused or deleted. The script cleans up through a trap and is safe to rerun. GitHub Actions exposes the same suite only through the manual `Cluster E2E` workflow; it is not a push gate.
 
 ## License And Copyright
 

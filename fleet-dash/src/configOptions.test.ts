@@ -137,4 +137,37 @@ describe("config option helpers", () => {
     expect(draft.flags["--verbose"]).toBe(true);
     expect(draft.rawArgs).toBe("--unknown-option 1");
   });
+
+  it("passes advanced arguments through for authoritative server validation", () => {
+    expect(optionsFromDraft({
+      flags: {},
+      values: {},
+      rawArgs: "--not-advertised value stray",
+      requests: {},
+      limits: {}
+    }, definitions)).toEqual(["--not-advertised value stray"]);
+  });
+
+  it("keeps quoted advanced arguments intact when baseline options exist", () => {
+    expect(optionsFromDraft({
+      flags: {},
+      values: {},
+      rawArgs: "--filename-template 'orders {{request.method}}'",
+      requests: {},
+      limits: {}
+    }, definitions, {
+      options: ["--verbose"],
+      resources: emptyResources
+    })).toEqual(["--filename-template 'orders {{request.method}}'"]);
+  });
+
+  it("does not hide duplicate options from server validation", () => {
+    expect(optionsFromDraft({
+      flags: { "--verbose": true },
+      values: {},
+      rawArgs: "--verbose",
+      requests: {},
+      limits: {}
+    }, definitions)).toEqual(["--verbose", "--verbose"]);
+  });
 });
