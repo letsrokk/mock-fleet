@@ -4,12 +4,17 @@ import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.MockedStatic;
 
 import java.io.IOException;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermission;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,7 +23,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.CALLS_REAL_METHODS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class MappingsServiceTest {
@@ -178,6 +185,35 @@ class MappingsServiceTest {
     }
 
     @Test
+    void rejectsSymlinkMappingRootWithoutTraversingTarget() throws IOException {
+        Path target = Files.createDirectories(mappingsRoot.resolve("target"));
+        Path targetFile = Files.writeString(target.resolve("mapping.json"), "{}");
+        createSymbolicLink(mappingsRoot.resolve("demo"), target);
+        MappingsService service = service(true);
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.tree("demo"));
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true,
+                Map.of("mockId", "demo", "path", ""));
+        assertTrue(Files.exists(targetFile));
+    }
+
+    @Test
+    void countsIgnoredSymlinksTowardMaximumEntries() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path target = Files.writeString(mappingsRoot.resolve("target.json"), "{}");
+        for (int index = 0; index < 4; index++) {
+            createSymbolicLink(root.resolve("link-" + index), target);
+        }
+        MappingsService service = service(true, 10, 4);
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.tree("demo"));
+
+        assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
+                Map.of("mockId", "demo", "limit", "maxEntries", "maximum", 4));
+    }
+
+    @Test
     void resolvesAndDeletesFiles() throws IOException {
         Files.createDirectories(mappingsRoot.resolve("demo"));
         Path file = mappingsRoot.resolve("demo/mapping.json");
@@ -222,6 +258,86 @@ class MappingsServiceTest {
     }
 
     @Test
+    void overEntryDeleteRemovesNoPath() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        createFiles(root, 4);
+        MappingsService service = service(true, 10, 4);
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
+
+        assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
+                Map.of("mockId", "demo", "limit", "maxEntries", "maximum", 4));
+        for (int index = 0; index < 4; index++) {
+            assertTrue(Files.exists(root.resolve("mapping-%05d.json".formatted(index))));
+        }
+    }
+
+    @Test
+    void rejectsDirectoryReplacementBeforeTraversalOrDeletion() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path nested = Files.createDirectories(root.resolve("nested"));
+        Path originalFile = Files.writeString(nested.resolve("original.json"), "{}");
+        Path target = Files.createDirectories(mappingsRoot.resolve("target"));
+        Path targetFile = Files.writeString(target.resolve("target.json"), "{}");
+        Path moved = root.resolve("moved");
+        DirectoryStream<Path> delegate = root.getFileSystem().provider()
+                .newDirectoryStream(root, ignored -> true);
+        DirectoryStream<Path> replacingStream = replaceAfterEnumeration(delegate, () -> {
+            try {
+                root.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
+                root.getFileSystem().provider().createSymbolicLink(nested, target);
+            } catch (IOException e) {
+                throw new DirectoryIteratorException(e);
+            }
+        });
+        MappingsService service = service(true);
+
+        ApiException exception;
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.newDirectoryStream(root)).thenReturn(replacingStream);
+
+            exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
+        }
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true, Map.of("mockId", "demo"));
+        assertTrue(Files.exists(targetFile));
+        assertTrue(Files.exists(moved.resolve(originalFile.getFileName())));
+    }
+
+    @Test
+    void rejectsDirectoryReplacementAfterDiscoveryBeforeTreeAssembly() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path nested = Files.createDirectories(root.resolve("nested"));
+        Files.writeString(nested.resolve("original.json"), "{}");
+        Path target = Files.createDirectories(mappingsRoot.resolve("target"));
+        Path moved = root.resolve("moved");
+        DirectoryStream<Path> rootStream = replaceAfterEnumeration(
+                root.getFileSystem().provider().newDirectoryStream(root, ignored -> true), () -> { });
+        DirectoryStream<Path> nestedStream = replaceAfterEnumeration(
+                nested.getFileSystem().provider().newDirectoryStream(nested, ignored -> true), () -> {
+                    try {
+                        root.getFileSystem().provider().move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
+                        root.getFileSystem().provider().createSymbolicLink(nested, target);
+                    } catch (IOException e) {
+                        throw new DirectoryIteratorException(e);
+                    }
+                });
+        MappingsService service = service(true);
+
+        ApiException exception;
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.newDirectoryStream(root)).thenReturn(rootStream);
+            files.when(() -> Files.newDirectoryStream(nested)).thenReturn(nestedStream);
+
+            exception = assertThrows(ApiException.class, () -> service.tree("demo"));
+        }
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true,
+                Map.of("mockId", "demo", "path", ""));
+        assertTrue(Files.exists(moved.resolve("original.json")));
+    }
+
+    @Test
     void reportsStorageFailureDuringDelete() throws IOException {
         Assumptions.assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
         Path root = Files.createDirectories(mappingsRoot.resolve("demo/nested"));
@@ -240,6 +356,26 @@ class MappingsServiceTest {
 
         assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true, true, Map.of("mockId", "demo"));
         assertTrue(Files.exists(file));
+    }
+
+    @Test
+    void reportsDirectoryPhaseStorageFailureDuringDelete() throws IOException {
+        Assumptions.assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo/nested"));
+        MappingsService service = service(true);
+        Set<PosixFilePermission> originalPermissions = Files.getPosixFilePermissions(root.getParent());
+        Files.setPosixFilePermissions(root.getParent(), Set.of(PosixFilePermission.OWNER_READ,
+                PosixFilePermission.OWNER_EXECUTE));
+
+        ApiException exception;
+        try {
+            exception = assertThrows(ApiException.class, () -> service.deleteFolder("demo"));
+        } finally {
+            Files.setPosixFilePermissions(root.getParent(), originalPermissions);
+        }
+
+        assertApiError(exception, 503, "MAPPINGS_STORAGE_ERROR", true, true, Map.of("mockId", "demo"));
+        assertTrue(Files.exists(root));
     }
 
     @Test
@@ -332,6 +468,47 @@ class MappingsServiceTest {
         for (int index = 0; index < count; index++) {
             Files.writeString(root.resolve("mapping-%05d.json".formatted(index)), "{}");
         }
+    }
+
+    private Path createSymbolicLink(Path link, Path target) throws IOException {
+        try {
+            return Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException e) {
+            Assumptions.assumeTrue(false, "Symbolic links are not supported by this file system");
+            return link;
+        }
+    }
+
+    private DirectoryStream<Path> replaceAfterEnumeration(DirectoryStream<Path> delegate, Runnable replacement) {
+        return new DirectoryStream<>() {
+            @Override
+            public Iterator<Path> iterator() {
+                Iterator<Path> iterator = delegate.iterator();
+                return new Iterator<>() {
+                    private boolean replaced;
+
+                    @Override
+                    public boolean hasNext() {
+                        boolean hasNext = iterator.hasNext();
+                        if (!hasNext && !replaced) {
+                            replaced = true;
+                            replacement.run();
+                        }
+                        return hasNext;
+                    }
+
+                    @Override
+                    public Path next() {
+                        return iterator.next();
+                    }
+                };
+            }
+
+            @Override
+            public void close() throws IOException {
+                delegate.close();
+            }
+        };
     }
 
     private MappingsService service(boolean persistent) {
