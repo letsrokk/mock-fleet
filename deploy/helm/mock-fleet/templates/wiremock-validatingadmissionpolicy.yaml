@@ -170,8 +170,11 @@ spec:
         !has(variables.wiremock.livenessProbe.exec) && !has(variables.wiremock.livenessProbe.tcpSocket) && !has(variables.wiremock.livenessProbe.grpc)
       message: Managed WireMock health probes cannot add executable commands or alternate endpoints.
     - expression: >-
-        !has(variables.wiremock.env) || variables.wiremock.env.all(env,
-          env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom))
+        !has(variables.wiremock.env) ||
+        (variables.wiremock.env.all(env,
+           env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom)) &&
+         variables.wiremock.env.all(env,
+           variables.wiremock.env.filter(other, other.name == env.name).size() == 1))
       message: Only AWS workload-identity environment mutations are allowed.
     - expression: >-
         variables.identityVolumes.all(volume,
@@ -193,29 +196,43 @@ spec:
            has(variables.wiremock.volumeMounts) &&
            has(variables.wiremock.env) &&
            variables.eksIdentityVolumes.all(volume,
+             volume.name == 'eks-pod-identity-token' &&
+             volume.projected.sources[0].serviceAccountToken.path == 'eks-pod-identity-token' &&
+             variables.wiremock.volumeMounts.filter(mount, mount.name == volume.name).size() == 1 &&
              variables.wiremock.volumeMounts.exists(mount,
                mount.name == volume.name && mount.readOnly == true &&
-               mount.mountPath == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount') &&
+               mount.mountPath == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount' &&
+               (!has(mount.subPath) || mount.subPath == '') &&
+               (!has(mount.subPathExpr) || mount.subPathExpr == '')) &&
              variables.wiremock.env.filter(env,
+               env.name == 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE').size() == 1 &&
+             variables.wiremock.env.exists(env,
                env.name == 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE' &&
-               env.value == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/' +
-                 volume.projected.sources[0].serviceAccountToken.path).size() == 1 &&
+               env.value == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token') &&
              variables.wiremock.env.filter(env,
+               env.name == 'AWS_CONTAINER_CREDENTIALS_FULL_URI').size() == 1 &&
+             variables.wiremock.env.exists(env,
                env.name == 'AWS_CONTAINER_CREDENTIALS_FULL_URI' &&
-               env.value == 'http://169.254.170.23/v1/credentials').size() == 1) &&
+               env.value == 'http://169.254.170.23/v1/credentials')) &&
            (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
              has(container.volumeMounts) && has(container.env) &&
              variables.eksIdentityVolumes.all(volume,
+               container.volumeMounts.filter(mount, mount.name == volume.name).size() == 1 &&
                container.volumeMounts.exists(mount,
                  mount.name == volume.name && mount.readOnly == true &&
-                 mount.mountPath == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount') &&
+                 mount.mountPath == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount' &&
+                 (!has(mount.subPath) || mount.subPath == '') &&
+                 (!has(mount.subPathExpr) || mount.subPathExpr == '')) &&
                container.env.filter(env,
+                 env.name == 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE').size() == 1 &&
+               container.env.exists(env,
                  env.name == 'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE' &&
-                 env.value == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/' +
-                   volume.projected.sources[0].serviceAccountToken.path).size() == 1 &&
+                 env.value == '/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token') &&
                container.env.filter(env,
+                 env.name == 'AWS_CONTAINER_CREDENTIALS_FULL_URI').size() == 1 &&
+               container.env.exists(env,
                  env.name == 'AWS_CONTAINER_CREDENTIALS_FULL_URI' &&
-                 env.value == 'http://169.254.170.23/v1/credentials').size() == 1)))))
+                 env.value == 'http://169.254.170.23/v1/credentials'))))))
       message: EKS Pod Identity labels, tokens, mounts, and credential environment must form one standard mutation.
     - expression: >-
         (!has(variables.wiremock.volumeMounts) && variables.identityVolumeNames.size() == 0 &&
@@ -256,8 +273,11 @@ spec:
         (!has(object.spec.initContainers[0].resources) ||
           ((!has(object.spec.initContainers[0].resources.requests) || object.spec.initContainers[0].resources.requests.size() == 0) &&
            (!has(object.spec.initContainers[0].resources.limits) || object.spec.initContainers[0].resources.limits.size() == 0))) &&
-        (!has(object.spec.initContainers[0].env) || object.spec.initContainers[0].env.all(env,
-          env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom))) &&
+        (!has(object.spec.initContainers[0].env) ||
+          (object.spec.initContainers[0].env.all(env,
+             env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom)) &&
+           object.spec.initContainers[0].env.all(env,
+             object.spec.initContainers[0].env.filter(other, other.name == env.name).size() == 1))) &&
         has(object.spec.initContainers[0].securityContext) &&
         object.spec.initContainers[0].securityContext.runAsNonRoot == true &&
         object.spec.initContainers[0].securityContext.runAsUser == 1000 &&

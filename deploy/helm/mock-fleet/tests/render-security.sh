@@ -77,7 +77,7 @@ admission_fixture() {
 
   case "${variant}" in
     accepted) ;;
-    accepted-workload-identity|identity-alternate-mount|identity-init-subpath)
+    accepted-workload-identity|identity-alternate-mount|identity-init-subpath|irsa-duplicate-role-env)
       fixture=$(jq -c '
         .spec.volumes += [{
           name:"aws-iam-token",
@@ -97,7 +97,7 @@ admission_fixture() {
           else . end
       ' <<<"${fixture}")
       ;;
-    accepted-eks-pod-identity|eks-token-without-label|eks-label-wrong-value)
+    accepted-eks-pod-identity|eks-token-without-label|eks-label-wrong-value|eks-nonstandard-token-path|eks-alternate-volume-name|eks-dual-irsa-mount|eks-second-mount|eks-duplicate-full-uri|eks-duplicate-token-file)
       fixture=$(jq -c '
         .metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"
         | .spec.volumes += [{
@@ -146,6 +146,52 @@ admission_fixture() {
   esac
 
   case "${variant}" in
+    eks-nonstandard-token-path)
+      fixture=$(jq -c '
+        .spec.volumes[-1].projected.sources[0].serviceAccountToken.path = "token"
+        | .spec.containers[0].env |= map(if .name == "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" then .value = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/token" else . end)
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].env |= map(if .name == "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE" then .value = "/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/token" else . end)
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    eks-alternate-volume-name)
+      fixture=$(jq -c '
+        .spec.volumes[-1].name = "alternate-eks-token"
+        | .spec.containers[0].volumeMounts |= map(if .name == "eks-pod-identity-token" then .name = "alternate-eks-token" else . end)
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts |= map(if .name == "eks-pod-identity-token" then .name = "alternate-eks-token" else . end)
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    eks-dual-irsa-mount)
+      fixture=$(jq -c '
+        .spec.containers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    eks-second-mount)
+      fixture=$(jq -c '
+        .spec.containers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount-shadow",readOnly:true}]
+      ' <<<"${fixture}")
+      ;;
+    eks-duplicate-full-uri)
+      fixture=$(jq -c '.spec.containers[0].env += [{name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://127.0.0.1/credentials"}]' <<<"${fixture}")
+      ;;
+    eks-duplicate-token-file)
+      fixture=$(jq -c '
+        if (.spec | has("initContainers")) then
+          .spec.initContainers[0].env += [{name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/tmp/shadow-token"}]
+        else
+          .spec.containers[0].env += [{name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/tmp/shadow-token"}]
+        end
+      ' <<<"${fixture}")
+      ;;
+    irsa-duplicate-role-env)
+      fixture=$(jq -c '.spec.containers[0].env += [{name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/shadow"}]' <<<"${fixture}")
+      ;;
     eks-token-without-label)
       fixture=$(jq -c 'del(.metadata.labels["eks.amazonaws.com/pod-identity"])' <<<"${fixture}")
       ;;
@@ -231,6 +277,9 @@ for fragment in \
   'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE' \
   'AWS_CONTAINER_CREDENTIALS_FULL_URI' \
   'http://169.254.170.23/v1/credentials' \
+  "volume.name == 'eks-pod-identity-token'" \
+  "serviceAccountToken.path == 'eks-pod-identity-token'" \
+  'variables.wiremock.env.filter(other, other.name == env.name).size() == 1' \
   'custom-fleet-wiremock' \
   'wiremock/wiremock:3.13.2-2' \
   'automountServiceAccountToken' \
@@ -286,9 +335,12 @@ eks_fixture=$(admission_fixture accepted-eks-pod-identity)
 jq -e '
   (.metadata.labels | length) == 4 and
   .metadata.labels["eks.amazonaws.com/pod-identity"] == "enabled" and
-  .spec.volumes[0].projected.sources[0].serviceAccountToken.audience == "pods.eks.amazonaws.com"
+  .spec.volumes[0].name == "eks-pod-identity-token" and
+  .spec.volumes[0].projected.sources[0].serviceAccountToken.audience == "pods.eks.amazonaws.com" and
+  .spec.volumes[0].projected.sources[0].serviceAccountToken.path == "eks-pod-identity-token" and
+  ([.spec.containers[0].volumeMounts[] | select(.name == "eks-pod-identity-token")] | length) == 1
 ' >/dev/null <<<"${eks_fixture}" || fail 'EKS Pod Identity fixture does not match the current upstream mutation'
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label; do
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"

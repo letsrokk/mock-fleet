@@ -149,7 +149,9 @@ verify_admission_dry_runs() {
       native-init-sidecar pod-apparmor-unconfined container-apparmor-unconfined \
       init-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user \
       container-selinux-type init-selinux-role container-procmount-unmasked init-procmount-unmasked \
-      eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label; do
+      eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label \
+      eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount \
+      eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env; do
     server_dry_run_admission_fixture "${variant}" rejected
   done
 }
@@ -1100,7 +1102,14 @@ self_test() {
     'eks-label-without-token rejected' \
     'eks-token-without-label rejected' \
     'eks-label-wrong-value rejected' \
-    'extra-unrelated-label rejected'; do
+    'extra-unrelated-label rejected' \
+    'eks-nonstandard-token-path rejected' \
+    'eks-alternate-volume-name rejected' \
+    'eks-dual-irsa-mount rejected' \
+    'eks-second-mount rejected' \
+    'eks-duplicate-full-uri rejected' \
+    'eks-duplicate-token-file rejected' \
+    'irsa-duplicate-role-env rejected'; do
     grep -Fxq "${expected_fixture}" <<<"${admission_matrix}" \
       || fail "Admission dry-run matrix omitted ${expected_fixture}."
   done
