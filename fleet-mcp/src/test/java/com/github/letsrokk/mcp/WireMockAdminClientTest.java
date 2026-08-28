@@ -25,7 +25,8 @@ class WireMockAdminClientTest {
     private final RecordingTransport transport = new RecordingTransport();
     private final WireMockAdminClient client = new WireMockAdminClient(
             transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"), null, null,
-            67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0));
+            67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
+            new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
     @Test
     void uploadsBodyFilesAsOpaqueBytes() {
@@ -47,6 +48,24 @@ class WireMockAdminClientTest {
         assertEquals(2, transport.requestCount());
         assertEquals("/__admin/files/payload.txt", transport.requestAt(0).target());
         assertEquals("/__admin/files/payload.txt", transport.requestAt(1).target());
+    }
+
+    @Test
+    void retriesBodyFileReadAcrossAnS3RemountWindow() {
+        WireMockAdminClient polling = new WireMockAdminClient(
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
+                new WireMockAdminClient.BodyFileReadPolicy(5, 0));
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(500, "java.io.IOException: Stale file handle");
+        transport.respond(200, "hello");
+
+        TransportResponse response = polling.getBodyFile("orders", "payload.txt");
+
+        assertEquals("hello", response.bodyAsString());
+        assertEquals(5, transport.requestCount());
     }
 
     @Test

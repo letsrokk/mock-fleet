@@ -21,7 +21,6 @@ public final class WireMockAdminClient {
     private static final String RECOVERY_METADATA_KEY = "_mockFleetMcpRecovery";
     private static final String RECORDER_DISCARD_METADATA_KEY = "_mockFleetMcpRecorderDiscarded";
     private static final int MAPPING_SCAN_PAGE_SIZE = 200;
-    private static final int BODY_FILE_STALE_HANDLE_ATTEMPTS = 3;
 
     private static final Map<String, List<String>> JSON_HEADERS = Map.of(
             "accept", List.of("application/json"),
@@ -35,6 +34,7 @@ public final class WireMockAdminClient {
     private final long maxCollectionScanBytes;
     private final int maxCollectionScanItems;
     private final RecorderCleanupPolicy recorderCleanupPolicy;
+    private final BodyFileReadPolicy bodyFileReadPolicy;
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders) {
@@ -56,12 +56,22 @@ public final class WireMockAdminClient {
             Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
             long maxCollectionScanBytes, int maxCollectionScanItems) {
         this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
-                maxCollectionScanBytes, maxCollectionScanItems, RecorderCleanupPolicy.production());
+                maxCollectionScanBytes, maxCollectionScanItems, RecorderCleanupPolicy.production(),
+                BodyFileReadPolicy.production());
     }
 
     WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
             long maxCollectionScanBytes, int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy) {
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
+                maxCollectionScanBytes, maxCollectionScanItems, recorderCleanupPolicy,
+                BodyFileReadPolicy.production());
+    }
+
+    WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
+            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
+            long maxCollectionScanBytes, int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy,
+            BodyFileReadPolicy bodyFileReadPolicy) {
         this.transport = transport;
         this.mapper = mapper;
         this.maxPayloadBytes = maxPayloadBytes;
@@ -70,6 +80,7 @@ public final class WireMockAdminClient {
         this.maxCollectionScanBytes = maxCollectionScanBytes;
         this.maxCollectionScanItems = maxCollectionScanItems;
         this.recorderCleanupPolicy = recorderCleanupPolicy;
+        this.bodyFileReadPolicy = bodyFileReadPolicy;
     }
 
     public WireMockVersion version(String mockId) {
@@ -338,7 +349,7 @@ public final class WireMockAdminClient {
         TransportRequest request = new TransportRequest(HttpMethod.GET,
                 "/__admin/files/" + BodyFileName.toUrlPath(fileName), Map.of(), new byte[0]);
         McpOperationException lastFailure = null;
-        for (int attempt = 0; attempt < BODY_FILE_STALE_HANDLE_ATTEMPTS; attempt++) {
+        for (int attempt = 0; attempt < bodyFileReadPolicy.attempts(); attempt++) {
             try {
                 return send(mockId, request);
             } catch (McpOperationException failure) {
@@ -346,6 +357,14 @@ public final class WireMockAdminClient {
                     throw failure;
                 }
                 lastFailure = failure;
+                if (attempt + 1 < bodyFileReadPolicy.attempts() && bodyFileReadPolicy.intervalMillis() > 0) {
+                    try {
+                        Thread.sleep(bodyFileReadPolicy.intervalMillis());
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw failure;
+                    }
+                }
             }
         }
         throw lastFailure;
@@ -1214,6 +1233,18 @@ public final class WireMockAdminClient {
 
         static RecorderCleanupPolicy production() {
             return new RecorderCleanupPolicy(26, 3, 200);
+        }
+    }
+
+    record BodyFileReadPolicy(int attempts, long intervalMillis) {
+        BodyFileReadPolicy {
+            if (attempts < 1 || intervalMillis < 0) {
+                throw new IllegalArgumentException("Invalid body-file read policy");
+            }
+        }
+
+        static BodyFileReadPolicy production() {
+            return new BodyFileReadPolicy(26, 200);
         }
     }
 }
