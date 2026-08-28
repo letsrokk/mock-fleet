@@ -97,9 +97,10 @@ admission_fixture() {
           else . end
       ' <<<"${fixture}")
       ;;
-    accepted-eks-pod-identity)
+    accepted-eks-pod-identity|eks-token-without-label|eks-label-wrong-value)
       fixture=$(jq -c '
-        .spec.volumes += [{
+        .metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"
+        | .spec.volumes += [{
           name:"eks-pod-identity-token",
           projected:{sources:[{serviceAccountToken:{audience:"pods.eks.amazonaws.com",expirationSeconds:86400,path:"eks-pod-identity-token"}}]}
         }]
@@ -139,10 +140,18 @@ admission_fixture() {
     init-selinux-role) fixture=$(jq -c '.spec.initContainers[0].securityContext.seLinuxOptions = {role:"system_r",type:"container_init_t"}' <<<"${fixture}") ;;
     container-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.containers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     init-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.initContainers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
+    eks-label-without-token) fixture=$(jq -c '.metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"' <<<"${fixture}") ;;
+    extra-unrelated-label) fixture=$(jq -c '.metadata.labels["attacker.example/unrelated"] = "enabled"' <<<"${fixture}") ;;
     *) printf 'Unknown admission fixture: %s\n' "${variant}" >&2; return 1 ;;
   esac
 
   case "${variant}" in
+    eks-token-without-label)
+      fixture=$(jq -c 'del(.metadata.labels["eks.amazonaws.com/pod-identity"])' <<<"${fixture}")
+      ;;
+    eks-label-wrong-value)
+      fixture=$(jq -c '.metadata.labels["eks.amazonaws.com/pod-identity"] = "disabled"' <<<"${fixture}")
+      ;;
     identity-alternate-mount)
       fixture=$(jq -c '.spec.containers[0].volumeMounts[-1].mountPath = "/var/run/secrets/alternate"' <<<"${fixture}")
       ;;
@@ -218,6 +227,10 @@ for fragment in \
   'mock-fleet-wiremock' \
   'app.kubernetes.io/managed-by' \
   'mock-fleet/mock-id' \
+  'eks.amazonaws.com/pod-identity' \
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE' \
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI' \
+  'http://169.254.170.23/v1/credentials' \
   'custom-fleet-wiremock' \
   'wiremock/wiremock:3.13.2-2' \
   'automountServiceAccountToken' \
@@ -263,7 +276,19 @@ for accepted_fixture in accepted accepted-workload-identity accepted-eks-pod-ide
   jq -e '.kind == "Pod" and .spec.automountServiceAccountToken == false' >/dev/null <<<"${fixture}" \
     || fail "Accepted admission fixture is malformed: ${accepted_fixture}"
 done
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked; do
+irsa_fixture=$(admission_fixture accepted-workload-identity)
+jq -e '
+  (.metadata.labels | length) == 3 and
+  (.metadata.labels | has("eks.amazonaws.com/pod-identity") | not) and
+  .spec.volumes[0].projected.sources[0].serviceAccountToken.audience == "sts.amazonaws.com"
+' >/dev/null <<<"${irsa_fixture}" || fail 'IRSA fixture acquired the EKS Pod Identity label'
+eks_fixture=$(admission_fixture accepted-eks-pod-identity)
+jq -e '
+  (.metadata.labels | length) == 4 and
+  .metadata.labels["eks.amazonaws.com/pod-identity"] == "enabled" and
+  .spec.volumes[0].projected.sources[0].serviceAccountToken.audience == "pods.eks.amazonaws.com"
+' >/dev/null <<<"${eks_fixture}" || fail 'EKS Pod Identity fixture does not match the current upstream mutation'
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"
