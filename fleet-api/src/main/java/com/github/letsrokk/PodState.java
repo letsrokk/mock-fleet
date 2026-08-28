@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiFunction;
 
 @ApplicationScoped
 public class PodState {
@@ -31,6 +32,15 @@ public class PodState {
     private final UUID podLifecycleListenerRegistration;
 
     private static final long FAILED_STARTUP_RETENTION_SECONDS = 30;
+
+    private enum LatestAccessTimestamp implements BiFunction<Long, Long, Long> {
+        INSTANCE;
+
+        @Override
+        public Long apply(Long current, Long saved) {
+            return Math.max(current, saved);
+        }
+    }
 
     @Inject
     MockCapacity mockCapacity;
@@ -120,8 +130,10 @@ public class PodState {
             }
             podMap.put(mockId, claim.previousPod());
             if (claim.previousLastAccessEpochMillis() != null) {
-                lastAccessTimeMap.put(
-                        claim.previousPod().podName(), claim.previousLastAccessEpochMillis());
+                lastAccessTimeMap.merge(
+                        claim.previousPod().podName(),
+                        claim.previousLastAccessEpochMillis(),
+                        LatestAccessTimestamp.INSTANCE);
             }
             podLifecycleMap.put(mockId, claim.previousLifecycle());
             return true;

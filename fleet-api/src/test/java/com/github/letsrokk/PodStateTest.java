@@ -1,5 +1,7 @@
 package com.github.letsrokk;
 
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.EntryEvent;
 import com.hazelcast.map.IMap;
@@ -257,9 +259,41 @@ class PodStateTest {
 
         assertEquals(true, podState.rollbackRejectedRestart("demo", replacement));
         verify(podMap).put("demo", previousPod);
-        verify(lastAccessMap).put(previousPod.podName(), 1_234L);
+        verify(lastAccessMap).merge(eq(previousPod.podName()), eq(1_234L), any());
         verify(lifecycleMap).put("demo", previousLifecycle);
         verify(capacity).release("demo", replacement.lifecycle().attemptId());
+    }
+
+    @Test
+    void rejectedRestartRestoresLastAccessWithoutOverwritingAConcurrentRefresh() {
+        Config config = new Config();
+        config.setClusterName("pod-state-access-rollback-" + System.nanoTime());
+        config.setProperty("hazelcast.logging.type", "none");
+        config.setProperty("hazelcast.phone.home.enabled", "false");
+        config.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(config);
+        PodState podState = new PodState(hazelcast);
+        MockCapacity capacity = mock(MockCapacity.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(2).run();
+            return null;
+        }).when(capacity).reserve(any(), any(), any());
+        podState.mockCapacity = capacity;
+
+        try {
+            assertRejectedRestartAccess(podState, "newer", 1_234L, 2_000L, 2_000L);
+            assertRejectedRestartAccess(podState, "older", 1_234L, 1_000L, 1_234L);
+            assertRejectedRestartAccess(podState, "equal", 1_234L, 1_234L, 1_234L);
+            assertRejectedRestartAccess(podState, "missing-current", 1_234L, null, 1_234L);
+            assertRejectedRestartAccess(podState, "missing-saved", null, 2_000L, 2_000L);
+            assertRejectedRestartAccess(podState, "missing-both", null, null, null);
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
     }
 
     @Test
@@ -478,6 +512,26 @@ class PodStateTest {
 
     private PodState podStateWithPodMap(IMap<String, MockPodRef> podMap) {
         return podStateWithMaps(podMap, lifecycleMap());
+    }
+
+    private void assertRejectedRestartAccess(PodState podState, String mockId,
+                                             Long savedAccess, Long concurrentAccess,
+                                             Long expectedAccess) {
+        MockPodRef pod = new MockPodRef("mock-fleet-" + mockId, "10.0.0.1");
+        podState.getPods().put(mockId, pod);
+        podState.getPodLifecycles().put(mockId,
+                MockPodLifecycle.running("attempt-old-" + mockId, pod.podName()));
+        if (savedAccess != null) {
+            podState.setLastAccessTime(pod.podName(), savedAccess);
+        }
+
+        PodState.RestartClaim replacement = podState.claimRestart(mockId);
+        if (concurrentAccess != null) {
+            podState.setLastAccessTime(pod.podName(), concurrentAccess);
+        }
+
+        assertEquals(true, podState.rollbackRejectedRestart(mockId, replacement));
+        assertEquals(expectedAccess, podState.getLastAccessTime(pod.podName()));
     }
 
     private PodState podStateWithMaps(IMap<String, MockPodRef> podMap,
