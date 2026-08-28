@@ -101,6 +101,23 @@ class HostRoutingProxyResourceTest {
     }
 
     @Test
+    void rejectsEncodedBackslashTargetsBeforeResolvingOrContactingTheUpstream() {
+        mockUpstream("demo");
+
+        given()
+                .urlEncodingEnabled(false)
+                .header("Host", "demo.mock-fleet.localhost")
+        .when()
+                .get("/%5cattacker")
+        .then()
+                .statusCode(400)
+                .body(containsString("origin-form"));
+
+        verifyNoInteractions(fleetApiClient);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void returnsControlledBadRequestForInvalidHostHeader() {
         given()
                 .header("Host", "!!!:8080")
@@ -379,6 +396,71 @@ class HostRoutingProxyResourceTest {
         assertEquals("/headers/check?mode=full", request.uri());
         assertEquals("value", request.headers().get("X-Test"));
         assertArrayEquals("payload".getBytes(StandardCharsets.UTF_8), request.body());
+    }
+
+    @Test
+    void replacesAuthorityAndFramingHeadersAndRemovesInboundHopByHopHeaders() {
+        mockUpstream("demo");
+
+        given()
+                .header("Host", "demo.mock-fleet.localhost")
+                .header("Connection", "X-Remove")
+                .header("X-Remove", "secret")
+                .header("Proxy-Connection", "close")
+                .header("Keep-Alive", "timeout=5")
+                .header("TE", "trailers")
+                .header("Trailer", "X-Trailer")
+                .header("Proxy-Authorization", "Basic secret")
+                .body("payload")
+        .when()
+                .post("/hop-by-hop-headers")
+        .then()
+                .statusCode(200);
+
+        MultiMap headers = capturedRequest.get().headers();
+        assertEquals("127.0.0.1:" + upstreamServer.actualPort(), headers.get("Host"));
+        assertEquals(null, headers.get("X-Remove"));
+        assertEquals(null, headers.get("Proxy-Connection"));
+        assertEquals(null, headers.get("Keep-Alive"));
+        assertEquals(null, headers.get("Transfer-Encoding"));
+        assertEquals(null, headers.get("TE"));
+        assertEquals(null, headers.get("Trailer"));
+        assertEquals(null, headers.get("Upgrade"));
+        assertEquals(null, headers.get("Proxy-Authorization"));
+    }
+
+    @Test
+    void headerCopyRejectsEveryConfiguredAndConnectionNominatedHopByHopHeader() {
+        MultiMap inbound = MultiMap.caseInsensitiveMultiMap()
+                .add("Host", "attacker.example")
+                .add("Connection", "X-Remove")
+                .add("X-Remove", "secret")
+                .add("Proxy-Connection", "close")
+                .add("Keep-Alive", "timeout=5")
+                .add("Content-Length", "999")
+                .add("Transfer-Encoding", "chunked")
+                .add("TE", "trailers")
+                .add("Trailer", "X-Trailer")
+                .add("Upgrade", "h2c")
+                .add("Proxy-Authorization", "Basic secret")
+                .add("X-Repeat", "one")
+                .add("X-Repeat", "two");
+        MultiMap outbound = MultiMap.caseInsensitiveMultiMap();
+
+        ProxyForwarder.copyForwardableRequestHeaders(inbound, outbound);
+
+        assertEquals(null, outbound.get("Host"));
+        assertEquals(null, outbound.get("Connection"));
+        assertEquals(null, outbound.get("X-Remove"));
+        assertEquals(null, outbound.get("Proxy-Connection"));
+        assertEquals(null, outbound.get("Keep-Alive"));
+        assertEquals(null, outbound.get("Content-Length"));
+        assertEquals(null, outbound.get("Transfer-Encoding"));
+        assertEquals(null, outbound.get("TE"));
+        assertEquals(null, outbound.get("Trailer"));
+        assertEquals(null, outbound.get("Upgrade"));
+        assertEquals(null, outbound.get("Proxy-Authorization"));
+        assertEquals(List.of("one", "two"), outbound.getAll("X-Repeat"));
     }
 
     @Test
