@@ -34,6 +34,8 @@ public interface MockFleetConfig {
 
     Optional<String> proxyDeploymentName();
 
+    WireMockResourcePolicyConfig wiremockResourcePolicy();
+
     ProxyConfig proxy();
 
     StorageConfig storage();
@@ -72,6 +74,16 @@ public interface MockFleetConfig {
         int port();
         int backupCount();
         int gracefulShutdownMaxWaitSeconds();
+    }
+
+    interface WireMockResourcePolicyConfig {
+        ResourceValues requestFloor();
+        ResourceValues limitCeiling();
+    }
+
+    interface ResourceValues {
+        String cpu();
+        String memory();
     }
 
 }

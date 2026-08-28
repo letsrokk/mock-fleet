@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
@@ -53,7 +54,7 @@ class WireMockConfigServiceTest {
     }
 
     @Test
-    void viewPreservesExplicitEmptyUserResourcesAsAnOverride() {
+    void viewNormalizesExplicitEmptyUserResourcesToTheBaseline() {
         WireMockConfigService.ConfigView view = configViewForUserYaml("""
                 wiremock:
                   default:
@@ -70,8 +71,66 @@ class WireMockConfigServiceTest {
         WireMockConfigService.MockConfigView mock = view.mocks().getFirst();
         assertEquals(Map.of(), mock.user().resources().requests());
         assertEquals(Map.of(), mock.user().resources().limits());
-        assertEquals(Map.of(), mock.effective().resources().requests());
-        assertEquals(Map.of(), mock.effective().resources().limits());
+        assertEquals(Map.of("cpu", "0.5", "memory", "512Mi"), mock.effective().resources().requests());
+        assertEquals(Map.of("cpu", "1", "memory", "1Gi"), mock.effective().resources().limits());
+    }
+
+    @Test
+    void viewMergesPartialLegacyResourceMapsWithTheBaseline() {
+        WireMockConfigService.ConfigView view = configViewForUserYaml("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: []
+                      resources:
+                        requests:
+                          cpu: "0.75"
+                        limits:
+                          memory: 1536Mi
+                """);
+
+        WireMockConfigService.MockConfigView mock = view.mocks().getFirst();
+        assertEquals(Map.of("cpu", "0.75", "memory", "512Mi"), mock.effective().resources().requests());
+        assertEquals(Map.of("cpu", "1", "memory", "1536Mi"), mock.effective().resources().limits());
+    }
+
+    @Test
+    void viewRedactsLegacyPasswordOptionsWithoutMutatingRetainedConfiguration() {
+        String secret = "legacy-secret-must-not-escape";
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --keystore-password
+                        - %s
+                """.formatted(secret));
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("mock-fleet")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        WireMockConfigService.ConfigView view = service.view();
+
+        String renderedView = view.toString();
+        org.junit.jupiter.api.Assertions.assertTrue(renderedView.contains("--keystore-password"));
+        org.junit.jupiter.api.Assertions.assertFalse(renderedView.contains(secret));
+        assertEquals(List.of("--keystore-password", secret),
+                service.wireMockOptions.userConfig().mockConfigs().get("demo").options());
+        org.junit.jupiter.api.Assertions.assertTrue(existing.getData().get("wiremock-options.yaml").contains(secret));
     }
 
     @Test
@@ -242,7 +301,7 @@ class WireMockConfigServiceTest {
         service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
                 null,
                 List.of("--verbose"),
-                new WireMockConfigService.ResourceData(Map.of(), Map.of()),
+                null,
                 "futureOnly"));
 
         verify(createdConfigMap).create();
@@ -280,7 +339,7 @@ class WireMockConfigServiceTest {
         service.upsertMockConfig("beta", new WireMockConfigService.ConfigUpdateRequest(
                 "42",
                 List.of(),
-                new WireMockConfigService.ResourceData(Map.of(), Map.of()),
+                null,
                 "futureOnly"));
 
         ArgumentCaptor<ConfigMap> persistedConfig = ArgumentCaptor.forClass(ConfigMap.class);
@@ -331,6 +390,104 @@ class WireMockConfigServiceTest {
                 "futureOnly"));
 
         verify(updatedConfigMap).update();
+    }
+
+    @Test
+    void upsertNormalizesPartialResourcesAgainstTheBaselineBeforePersistence() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<ConfigMap> updatedConfigMap = mock(NamespaceableResource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        when(namespacedConfigMaps.resource(any())).thenReturn(updatedConfigMap);
+        MockFleetConfig config = config();
+        WireMockConfigService service = service(kubernetesClient, config);
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                        memory: 512Mi
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                  mocks: []
+                """.getBytes(StandardCharsets.UTF_8)));
+
+        service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                "42", List.of(),
+                new WireMockConfigService.ResourceData(Map.of("cpu", "0.75"), Map.of("memory", "1536Mi")),
+                "futureOnly"));
+
+        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(namespacedConfigMaps).resource(persisted.capture());
+        ResourceRequirements saved = WireMockConfigDocument.load(
+                        persisted.getValue().getData().get("wiremock-options.yaml"))
+                .mockConfigs().get("demo").resources();
+        assertEquals(Map.of("cpu", new io.fabric8.kubernetes.api.model.Quantity("0.75"),
+                        "memory", new io.fabric8.kubernetes.api.model.Quantity("512Mi")), saved.getRequests());
+        assertEquals(Map.of("cpu", new io.fabric8.kubernetes.api.model.Quantity("1"),
+                        "memory", new io.fabric8.kubernetes.api.model.Quantity("1536Mi")), saved.getLimits());
+    }
+
+    @Test
+    void upsertRejectsAnInvalidInheritedResourceSetBeforePersistence() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """));
+        MockFleetConfig config = config();
+        WireMockConfigService service = service(kubernetesClient, config);
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                      limits:
+                        cpu: "1"
+                  mocks: []
+                """.getBytes(StandardCharsets.UTF_8)));
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> service.upsertMockConfig("demo", new WireMockConfigService.ConfigUpdateRequest(
+                        "42", List.of("--verbose"), null, "futureOnly")));
+
+        assertEquals("WireMock resources require requests and limits for cpu and memory.", exception.getMessage());
+        verify(namespacedConfigMaps, never()).resource(any());
     }
 
     @Test
@@ -471,6 +628,20 @@ class WireMockConfigServiceTest {
         service.config = config;
         service.kubernetesClient = kubernetesClient;
         service.wireMockOptions = new WireMockOptions();
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                        memory: 512Mi
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                  mocks: []
+                """.getBytes(StandardCharsets.UTF_8)));
+        service.resourcePolicy = new WireMockResourcePolicy(config);
         service.podManager = mock(PodManager.class);
         when(service.podManager.listMocks()).thenReturn(List.of());
         when(service.podManager.status(any())).thenAnswer(invocation -> new PodManager.MockPodStatus(

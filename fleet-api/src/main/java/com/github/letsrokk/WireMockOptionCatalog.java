@@ -1,6 +1,6 @@
 package com.github.letsrokk;
 
-import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -10,14 +10,20 @@ import java.util.Set;
 
 public final class WireMockOptionCatalog {
 
+    private static final Set<String> SENSITIVE_OPTIONS = Set.of(
+            "--ca-keystore-password",
+            "--keystore-password",
+            "--key-manager-password",
+            "--truststore-password");
+
     private static final List<OptionDefinition> DEFINITIONS = List.of(
             flag("--verbose", "Verbose logging", "Logging and Diagnostics", "Log more detail to stdout."),
             flag("--print-all-network-traffic", "Print network traffic", "Logging and Diagnostics", "Print raw inbound and outbound network traffic."),
             flag("--disable-request-logging", "Disable request logging", "Logging and Diagnostics", "Stops requests and responses being sent to the notifier."),
-            number("--logged-response-body-size-limit", "Response body log limit", "Logging and Diagnostics", "Truncates logged response bodies above this byte limit."),
+            number("--logged-response-body-size-limit", "Response body log limit", "Logging and Diagnostics", "Truncates logged response bodies above this byte limit.", 0, 16777216),
             flag("--disable-banner", "Disable banner", "Logging and Diagnostics", "Prevents the WireMock logo being printed on startup."),
             flag("--no-request-journal", "Disable request journal", "Request Journal and Recording", "Turns off the in-memory journal of received requests."),
-            number("--max-request-journal-entries", "Max journal entries", "Request Journal and Recording", "Sets the maximum number of request journal entries."),
+            number("--max-request-journal-entries", "Max journal entries", "Request Journal and Recording", "Sets the maximum number of request journal entries.", 0, 100000),
             flag("--record-mappings", "Record mappings", "Request Journal and Recording", "Records incoming requests as stub mappings."),
             input("--match-headers", "Match headers", "Request Journal and Recording", "Captures the named request headers when recording."),
             input("--filename-template", "Filename template", "Request Journal and Recording", "Sets the Handlebars filename template for recorded mappings."),
@@ -28,7 +34,7 @@ public final class WireMockOptionCatalog {
             input("--supported-proxy-encodings", "Proxy encodings", "Proxying", "Sets acceptable compression methods for proxy and recording traffic."),
             input("--allow-proxy-targets", "Allow proxy targets", "Proxying", "Limits proxying and recording to the supplied targets."),
             input("--deny-proxy-targets", "Deny proxy targets", "Proxying", "Blocks proxying and recording to the supplied targets."),
-            number("--proxy-timeout", "Proxy timeout ms", "Proxying", "Sets the proxy request timeout in milliseconds."),
+            number("--proxy-timeout", "Proxy timeout ms", "Proxying", "Sets the proxy request timeout in milliseconds.", 1, 3600000),
             flag("--proxy-pass-through", "Proxy pass through", "Proxying", "Allows unmatched browser proxy requests to pass through."),
             flag("--enable-browser-proxying", "Browser proxying", "Browser Proxy and Certificates", "Runs WireMock as a browser proxy."),
             input("--ca-keystore", "CA keystore", "Browser Proxy and Certificates", "Sets the CA keystore used for generated proxy certificates."),
@@ -54,27 +60,27 @@ public final class WireMockOptionCatalog {
             flag("--global-response-templating", "Global response templating", "Templating", "Renders all response definitions with Handlebars templates."),
             flag("--local-response-templating", "Local response templating", "Templating", "Allows templating only on stub mappings that opt in."),
             flag("--disable-response-templating", "Disable response templating", "Templating", "Disables processing responses with Handlebars templates."),
-            number("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache."),
+            number("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache.", 0, 100000),
             input("--permitted-system-keys", "Permitted system keys", "Templating", "Sets permitted system property and environment variable names for templates."),
             input("--extensions", "Extensions", "Extensions", "Sets extension class names."),
             flag("--disable-extensions-scanning", "Disable extension scanning", "Extensions", "Prevents extensions being scanned and loaded from the classpath."),
             flag("--disable-optimize-xml-factories-loading", "Disable XML factory optimization", "Extensions", "Disables optimized XML factory loading."),
             flag("--async-response-enabled", "Async responses", "Performance and Jetty", "Enables asynchronous request processing for delayed responses."),
-            number("--async-response-threads", "Async response threads", "Performance and Jetty", "Sets the number of background response threads."),
-            number("--container-threads", "Container threads", "Performance and Jetty", "Sets the number of Jetty container threads."),
-            number("--max-http-client-connections", "Max HTTP client connections", "Performance and Jetty", "Sets the maximum HTTP client connections."),
-            number("--jetty-acceptor-threads", "Jetty acceptor threads", "Performance and Jetty", "Sets the number of Jetty acceptor threads."),
-            number("--jetty-accept-queue-size", "Jetty accept queue size", "Performance and Jetty", "Sets the Jetty accepted request queue size."),
-            number("--jetty-header-buffer-size", "Jetty header buffer size", "Performance and Jetty", "Sets the deprecated Jetty request header buffer size."),
-            number("--jetty-header-request-size", "Jetty request header size", "Performance and Jetty", "Sets the Jetty request header buffer size."),
-            number("--jetty-header-response-size", "Jetty response header size", "Performance and Jetty", "Sets the Jetty response header buffer size."),
-            number("--jetty-idle-timeout", "Jetty idle timeout ms", "Performance and Jetty", "Sets the Jetty connection idle timeout in milliseconds."),
-            number("--jetty-stop-timeout", "Jetty stop timeout ms", "Performance and Jetty", "Sets the Jetty stop timeout in milliseconds."),
-            number("--timeout", "Timeout ms", "Performance and Jetty", "Sets the default global timeout in milliseconds."),
-            number("--webhook-threadpool-size", "Webhook thread pool size", "Webhooks and WebSockets", "Sets the webhook processing thread count."),
-            number("--websocket-idle-timeout", "WebSocket idle timeout ms", "Webhooks and WebSockets", "Sets the WebSocket idle timeout in milliseconds."),
-            number("--websocket-max-text-message-size", "Max text message size", "Webhooks and WebSockets", "Sets the maximum WebSocket text message size in bytes."),
-            number("--websocket-max-binary-message-size", "Max binary message size", "Webhooks and WebSockets", "Sets the maximum WebSocket binary message size in bytes."));
+            number("--async-response-threads", "Async response threads", "Performance and Jetty", "Sets the number of background response threads.", 1, 256),
+            number("--container-threads", "Container threads", "Performance and Jetty", "Sets the number of Jetty container threads.", 1, 512),
+            number("--max-http-client-connections", "Max HTTP client connections", "Performance and Jetty", "Sets the maximum HTTP client connections.", 1, 10000),
+            number("--jetty-acceptor-threads", "Jetty acceptor threads", "Performance and Jetty", "Sets the number of Jetty acceptor threads.", 1, 256),
+            number("--jetty-accept-queue-size", "Jetty accept queue size", "Performance and Jetty", "Sets the Jetty accepted request queue size.", 1, 10000),
+            number("--jetty-header-buffer-size", "Jetty header buffer size", "Performance and Jetty", "Sets the deprecated Jetty request header buffer size.", 1, 1048576),
+            number("--jetty-header-request-size", "Jetty request header size", "Performance and Jetty", "Sets the Jetty request header buffer size.", 1, 1048576),
+            number("--jetty-header-response-size", "Jetty response header size", "Performance and Jetty", "Sets the Jetty response header buffer size.", 1, 1048576),
+            number("--jetty-idle-timeout", "Jetty idle timeout ms", "Performance and Jetty", "Sets the Jetty connection idle timeout in milliseconds.", 1, 3600000),
+            number("--jetty-stop-timeout", "Jetty stop timeout ms", "Performance and Jetty", "Sets the Jetty stop timeout in milliseconds.", 1, 3600000),
+            number("--timeout", "Timeout ms", "Performance and Jetty", "Sets the default global timeout in milliseconds.", 1, 3600000),
+            number("--webhook-threadpool-size", "Webhook thread pool size", "Webhooks and WebSockets", "Sets the webhook processing thread count.", 1, 256),
+            number("--websocket-idle-timeout", "WebSocket idle timeout ms", "Webhooks and WebSockets", "Sets the WebSocket idle timeout in milliseconds.", 1, 3600000),
+            number("--websocket-max-text-message-size", "Max text message size", "Webhooks and WebSockets", "Sets the maximum WebSocket text message size in bytes.", 1, 16777216),
+            number("--websocket-max-binary-message-size", "Max binary message size", "Webhooks and WebSockets", "Sets the maximum WebSocket binary message size in bytes.", 1, 16777216));
 
     private static final Map<String, OptionDefinition> BY_NAME = indexDefinitions();
 
@@ -82,7 +88,37 @@ public final class WireMockOptionCatalog {
     }
 
     static List<OptionDefinition> definitions() {
-        return DEFINITIONS;
+        return DEFINITIONS.stream()
+                .filter(definition -> !SENSITIVE_OPTIONS.contains(definition.name()))
+                .toList();
+    }
+
+    static void rejectSensitive(List<String> values) {
+        for (String token : tokenize(values == null ? List.of() : values)) {
+            String name = optionName(token);
+            if (name != null && SENSITIVE_OPTIONS.contains(name)) {
+                throw invalid("WireMock password option is not supported: " + name, name);
+            }
+        }
+    }
+
+    static List<String> redactSensitive(List<String> values) {
+        List<String> tokens = tokenize(values == null ? List.of() : values);
+        List<String> redacted = new ArrayList<>();
+        for (int index = 0; index < tokens.size(); index++) {
+            String token = tokens.get(index);
+            String name = optionName(token);
+            if (name == null || !SENSITIVE_OPTIONS.contains(name)) {
+                redacted.add(token);
+                continue;
+            }
+            redacted.add(name);
+            redacted.add("<redacted>");
+            if (!token.contains("=") && index + 1 < tokens.size()) {
+                index++;
+            }
+        }
+        return List.copyOf(redacted);
     }
 
     static List<String> validateAndNormalize(List<String> values) {
@@ -108,6 +144,9 @@ public final class WireMockOptionCatalog {
             if (definition == null) {
                 throw invalid("Unknown WireMock option: " + name, name);
             }
+            if (SENSITIVE_OPTIONS.contains(name)) {
+                throw invalid("WireMock password option is not supported: " + name, name);
+            }
             if (!seen.add(name)) {
                 throw invalid("Duplicate WireMock option: " + name, name);
             }
@@ -126,10 +165,15 @@ public final class WireMockOptionCatalog {
                 throw invalid("WireMock option requires a value: " + name, name);
             }
             if ("number".equals(definition.kind())) {
+                BigInteger numericValue;
                 try {
-                    new BigDecimal(optionValue);
+                    numericValue = new BigInteger(optionValue);
                 } catch (NumberFormatException error) {
-                    throw invalid("WireMock option requires a number: " + name, name);
+                    throw invalid(integerRangeMessage(definition), name);
+                }
+                if (numericValue.compareTo(BigInteger.valueOf(definition.minimum())) < 0
+                        || numericValue.compareTo(BigInteger.valueOf(definition.maximum())) > 0) {
+                    throw invalid(integerRangeMessage(definition), name);
                 }
             }
             if ("select".equals(definition.kind()) && !definition.values().contains(optionValue)) {
@@ -203,6 +247,19 @@ public final class WireMockOptionCatalog {
         return ApiException.badRequest("INVALID_OPTIONS", message, Map.of("option", option));
     }
 
+    private static String optionName(String token) {
+        if (token == null || !token.startsWith("--")) {
+            return null;
+        }
+        int equals = token.indexOf('=');
+        return equals < 0 ? token : token.substring(0, equals);
+    }
+
+    private static String integerRangeMessage(OptionDefinition definition) {
+        return "WireMock option requires an integer from " + definition.minimum() + " to "
+                + definition.maximum() + ": " + definition.name();
+    }
+
     private static Map<String, OptionDefinition> indexDefinitions() {
         Map<String, OptionDefinition> indexed = new LinkedHashMap<>();
         DEFINITIONS.forEach(definition -> indexed.put(definition.name(), definition));
@@ -210,23 +267,28 @@ public final class WireMockOptionCatalog {
     }
 
     private static OptionDefinition flag(String name, String label, String group, String description) {
-        return new OptionDefinition(name, label, "flag", group, description, List.of());
+        return new OptionDefinition(name, label, "flag", group, description, List.of(), null, null);
     }
 
     private static OptionDefinition input(String name, String label, String group, String description) {
-        return new OptionDefinition(name, label, "input", group, description, List.of());
+        return new OptionDefinition(name, label, "input", group, description, List.of(), null, null);
     }
 
-    private static OptionDefinition number(String name, String label, String group, String description) {
-        return new OptionDefinition(name, label, "number", group, description, List.of());
+    private static OptionDefinition number(String name, String label, String group, String description,
+                                           int minimum, int maximum) {
+        return new OptionDefinition(name, label, "number", group, description, List.of(), minimum, maximum);
     }
 
     private static OptionDefinition select(String name, String label, String group, String description,
                                            List<String> values) {
-        return new OptionDefinition(name, label, "select", group, description, List.copyOf(values));
+        return new OptionDefinition(name, label, "select", group, description, List.copyOf(values), null, null);
     }
 
     public record OptionDefinition(String name, String label, String kind, String group, String description,
-                                   List<String> values) {
+                                   List<String> values, Integer minimum, Integer maximum) {
+        public OptionDefinition(String name, String label, String kind, String group, String description,
+                                List<String> values) {
+            this(name, label, kind, group, description, values, null, null);
+        }
     }
 }

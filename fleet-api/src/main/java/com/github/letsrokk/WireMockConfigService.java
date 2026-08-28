@@ -4,7 +4,6 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
-import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
@@ -52,6 +51,9 @@ public class WireMockConfigService {
 
     @Inject
     PodManager podManager;
+
+    @Inject
+    WireMockResourcePolicy resourcePolicy;
 
     private volatile Watch userConfigWatch;
     private final ScheduledExecutorService userConfigWatchExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -127,7 +129,8 @@ public class WireMockConfigService {
             throw ApiException.badRequest("INVALID_REQUEST", "Config update request body is required.", Map.of());
         }
         ApplyMode applyMode = ApplyMode.from(request.applyMode());
-        WireMockPodConfig mockConfig = new WireMockPodConfig(validateOptions(request.options()), toResources(request.resources()));
+        WireMockPodConfig mockConfig = new WireMockPodConfig(
+                validateOptions(request.options()), toResources(mockId, request.resources()));
         updateUserConfigMap(mockId, "saved", request.resourceVersion(), current ->
                 current.withMockConfig(mockId, mockConfig));
         refreshUserConfig();
@@ -223,12 +226,12 @@ public class WireMockConfigService {
     }
 
     private ConfigData userConfigData(WireMockPodConfig config) {
-        return new ConfigData(List.copyOf(config.options()),
+        return new ConfigData(WireMockOptionCatalog.redactSensitive(config.options()),
                 config.resources() == null ? null : ResourceData.from(config.resources()));
     }
 
     private ConfigData configData(List<String> options, ResourceRequirements resources) {
-        return new ConfigData(options == null ? List.of() : List.copyOf(options), ResourceData.from(resources));
+        return new ConfigData(WireMockOptionCatalog.redactSensitive(options), ResourceData.from(resources));
     }
 
     private ConfigMap userConfigMap() {
@@ -393,27 +396,13 @@ public class WireMockConfigService {
         }
     }
 
-    private ResourceRequirements toResources(ResourceData resources) {
+    private ResourceRequirements toResources(String mockId, ResourceData resources) {
+        ResourceRequirements baseline = wireMockOptions.baselineConfig().resourcesFor(mockId);
         if (resources == null) {
+            resourcePolicy.validateEffective(baseline);
             return null;
         }
-        return new ResourceRequirementsBuilder()
-                .withRequests(toQuantities(resources.requests()))
-                .withLimits(toQuantities(resources.limits()))
-                .build();
-    }
-
-    private Map<String, Quantity> toQuantities(Map<String, String> values) {
-        if (values == null || values.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Quantity> quantities = new LinkedHashMap<>();
-        values.forEach((key, value) -> {
-            if (key != null && !key.isBlank() && value != null && !value.isBlank()) {
-                quantities.put(key, new Quantity(value.trim()));
-            }
-        });
-        return quantities;
+        return resourcePolicy.normalizeAndValidate(baseline, resources);
     }
 
     private List<WireMockOptionCatalog.OptionDefinition> optionDefinitions() {

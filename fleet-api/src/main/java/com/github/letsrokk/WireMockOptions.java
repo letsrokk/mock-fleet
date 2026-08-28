@@ -68,7 +68,9 @@ public class WireMockOptions {
     }
 
     public synchronized List<String> optionsFor(String mockId) {
-        return effectiveConfig.optionsFor(mockId);
+        List<String> options = effectiveConfig.optionsFor(mockId);
+        WireMockOptionCatalog.rejectSensitive(options);
+        return options;
     }
 
     public synchronized ResourceRequirements resourcesFor(String mockId) {

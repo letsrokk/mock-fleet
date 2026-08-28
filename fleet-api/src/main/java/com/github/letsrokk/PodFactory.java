@@ -27,22 +27,37 @@ public class PodFactory {
     static final String STORAGE_TYPE_S3 = "s3";
 
     private final MockFleetConfig config;
+    private final WireMockResourcePolicy resourcePolicy;
 
     @Inject
-    public PodFactory(MockFleetConfig config) {
+    public PodFactory(MockFleetConfig config, WireMockResourcePolicy resourcePolicy) {
         this.config = config;
+        this.resourcePolicy = resourcePolicy;
+    }
+
+    public PodFactory(MockFleetConfig config) {
+        this(config, new WireMockResourcePolicy(config));
     }
 
     public Pod createPodSpec(String podName, String mockId) {
-        return createPodSpec(podName, mockId, List.of(), null);
+        return createPodSpec(podName, mockId, List.of(), null, false);
     }
 
     public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions) {
-        return createPodSpec(podName, mockId, wireMockOptions, null);
+        return createPodSpec(podName, mockId, wireMockOptions, null, false);
     }
 
     public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
                              ResourceRequirements resources) {
+        return createPodSpec(podName, mockId, wireMockOptions, resources, true);
+    }
+
+    private Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
+                              ResourceRequirements resources, boolean validatePolicy) {
+        if (validatePolicy) {
+            WireMockOptionCatalog.rejectSensitive(wireMockOptions);
+            resourcePolicy.validateEffective(resources);
+        }
         MockFleetConfig.StorageConfig storage = config.storage();
 
         ContainerBuilder containerBuilder = new ContainerBuilder()

@@ -17,7 +17,9 @@ public final class UpdateMockConfigInputSchemaGenerator
                 .put("additionalProperties", new JsonObject().put("type", "string"));
         JsonObject resources = new JsonObject()
                 .put("type", "object")
-                .put("description", "Kubernetes requests and limits override; omit to inherit baseline resources")
+                .put("description", "Kubernetes resource override. Only cpu and memory are accepted, and effective "
+                        + "values must stay within the cluster-owned request floor and limit ceiling. Omit resources "
+                        + "or individual cpu and memory keys to inherit baseline values")
                 .put("properties", new JsonObject()
                         .put("requests", stringMap.copy())
                         .put("limits", stringMap.copy()))

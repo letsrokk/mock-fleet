@@ -73,15 +73,13 @@ final class WireMockConfigDocument {
         Map<String, WireMockPodConfig> mergedMocks = new LinkedHashMap<>(mockConfigs);
         overrides.mockConfigs.forEach((mockId, override) -> {
             WireMockPodConfig base = mergedMocks.getOrDefault(mockId, new WireMockPodConfig(List.of(), null));
-            ResourceRequirements resources = override.resources() == null ? base.resources() : override.resources();
+            ResourceRequirements resources = mergeResources(base.resources(), override.resources());
             List<String> options = mergeOptions(base.options(), override.options());
             mergedMocks.put(mockId, new WireMockPodConfig(List.copyOf(options), resources));
         });
 
         List<String> mergedDefaults = mergeOptions(defaultOptions, overrides.defaultOptions);
-        ResourceRequirements mergedDefaultResources = overrides.defaultResources == null
-                ? defaultResources
-                : overrides.defaultResources;
+        ResourceRequirements mergedDefaultResources = mergeResources(defaultResources, overrides.defaultResources);
         return new WireMockConfigDocument(mergedDefaults, mergedDefaultResources, mergedMocks);
     }
 
@@ -92,10 +90,7 @@ final class WireMockConfigDocument {
 
     ResourceRequirements resourcesFor(String mockId) {
         WireMockPodConfig mockConfig = mockConfigs.get(mockId);
-        if (mockConfig != null && mockConfig.resources() != null) {
-            return mockConfig.resources();
-        }
-        return defaultResources;
+        return mergeResources(defaultResources, mockConfig == null ? null : mockConfig.resources());
     }
 
     List<String> defaultOptions() {
@@ -179,6 +174,33 @@ final class WireMockConfigDocument {
         }
         String format = quantity.getFormat();
         return quantity.getAmount() + (format == null ? "" : format);
+    }
+
+    private static ResourceRequirements mergeResources(ResourceRequirements baseline,
+                                                       ResourceRequirements override) {
+        if (override == null) {
+            return baseline;
+        }
+        Map<String, Quantity> requests = mergedQuantities(
+                baseline == null ? null : baseline.getRequests(), override.getRequests());
+        Map<String, Quantity> limits = mergedQuantities(
+                baseline == null ? null : baseline.getLimits(), override.getLimits());
+        return new ResourceRequirementsBuilder()
+                .withRequests(requests)
+                .withLimits(limits)
+                .build();
+    }
+
+    private static Map<String, Quantity> mergedQuantities(Map<String, Quantity> baseline,
+                                                          Map<String, Quantity> override) {
+        Map<String, Quantity> merged = new LinkedHashMap<>();
+        if (baseline != null) {
+            merged.putAll(baseline);
+        }
+        if (override != null) {
+            merged.putAll(override);
+        }
+        return merged;
     }
 
     private static List<String> mergeOptions(List<String> baseOptions, List<String> overrideOptions) {

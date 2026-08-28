@@ -229,6 +229,74 @@ class WireMockOptionsTest {
         assertResourceValue("1", options.resourcesFor("demo"), false, "cpu");
     }
 
+    @Test
+    void userResourceOverridesInheritOmittedBaselineKeys() {
+        WireMockOptions options = new WireMockOptions();
+        options.load(input("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                        memory: 512Mi
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                  mocks: []
+                """));
+        options.setUserConfig(WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: []
+                      resources:
+                        requests:
+                          cpu: "0.75"
+                        limits: {}
+                """));
+
+        ResourceRequirements effective = options.resourcesFor("demo");
+        assertResourceValue("0.75", effective, false, "cpu");
+        assertResourceValue("512Mi", effective, false, "memory");
+        assertResourceValue("1", effective, true, "cpu");
+        assertResourceValue("1Gi", effective, true, "memory");
+    }
+
+    @Test
+    void rejectsLegacyPasswordOptionsBeforeReturningStartupArguments() {
+        WireMockOptions options = new WireMockOptions();
+        String secret = "legacy-startup-secret";
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --truststore-password=%s
+                  mocks: []
+                """.formatted(secret)));
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> options.optionsFor("demo"));
+
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("--truststore-password"));
+        org.junit.jupiter.api.Assertions.assertFalse(exception.getMessage().contains(secret));
+    }
+
+    @Test
+    void podFactoryRejectsPasswordArgumentsBeforeBuildingThePod() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        PodFactory podFactory = new PodFactory(config);
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo",
+                        List.of("--key-manager-password", "direct-secret"), null));
+
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("--key-manager-password"));
+        org.junit.jupiter.api.Assertions.assertFalse(exception.getMessage().contains("direct-secret"));
+    }
+
     private void assertResourceValue(String expected, ResourceRequirements resources, boolean limit, String key) {
         Quantity quantity = limit ? resources.getLimits().get(key) : resources.getRequests().get(key);
         Quantity expectedQuantity = new Quantity(expected);

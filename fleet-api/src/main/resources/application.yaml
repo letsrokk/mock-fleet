@@ -35,6 +35,13 @@ mock-fleet:
   wiremock-config-path: ${MOCK_FLEET_WIREMOCK_CONFIG_PATH:}
   wiremock-user-config-map-name: ${MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME:}
   wiremock-config-key: ${MOCK_FLEET_WIREMOCK_CONFIG_KEY:wiremock-options.yaml}
+  wiremock-resource-policy:
+    request-floor:
+      cpu: ${MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_CPU:100m}
+      memory: ${MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_MEMORY:128Mi}
+    limit-ceiling:
+      cpu: ${MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_CPU:4}
+      memory: ${MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_MEMORY:4Gi}
   proxy-deployment-name: ${MOCK_FLEET_PROXY_DEPLOYMENT_NAME:}
   proxy:
     routing:
