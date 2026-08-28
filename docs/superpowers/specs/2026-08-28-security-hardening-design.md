@@ -4,11 +4,11 @@
 
 Remove the validated non-authentication vulnerabilities in the Mock Fleet codebase and its local Minikube deployment without changing the API or MCP authentication model. The change must make trust boundaries enforceable, bound attacker-controlled work, stop plaintext password propagation, and move affected dependencies to fixed releases.
 
-The implementation targets the repository revision reviewed by Codex Security (`70679f0974d85081cf2b70ba3cf1037126d5c2ba`). Authentication for API and MCP endpoints remains explicitly out of scope.
+The implementation targets the repository revision reviewed by the canonical replacement Codex Security scan (`f9a0c786333d25945231a2cb6227e70bd4c22cb4`). Authentication for API and MCP endpoints remains explicitly out of scope.
 
 ## Validated Risks
 
-The design covers these eight findings:
+The design covers these nine findings:
 
 1. Fleet Proxy accepts absolute and scheme-relative request targets that can replace the configured upstream authority.
 2. WireMock egress controls depend on MCP being enabled, and the current Minikube bridge CNI does not enforce the rendered `NetworkPolicy`.
@@ -18,6 +18,7 @@ The design covers these eight findings:
 6. The API service account can create arbitrary pods, mutate all ConfigMaps, and patch Deployments in the namespace. The namespace has no Pod Security Admission policy.
 7. Hazelcast 5.5.0 exposes its member protocol on TCP 5701 to the namespace and contains known memory-access and remote-code-execution vulnerabilities.
 8. Quarkus REST 3.18.1 can exhaust worker threads with crafted requests and is no longer supported.
+9. Editable WireMock configuration can replace the chart baseline with empty or attacker-selected pod resources, and workload-shaping numeric options have no safe ranges.
 
 ## Security Boundaries
 
@@ -67,7 +68,7 @@ Pod creation cannot be constrained by ordinary RBAC. The chart will install a `V
 - the pod uses the dedicated WireMock service account;
 - each container image matches the configured WireMock image and digest or tag policy;
 - host networking, host PID, host IPC, privileged containers, privilege escalation, host paths, host ports, and added Linux capabilities are absent;
-- containers use the chart-defined resource limits and hardened security context;
+- containers remain inside the chart-defined resource envelope and use the hardened security context;
 - pod and container fields outside the generated WireMock shape cannot add an alternate execution path.
 
 The policy will fail closed for the scoped service account. It will allow the projected token volume, volume mount, and credential environment variables that the cluster's IRSA or EKS Pod Identity admission integration injects into an otherwise valid WireMock pod. The implementation will generate validation expressions from stable chart values where necessary and will include Helm-render and live admission tests for an accepted managed pod and rejected privileged, host-path, wrong-image, wrong-service-account, and label-spoofed pods.
@@ -85,6 +86,16 @@ A start request reserves capacity atomically before asynchronous work begins. It
 A successful explicit start will set `lastAccess` immediately so the existing idle-cleanup policy can reclaim it. Tests will cover races, queue saturation, failed starts, reservation release, and idle cleanup.
 
 The chart will add a namespace `ResourceQuota` for pod count and aggregate CPU and memory. Quota values remain configurable because local cluster sizes differ. This is a second boundary if application admission fails; it does not replace application limits.
+
+## Managed Pod Resource Policy
+
+The chart will define administrator-owned CPU and memory request floors and limit ceilings for managed WireMock pods. Editable mock configuration may select values only inside that envelope. Omitted keys inherit the chart baseline, an empty resource object cannot erase it, only `cpu` and `memory` are accepted, and every limit must be greater than or equal to its request.
+
+The API will validate the effective resource set before persistence and again before pod creation. The `ValidatingAdmissionPolicy` will enforce the same request floors and limit ceilings at the Kubernetes boundary so a compromised API cannot bypass the application check. Chart rendering will fail when the baseline lies outside the configured envelope.
+
+WireMock options that directly allocate threads, connections, queues, caches, headers, messages, journals, or timeout state will accept bounded integers rather than arbitrary `BigDecimal` values. The option catalog will own the bounds so API metadata, dashboard inputs, MCP schemas, validation, and tests use one definition.
+
+Tests will cover inherited values, empty and partial overrides, unsupported resource names, limits below requests, values outside the envelope, numeric fractions and signs, and admission rejection of a generated pod outside the envelope.
 
 ## Mapping Traversal Budgets
 
@@ -110,7 +121,7 @@ The dependency upgrade is not accepted solely because the version changed. Tests
 
 ## Deployment and Upgrade Behavior
 
-The Helm chart remains the source of truth for Kubernetes controls. New values will expose capacity, traversal, quota, network-policy, and admission-policy settings with secure defaults. Disabling network or admission controls must require an explicit value and will be documented as weakening the corresponding security boundary.
+The Helm chart remains the source of truth for Kubernetes controls. New values will expose capacity, traversal, resource-policy, quota, network-policy, and admission-policy settings with secure defaults. Disabling network or admission controls must require an explicit value and will be documented as weakening the corresponding security boundary.
 
 The cluster must support `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` to install the admission control. The chart will render `NetworkPolicy` independently of the installed CNI, and the documentation will make clear that live enforcement is an operator-owned cluster capability rather than a property Helm can prove.
 
@@ -136,7 +147,7 @@ Moving pod management into a separate controller and namespace would create the 
 
 ## Completion Criteria
 
-- All eight validated findings have root-cause fixes and regression coverage.
+- All nine validated findings have root-cause fixes and regression coverage.
 - No API or MCP authentication behavior changes.
 - Secure Helm defaults render the intended RBAC, admission, network, quota, and workload controls.
 - The full repository test suite passes after the dependency upgrades.
