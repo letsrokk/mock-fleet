@@ -68,9 +68,10 @@ public class WireMockOptions {
     }
 
     public synchronized List<String> optionsFor(String mockId) {
+        validateSourceOptions(baselineConfig, mockId);
+        validateSourceOptions(userConfig, mockId);
         List<String> options = effectiveConfig.optionsFor(mockId);
-        WireMockOptionCatalog.rejectSensitive(options);
-        return options;
+        return WireMockOptionCatalog.validateAndNormalize(options);
     }
 
     public synchronized ResourceRequirements resourcesFor(String mockId) {
@@ -79,5 +80,13 @@ public class WireMockOptions {
 
     private void rebuildEffectiveConfig() {
         this.effectiveConfig = baselineConfig.merge(userConfig);
+    }
+
+    private void validateSourceOptions(WireMockConfigDocument document, String mockId) {
+        WireMockOptionCatalog.validateAndNormalize(document.defaultOptions());
+        WireMockPodConfig mockConfig = document.mockConfigs().get(mockId);
+        if (mockConfig != null) {
+            WireMockOptionCatalog.validateAndNormalize(mockConfig.options());
+        }
     }
 }

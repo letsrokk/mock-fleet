@@ -50,7 +50,7 @@ public class PodFactory {
 
     public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
                              ResourceRequirements resources) {
-        WireMockOptionCatalog.rejectSensitive(wireMockOptions);
+        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(wireMockOptions);
         resourcePolicy.validateEffective(resources);
         MockFleetConfig.StorageConfig storage = config.storage();
 
@@ -93,8 +93,8 @@ public class PodFactory {
                     .withFailureThreshold(3)
                 .endLivenessProbe();
 
-        if (wireMockOptions != null && !wireMockOptions.isEmpty()) {
-            containerBuilder.withArgs(wireMockOptions);
+        if (!normalizedOptions.isEmpty()) {
+            containerBuilder.withArgs(normalizedOptions);
         }
         if (resources != null) {
             containerBuilder.withResources(resources);

@@ -132,6 +132,40 @@ class WireMockConfigServiceTest {
     }
 
     @Test
+    void retainedConfigMapOptionsAreRevalidatedBeforeStartup() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespacedConfigMaps =
+                mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> configMapResource = mock(Resource.class);
+        ConfigMap existing = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options:
+                        - --async-response-threads
+                        - "1.5"
+                """);
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("mock-fleet")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
+        when(configMapResource.get()).thenReturn(existing);
+        WireMockConfigService service = service(kubernetesClient, config());
+        service.view();
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> service.wireMockOptions.optionsFor("demo"));
+
+        assertEquals(400, exception.getResponse().getStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("requires an integer"));
+    }
+
+    @Test
     void viewListsOnlySortedUserSavedMockIds() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         @SuppressWarnings("unchecked")
