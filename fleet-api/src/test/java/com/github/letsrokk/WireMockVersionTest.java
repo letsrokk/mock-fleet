@@ -13,6 +13,7 @@ class WireMockVersionTest {
     @CsvSource({
             "wiremock/wiremock:3.0.0, 3.0.0",
             "wiremock/wiremock:3.13.2-2, 3.13.2",
+            "wiremock/wiremock:3.13.2-02, 3.13.2",
             "registry.example.test/team/wiremock:3.14.0-1, 3.14.0"
     })
     void parsesExactWireMockThreeImageTags(String image, String expected) {

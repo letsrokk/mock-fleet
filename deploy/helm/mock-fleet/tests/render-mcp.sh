@@ -62,14 +62,19 @@ user_config_render="$(helm template unusual-release "${chart_dir}" \
   --set fullnameOverride=custom-fleet \
   --show-only templates/wiremock-user-configmap.yaml)"
 
+version_catalog_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/wiremock-version-catalog-configmap.yaml)"
+
 expected_configmap_rule=$'  - apiGroups:\n      - ""\n    resources:\n      - configmaps\n    resourceNames:\n      - custom-fleet-wiremock-user-config\n    verbs:\n      - get\n      - watch\n      - update\n      - patch'
 if ! grep -Fq "${expected_configmap_rule}" <<<"${role_render}"; then
   echo "API role must limit user ConfigMap access to get/watch/update/patch by name" >&2
   exit 1
 fi
 
-if [[ "$(grep -Fc -- '- configmaps' <<<"${role_render}")" -ne 1 ]]; then
-  echo "API role must have exactly one named ConfigMap rule" >&2
+if [[ "$(grep -Fc -- '- configmaps' <<<"${role_render}")" -ne 2 ]]; then
+  echo "API role must have separate named user and version catalog ConfigMap rules" >&2
   exit 1
 fi
 
@@ -80,6 +85,12 @@ for forbidden_verb in '- create' '- list' '- delete'; do
     exit 1
   fi
 done
+
+expected_catalog_rule=$'  - apiGroups:\n      - ""\n    resources:\n      - configmaps\n    resourceNames:\n      - custom-fleet-wiremock-version-catalog\n    verbs:\n      - get\n      - watch'
+if ! grep -Fq "${expected_catalog_rule}" <<<"${role_render}"; then
+  echo "API role must limit version catalog access to named get/watch" >&2
+  exit 1
+fi
 
 if grep -Fq -- '- deployments' <<<"${role_render}"; then
   echo "API role must not grant Deployment permissions" >&2
@@ -104,6 +115,29 @@ for workload in proxy dash mcp; do
   fi
   if grep -Fq 'automountServiceAccountToken: true' <<<"${workload_render}"; then
     echo "${workload} must not opt back into the Kubernetes API token" >&2
+    exit 1
+  fi
+done
+
+for fragment in \
+  'name: custom-fleet-wiremock-version-catalog' \
+  'defaultVersion: 3.13.2' \
+  'selectable.3.13.2: wiremock/wiremock:3.13.2-2' \
+  'selectable.3.12.1: wiremock/wiremock:3.12.1-2' \
+  'selectable.3.11.0: wiremock/wiremock:3.11.0-1' \
+  'selectable.3.10.0: wiremock/wiremock:3.10.0-1' \
+  'selectable.3.9.2: wiremock/wiremock:3.9.2-1'; do
+  if ! grep -Fq "${fragment}" <<<"${version_catalog_render}"; then
+    echo "WireMock version catalog is missing: ${fragment}" >&2
+    exit 1
+  fi
+done
+
+for fragment in \
+  'name: MOCK_FLEET_WIREMOCK_VERSION_CATALOG_CONFIG_MAP_NAME' \
+  'value: "custom-fleet-wiremock-version-catalog"'; do
+  if ! grep -Fq "${fragment}" <<<"${api_render}"; then
+    echo "API deployment is missing its named version catalog: ${fragment}" >&2
     exit 1
   fi
 done
@@ -337,5 +371,24 @@ for image in "${invalid_images[@]}"; do
 done
 
 for image in wiremock/wiremock:3.0.0 wiremock/wiremock:3.13.2-2 wiremock/wiremock:3.14.0; do
-  helm template valid "${chart_dir}" --set fleet.mcp.enabled=false --set "wiremock.containerImage=${image}" >/dev/null
+  version="${image##*:}"
+  helm template valid "${chart_dir}" --set fleet.mcp.enabled=false \
+    --set "wiremock.containerImage=${image}" \
+    --set-json "wiremock.supportedImageTags=[\"${version}\"]" >/dev/null
+done
+
+
+invalid_catalog_values=(
+  '--set-json wiremock.supportedImageTags=[]'
+  '--set-json wiremock.supportedImageTags=["3.13.2-2","3.13.2-1"]'
+  '--set-json wiremock.supportedImageTags=["3.12.1-2"]'
+  '--set-json wiremock.supportedImageTags=["latest"]'
+  '--set-json wiremock.supportedImageTags=["3.13.2-alpine"]'
+)
+for arguments in "${invalid_catalog_values[@]}"; do
+  read -r -a catalog_args <<<"${arguments}"
+  if helm template invalid "${chart_dir}" "${catalog_args[@]}" >/dev/null 2>&1; then
+    echo "Releases must reject invalid WireMock catalog values: ${arguments}" >&2
+    exit 1
+  fi
 done

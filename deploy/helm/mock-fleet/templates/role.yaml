@@ -27,4 +27,13 @@ rules:
       - watch
       - update
       - patch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      - {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
+    verbs:
+      - get
+      - watch
 {{- end }}
