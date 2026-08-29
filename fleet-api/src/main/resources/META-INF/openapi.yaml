@@ -356,6 +356,7 @@ components:
           $ref: "#/components/schemas/ResolvedConfigData"
     PublicOptionDefinition:
       type: object
+      additionalProperties: false
       required: [name, label, kind, group, description, values, minimum, maximum]
       properties:
         name: { type: string }

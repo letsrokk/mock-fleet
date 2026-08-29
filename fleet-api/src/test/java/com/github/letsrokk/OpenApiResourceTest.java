@@ -182,6 +182,12 @@ class OpenApiResourceTest {
         assertEquals("options", catalog.path("required").get(2).asText());
 
         JsonNode option = root.path("components").path("schemas").path("PublicOptionDefinition");
+        Set<String> optionProperties = new HashSet<>();
+        option.path("properties").fieldNames().forEachRemaining(optionProperties::add);
+        assertEquals(Set.of("name", "label", "kind", "group", "description", "values", "minimum", "maximum"),
+                optionProperties);
+        assertTrue(option.has("additionalProperties"));
+        assertFalse(option.path("additionalProperties").asBoolean());
         assertFalse(option.path("properties").has("available"));
         assertFalse(option.path("properties").has("compatibility"));
         assertFalse(option.path("properties").has("versionRanges"));
