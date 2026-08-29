@@ -28,10 +28,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -63,6 +66,9 @@ public class PodManager {
     @Inject
     PodTransitionCoordinator podTransitionCoordinator;
 
+    @Inject
+    MockCapacity mockCapacity;
+
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
     Duration inactivityThreshold;
 
@@ -70,6 +76,8 @@ public class PodManager {
     Duration podCreationTimeout;
 
     Executor startExecutor = Runnable::run;
+    ScheduledExecutorService reservationHeartbeatExecutor;
+    private final java.util.Set<StartAttempt> activeStartAttempts = ConcurrentHashMap.newKeySet();
 
     @PostConstruct
     void initializeStartExecutor() {
@@ -87,6 +95,19 @@ public class PodManager {
                     return thread;
                 },
                 new ThreadPoolExecutor.AbortPolicy());
+        if (mockCapacity != null) {
+            long heartbeatIntervalMillis = Math.max(1L, mockCapacity.reservationLeaseMillis() / 3L);
+            reservationHeartbeatExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "mock-capacity-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
+            reservationHeartbeatExecutor.scheduleWithFixedDelay(
+                    this::renewStartReservations,
+                    heartbeatIntervalMillis,
+                    heartbeatIntervalMillis,
+                    TimeUnit.MILLISECONDS);
+        }
     }
 
     public String getUpstreamBaseUrl(String mockId) {
@@ -142,6 +163,9 @@ public class PodManager {
         CompletableFuture<MockPodRef> completion = new CompletableFuture<>();
         StartTask task = new StartTask(
                 mockId, attemptId, previousPodName, completion, cancelAttempt);
+        StartAttempt startAttempt = new StartAttempt(mockId, attemptId);
+        activeStartAttempts.add(startAttempt);
+        completion.whenComplete((ignored, failure) -> activeStartAttempts.remove(startAttempt));
         try {
             startExecutor.execute(task);
         } catch (RejectedExecutionException rejection) {
@@ -218,6 +242,7 @@ public class PodManager {
                         "Failed to delete stale startup pod '" + previousPodName + "' before retry.");
             }
             requireCurrentStartingAttempt(mockId, attemptId);
+            requireCurrentReservation(mockId, attemptId);
             MockPodRef pod = spawnPod(mockId, attemptId);
             if (!podState.completeStart(mockId, attemptId, pod, Instant.now().toEpochMilli())) {
                 if (!deletePod(pod, mockId)) {
@@ -259,6 +284,29 @@ public class PodManager {
         }
     }
 
+    private void requireCurrentReservation(String mockId, String attemptId) {
+        if (mockCapacity != null && !mockCapacity.isCurrentReservation(mockId, attemptId)) {
+            throw new PodCreationException("Pod startup was superseded or stopped.");
+        }
+    }
+
+    void renewStartReservations() {
+        if (mockCapacity == null) {
+            return;
+        }
+        activeStartAttempts.forEach(attempt -> {
+            try {
+                if (!mockCapacity.renew(attempt.mockId(), attempt.attemptId())) {
+                    activeStartAttempts.remove(attempt);
+                }
+            } catch (RuntimeException failure) {
+                LOG.warnf(failure,
+                        "Failed to renew capacity ownership for mock id '%s', attempt '%s'.",
+                        attempt.mockId(), attempt.attemptId());
+            }
+        });
+    }
+
     private <T> T serializedPodTransition(String mockId, Supplier<T> action) {
         return podTransitionCoordinator == null ? action.get() : podTransitionCoordinator.serialized(mockId, action);
     }
@@ -276,6 +324,9 @@ public class PodManager {
 
     @PreDestroy
     void closeStartExecutor() {
+        if (reservationHeartbeatExecutor != null) {
+            reservationHeartbeatExecutor.shutdownNow();
+        }
         if (startExecutor instanceof ExecutorService executorService) {
             List<Runnable> abandoned = executorService.shutdownNow();
             abandoned.forEach(task -> {
@@ -324,6 +375,8 @@ public class PodManager {
             } catch (RuntimeException failure) {
                 LOG.warnf(failure, "Failed to start pod for mock id '%s'.", mockId);
                 completion.completeExceptionally(failure);
+            } finally {
+                activeStartAttempts.remove(new StartAttempt(mockId, attemptId));
             }
         }
 
@@ -339,6 +392,9 @@ public class PodManager {
                 completion.completeExceptionally(failure);
             }
         }
+    }
+
+    private record StartAttempt(String mockId, String attemptId) {
     }
 
     public List<ActiveMockPod> listActiveMocks() {
@@ -606,13 +662,26 @@ public class PodManager {
                 .map(MockPodRef::podName)
                 .filter(Objects::nonNull)
                 .forEach(ownedPods::add);
-        podState.getPodLifecycles().values().stream()
-                .filter(lifecycle -> lifecycle.status() != MockLifecycleStatus.STARTING
-                        || isFreshStartingForCleanup(lifecycle, System.currentTimeMillis()))
-                .map(MockPodLifecycle::podName)
-                .filter(Objects::nonNull)
-                .filter(podName -> !podName.isBlank())
-                .forEach(ownedPods::add);
+        if (mockCapacity == null) {
+            podState.getPodLifecycles().values().stream()
+                    .filter(lifecycle -> lifecycle.status() != MockLifecycleStatus.STARTING
+                            || isLiveStartingForCleanup(
+                                    null, lifecycle, System.currentTimeMillis()))
+                    .map(MockPodLifecycle::podName)
+                    .filter(Objects::nonNull)
+                    .filter(podName -> !podName.isBlank())
+                    .forEach(ownedPods::add);
+        } else {
+            podState.getPodLifecycles().entrySet().stream()
+                    .filter(entry -> entry.getValue().status() != MockLifecycleStatus.STARTING
+                            || isLiveStartingForCleanup(
+                                    entry.getKey(), entry.getValue(), System.currentTimeMillis()))
+                    .map(Map.Entry::getValue)
+                    .map(MockPodLifecycle::podName)
+                    .filter(Objects::nonNull)
+                    .filter(podName -> !podName.isBlank())
+                    .forEach(ownedPods::add);
+        }
 
         podList.getItems().forEach(p -> {
             String podName = p.getMetadata().getName();
@@ -631,7 +700,11 @@ public class PodManager {
         });
     }
 
-    private boolean isFreshStartingForCleanup(MockPodLifecycle lifecycle, long nowEpochMillis) {
+    private boolean isLiveStartingForCleanup(String mockId, MockPodLifecycle lifecycle,
+                                             long nowEpochMillis) {
+        if (mockCapacity != null) {
+            return mockCapacity.isCurrentReservation(mockId, lifecycle.attemptId());
+        }
         if (lifecycle.startedAtEpochMillis() <= 0L) {
             return false;
         }

@@ -9,32 +9,43 @@ import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 @ApplicationScoped
 public class MockCapacity {
 
     static final String RESERVATION_MAP_NAME = "mock-capacity-reservation-map";
+    static final String RESERVATION_LIVENESS_MAP_NAME = "mock-capacity-liveness-map";
     private static final String CAPACITY_LOCK_KEY = "__mock-fleet-capacity-lock__";
+    private static final String RECLAIMED_START_MESSAGE = "Pod startup ownership expired.";
 
     private final IMap<String, String> reservations;
+    private final IMap<String, ReservationLiveness> reservationLiveness;
     private final IMap<String, MockPodRef> pods;
     private final IMap<String, MockPodLifecycle> lifecycles;
     private final int maxActiveMocks;
-    private final long startupLeaseMillis;
+    private final long reservationLeaseMillis;
+    private final String ownerId;
 
     @Inject
     public MockCapacity(HazelcastInstance hazelcastInstance, MockFleetConfig config) {
         validate(config);
         this.reservations = hazelcastInstance.getMap(RESERVATION_MAP_NAME);
+        this.reservationLiveness = hazelcastInstance.getMap(RESERVATION_LIVENESS_MAP_NAME);
         this.pods = hazelcastInstance.getMap(HazelcastMemberConfig.POD_MAP_NAME);
         this.lifecycles = hazelcastInstance.getMap(HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
         this.maxActiveMocks = config.maxActiveMocks();
-        this.startupLeaseMillis = doubledMillis(config.podCreationTimeout());
+        this.reservationLeaseMillis = doubledMillis(config.podCreationTimeout());
+        this.ownerId = UUID.randomUUID().toString();
     }
 
     @PostConstruct
@@ -50,12 +61,11 @@ public class MockCapacity {
         Objects.requireNonNull(mockId, "mockId");
         Objects.requireNonNull(attemptId, "attemptId");
         Objects.requireNonNull(publishStarting, "publishStarting");
-        reservations.lock(CAPACITY_LOCK_KEY);
-        try {
+        withCapacityLock(() -> {
             long now = System.currentTimeMillis();
-            reconcileExpiredReservations(now, false);
+            reconcileExpiredReservations(now);
             String currentAttempt = reservations.get(mockId);
-            Set<String> activeMockIds = activeMockIds(now);
+            Set<String> activeMockIds = activeMockIds();
             if (!attemptId.equals(currentAttempt)
                     && currentAttempt == null
                     && !activeMockIds.contains(mockId)
@@ -64,36 +74,37 @@ public class MockCapacity {
             }
             if (!attemptId.equals(currentAttempt)) {
                 reservations.put(mockId, attemptId);
+                reservationLiveness.put(mockId, new ReservationLiveness(attemptId, ownerId, now));
+            } else {
+                renewLocked(mockId, attemptId, now);
             }
             try {
                 publishStarting.run();
             } catch (RuntimeException failure) {
                 reservations.remove(mockId, attemptId);
+                removeLiveness(mockId, attemptId);
                 throw failure;
             }
-        } finally {
-            reservations.unlock(CAPACITY_LOCK_KEY);
-        }
+            return null;
+        });
     }
 
     public void release(String mockId, String attemptId) {
         if (mockId == null || attemptId == null) {
             return;
         }
-        reservations.lock(CAPACITY_LOCK_KEY);
-        try {
+        withCapacityLock(() -> {
             reservations.remove(mockId, attemptId);
-        } finally {
-            reservations.unlock(CAPACITY_LOCK_KEY);
-        }
+            removeLiveness(mockId, attemptId);
+            return null;
+        });
     }
 
     public boolean complete(String mockId, String attemptId, Runnable publishRunning) {
         Objects.requireNonNull(mockId, "mockId");
         Objects.requireNonNull(attemptId, "attemptId");
         Objects.requireNonNull(publishRunning, "publishRunning");
-        reservations.lock(CAPACITY_LOCK_KEY);
-        try {
+        return withCapacityLock(() -> {
             if (!attemptId.equals(reservations.get(mockId))) {
                 return false;
             }
@@ -101,70 +112,129 @@ public class MockCapacity {
                 publishRunning.run();
             } catch (RuntimeException failure) {
                 reservations.remove(mockId, attemptId);
+                removeLiveness(mockId, attemptId);
                 throw failure;
             }
             reservations.remove(mockId, attemptId);
+            removeLiveness(mockId, attemptId);
             return true;
-        } finally {
-            reservations.unlock(CAPACITY_LOCK_KEY);
-        }
+        });
     }
 
     public int activeCount() {
-        reservations.lock(CAPACITY_LOCK_KEY);
-        try {
+        return withCapacityLock(() -> {
             long now = System.currentTimeMillis();
-            reconcileExpiredReservations(now, false);
-            return activeMockIds(now).size();
-        } finally {
-            reservations.unlock(CAPACITY_LOCK_KEY);
-        }
+            reconcileExpiredReservations(now);
+            return activeMockIds().size();
+        });
     }
 
     public void reconcile() {
+        withCapacityLock(() -> {
+            reconcileExpiredReservations(System.currentTimeMillis());
+            return null;
+        });
+    }
+
+    boolean renew(String mockId, String attemptId) {
+        if (mockId == null || attemptId == null) {
+            return false;
+        }
+        return withCapacityLock(() -> {
+            long now = System.currentTimeMillis();
+            reconcileExpiredReservations(now);
+            return renewLocked(mockId, attemptId, now);
+        });
+    }
+
+    boolean isCurrentReservation(String mockId, String attemptId) {
+        if (mockId == null || attemptId == null) {
+            return false;
+        }
+        return withCapacityLock(() -> {
+            reconcileExpiredReservations(System.currentTimeMillis());
+            return attemptId.equals(reservations.get(mockId));
+        });
+    }
+
+    <T> T withCapacityLock(Supplier<T> action) {
         reservations.lock(CAPACITY_LOCK_KEY);
         try {
-            reconcileExpiredReservations(System.currentTimeMillis(), true);
+            return action.get();
         } finally {
             reservations.unlock(CAPACITY_LOCK_KEY);
         }
     }
 
-    private void reconcileExpiredReservations(long now, boolean removeOrphans) {
+    long reservationLeaseMillis() {
+        return reservationLeaseMillis;
+    }
+
+    private boolean renewLocked(String mockId, String attemptId, long now) {
+        if (!attemptId.equals(reservations.get(mockId))) {
+            return false;
+        }
+        ReservationLiveness current = reservationLiveness.get(mockId);
+        if (current == null
+                || !attemptId.equals(current.attemptId())
+                || !ownerId.equals(current.ownerId())) {
+            return false;
+        }
+        reservationLiveness.put(mockId, new ReservationLiveness(attemptId, ownerId, now));
+        return true;
+    }
+
+    private void reconcileExpiredReservations(long now) {
         reservations.entrySet().forEach(entry -> {
-            MockPodLifecycle lifecycle = lifecycles.get(entry.getKey());
-            if ((lifecycle != null || removeOrphans)
-                    && !isFreshStartingAttempt(lifecycle, entry.getValue(), now)) {
-                reservations.remove(entry.getKey(), entry.getValue());
+            String mockId = entry.getKey();
+            String attemptId = entry.getValue();
+            lifecycles.lock(mockId);
+            try {
+                MockPodLifecycle lifecycle = lifecycles.get(mockId);
+                ReservationLiveness liveness = reservationLiveness.get(mockId);
+                boolean currentStartingAttempt = lifecycle != null
+                        && lifecycle.status() == MockLifecycleStatus.STARTING
+                        && Objects.equals(lifecycle.attemptId(), attemptId);
+                boolean liveReservation = liveness != null
+                        && Objects.equals(liveness.attemptId(), attemptId)
+                        && isFresh(liveness.renewedAtEpochMillis(), now);
+                if (!currentStartingAttempt || !liveReservation) {
+                    if (currentStartingAttempt) {
+                        lifecycles.put(mockId, MockPodLifecycle.failed(
+                                attemptId, lifecycle.podName(), RECLAIMED_START_MESSAGE),
+                                30L, TimeUnit.SECONDS);
+                    }
+                    reservations.remove(mockId, attemptId);
+                    removeLiveness(mockId, attemptId);
+                }
+            } finally {
+                lifecycles.unlock(mockId);
             }
         });
     }
 
-    private Set<String> activeMockIds(long now) {
+    private Set<String> activeMockIds() {
         Set<String> active = new HashSet<>(reservations.keySet());
         active.addAll(pods.keySet());
         lifecycles.forEach((mockId, lifecycle) -> {
-            if (lifecycle.status() == MockLifecycleStatus.RUNNING
-                    || isFreshStarting(lifecycle, now)) {
+            if (lifecycle.status() == MockLifecycleStatus.RUNNING) {
                 active.add(mockId);
             }
         });
         return active;
     }
 
-    private boolean isFreshStartingAttempt(MockPodLifecycle lifecycle, String attemptId, long now) {
-        return lifecycle != null
-                && Objects.equals(lifecycle.attemptId(), attemptId)
-                && isFreshStarting(lifecycle, now);
+    private boolean isFresh(long renewedAtEpochMillis, long now) {
+        return renewedAtEpochMillis > 0L
+                && (now < renewedAtEpochMillis
+                || now - renewedAtEpochMillis < reservationLeaseMillis);
     }
 
-    private boolean isFreshStarting(MockPodLifecycle lifecycle, long now) {
-        if (lifecycle == null || lifecycle.status() != MockLifecycleStatus.STARTING
-                || lifecycle.startedAtEpochMillis() <= 0L) {
-            return false;
+    private void removeLiveness(String mockId, String attemptId) {
+        ReservationLiveness current = reservationLiveness.get(mockId);
+        if (current != null && Objects.equals(current.attemptId(), attemptId)) {
+            reservationLiveness.remove(mockId, current);
         }
-        return now < lifecycle.startedAtEpochMillis()
-                || now - lifecycle.startedAtEpochMillis() < startupLeaseMillis;
     }
 
     private static void validate(MockFleetConfig config) {
@@ -186,6 +256,12 @@ public class MockCapacity {
     private static long doubledMillis(Duration duration) {
         long millis = Math.max(1L, duration.toMillis());
         return millis > Long.MAX_VALUE / 2L ? Long.MAX_VALUE : millis * 2L;
+    }
+
+    record ReservationLiveness(String attemptId, String ownerId,
+                               long renewedAtEpochMillis) implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 0L;
     }
 
     public static final class CapacityExceededException extends WebApplicationException {

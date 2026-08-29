@@ -156,6 +156,7 @@ class PodManagerTest {
         };
         podManager.config = config;
         podManager.podState = podState;
+        podManager.mockCapacity = capacity;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.initializeStartExecutor();
 
@@ -176,6 +177,112 @@ class PodManagerTest {
             assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isTerminated());
         } finally {
             podManager.closeStartExecutor();
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
+    void reclaimedQueuedAttemptCannotReachPodCreation() {
+        Config hazelcastConfig = new Config();
+        hazelcastConfig.setClusterName("pod-manager-reclaimed-" + System.nanoTime());
+        hazelcastConfig.setProperty("hazelcast.logging.type", "none");
+        hazelcastConfig.setProperty("hazelcast.phone.home.enabled", "false");
+        hazelcastConfig.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        hazelcastConfig.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(hazelcastConfig);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        when(config.maxActiveMocks()).thenReturn(1);
+        when(config.maxConcurrentStarts()).thenReturn(1);
+        when(config.queuedStartCapacity()).thenReturn(1);
+        when(config.podCreationTimeout()).thenReturn(Duration.ofMillis(5));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        AtomicInteger podCreations = new AtomicInteger();
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                podCreations.incrementAndGet();
+                return new MockPodRef("mock-fleet-" + mockId + "-1", "10.0.0.1");
+            }
+
+            @Override
+            boolean deletePod(MockPodRef pod, String mockId) {
+                return true;
+            }
+        };
+        podManager.config = config;
+        podManager.podState = podState;
+        podManager.mockCapacity = capacity;
+        podManager.podCreationTimeout = Duration.ofMillis(5);
+        podManager.startExecutor = queuedTask::set;
+
+        try {
+            podManager.startMock("demo");
+            assertTrue(queuedTask.get() != null);
+            awaitAfter(System.currentTimeMillis() + 10L);
+            assertEquals(0, capacity.activeCount());
+
+            queuedTask.get().run();
+
+            assertEquals(0, podCreations.get());
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
+    void queuedTaskHeartbeatKeepsOwnershipPastTheInitialLease() {
+        Config hazelcastConfig = new Config();
+        hazelcastConfig.setClusterName("pod-manager-heartbeat-" + System.nanoTime());
+        hazelcastConfig.setProperty("hazelcast.logging.type", "none");
+        hazelcastConfig.setProperty("hazelcast.phone.home.enabled", "false");
+        hazelcastConfig.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        hazelcastConfig.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(hazelcastConfig);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        when(config.maxActiveMocks()).thenReturn(1);
+        when(config.maxConcurrentStarts()).thenReturn(1);
+        when(config.queuedStartCapacity()).thenReturn(1);
+        when(config.podCreationTimeout()).thenReturn(Duration.ofMillis(10));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        AtomicReference<Runnable> queuedTask = new AtomicReference<>();
+        AtomicInteger podCreations = new AtomicInteger();
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                podCreations.incrementAndGet();
+                return new MockPodRef("mock-fleet-" + mockId + "-1", "10.0.0.1");
+            }
+        };
+        podManager.config = config;
+        podManager.podState = podState;
+        podManager.mockCapacity = capacity;
+        podManager.podCreationTimeout = Duration.ofMillis(10);
+        podManager.startExecutor = queuedTask::set;
+
+        try {
+            podManager.startMock("demo");
+            long initialLeaseStart = podState.lifecycle("demo").startedAtEpochMillis();
+            awaitAfter(initialLeaseStart + 10L);
+            podManager.renewStartReservations();
+            awaitAfter(initialLeaseStart + 21L);
+
+            assertEquals(1, capacity.activeCount());
+            queuedTask.get().run();
+
+            assertEquals(1, podCreations.get());
+            assertEquals(MockLifecycleStatus.RUNNING, podState.lifecycle("demo").status());
+        } finally {
             podState.removePodListener();
             hazelcast.getLifecycleService().terminate();
         }
@@ -1726,5 +1833,15 @@ class PodManagerTest {
                 .addToLimits("cpu", new Quantity(limitCpu))
                 .addToLimits("memory", new Quantity(limitMemory))
                 .build();
+    }
+
+    private void awaitAfter(long epochMillis) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (System.currentTimeMillis() <= epochMillis) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Clock did not advance past the startup lease deadline.");
+            }
+            Thread.onSpinWait();
+        }
     }
 }

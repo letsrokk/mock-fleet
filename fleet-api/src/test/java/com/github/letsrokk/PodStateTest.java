@@ -127,6 +127,7 @@ class PodStateTest {
         PodState podState = podStateWithMaps(podMap, lifecycleMap);
         MockPodLifecycle stale = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L);
         when(lifecycleMap.get("demo")).thenReturn(stale);
+        when(podState.mockCapacity.isCurrentReservation("demo", "attempt-1")).thenReturn(false);
 
         PodState.StartClaim claim = podState.claimStart("demo", 2_000L, 1_000L);
 
@@ -329,6 +330,7 @@ class PodStateTest {
             invocation.<Runnable>getArgument(2).run();
             return null;
         }).when(capacity).reserve(any(), any(), any());
+        runUnderCapacityLock(capacity);
         podState.mockCapacity = capacity;
 
         try {
@@ -599,6 +601,7 @@ class PodStateTest {
                                        IMap<String, MockPodLifecycle> lifecycleMap,
                                        IMap<String, Long> lastAccessTimeMap,
                                        MockCapacity capacity) {
+        runUnderCapacityLock(capacity);
         org.mockito.Mockito.doAnswer(invocation -> {
             invocation.<Runnable>getArgument(2).run();
             return null;
@@ -614,6 +617,13 @@ class PodStateTest {
         PodState podState = new PodState(hazelcastInstance);
         podState.mockCapacity = capacity;
         return podState;
+    }
+
+    private void runUnderCapacityLock(MockCapacity capacity) {
+        org.mockito.Mockito.doAnswer(invocation ->
+                invocation.<java.util.function.Supplier<?>>getArgument(0).get())
+                .when(capacity).withCapacityLock(any());
+        when(capacity.isCurrentReservation(any(), any())).thenReturn(true);
     }
 
     private IMap<String, MockPodRef> podMap() {
