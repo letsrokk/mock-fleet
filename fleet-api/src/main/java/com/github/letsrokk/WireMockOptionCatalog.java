@@ -87,11 +87,8 @@ public final class WireMockOptionCatalog {
             number("--jetty-header-response-size", "Jetty response header size", "Performance and Jetty", "Sets the Jetty response header buffer size.", 1, 1048576),
             number("--jetty-idle-timeout", "Jetty idle timeout ms", "Performance and Jetty", "Sets the Jetty connection idle timeout in milliseconds.", 1, 3600000),
             number("--jetty-stop-timeout", "Jetty stop timeout ms", "Performance and Jetty", "Sets the Jetty stop timeout in milliseconds.", 1, 3600000),
-            number("--timeout", "Timeout ms", "Performance and Jetty", "Sets the default global timeout in milliseconds.", 1, 3600000),
-            number("--webhook-threadpool-size", "Webhook thread pool size", "Webhooks and WebSockets", "Sets the webhook processing thread count.", 1, 256),
-            number("--websocket-idle-timeout", "WebSocket idle timeout ms", "Webhooks and WebSockets", "Sets the WebSocket idle timeout in milliseconds.", 1, 3600000),
-            number("--websocket-max-text-message-size", "Max text message size", "Webhooks and WebSockets", "Sets the maximum WebSocket text message size in bytes.", 1, 16777216),
-            number("--websocket-max-binary-message-size", "Max binary message size", "Webhooks and WebSockets", "Sets the maximum WebSocket binary message size in bytes.", 1, 16777216));
+            input("--timeout", "Timeout ms", "Performance and Jetty", "Sets the default global timeout in milliseconds."),
+            number("--webhook-threadpool-size", "Webhook thread pool size", "Webhooks and WebSockets", "Sets the webhook processing thread count.", 1, 256));
 
     private WireMockOptionCatalog() {
     }

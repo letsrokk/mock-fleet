@@ -102,7 +102,6 @@ class WireMockOptionValidationTest {
                 new InvalidNumber("--async-response-threads", "257", 1, 256),
                 new InvalidNumber("--max-request-journal-entries", "100001", 0, 100000),
                 new InvalidNumber("--jetty-header-buffer-size", "1048577", 1, 1048576),
-                new InvalidNumber("--websocket-max-text-message-size", "16777217", 1, 16777216),
                 new InvalidNumber("--proxy-timeout", "3600001", 1, 3600000)
         ).forEach(number -> assertInvalid(
                 List.of(number.option(), number.value()),
@@ -130,17 +129,22 @@ class WireMockOptionValidationTest {
     }
 
     @Test
-    void treatsTimeoutAsAFlagForThePinnedWireMockVersion() {
+    void persistsTimeoutOnlyWhenItHasAValue() {
         Fixture fixture = fixture();
 
-        fixture.service.upsertMockConfig("demo", request(List.of("--timeout")));
+        fixture.service.upsertMockConfig("demo", request(List.of("--timeout", "10000")));
 
         ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespacedConfigMaps).resource(persisted.capture());
-        assertEquals(List.of("--timeout"),
+        assertEquals(List.of("--timeout", "10000"),
                 WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
                         .mockConfigs().get("demo").options());
-        assertInvalid(List.of("--timeout", "10000"), "Unexpected WireMock option value: 10000");
+
+        Fixture inlineFixture = fixture();
+        inlineFixture.service.upsertMockConfig("demo", request(List.of("--timeout=2500")));
+        verify(inlineFixture.namespacedConfigMaps).resource(any());
+
+        assertInvalid(List.of("--timeout"), "WireMock option requires a value: --timeout");
     }
 
     @Test
@@ -165,16 +169,22 @@ class WireMockOptionValidationTest {
     }
 
     @Test
-    void compatibilityWarningsNeverBlockNormalization() {
-        assertEquals(List.of("--disable-connection-reuse", "true"),
-                WireMockOptionCatalog.validateAndNormalize(
-                        List.of("--disable-connection-reuse", "true"), new WireMockVersion(3, 0, 0)));
+    void acceptsAdvertisedOptionsAndRejectsOptionsHiddenForTheVersion() {
         assertEquals(List.of("--trust-all-proxy-targets"),
                 WireMockOptionCatalog.validateAndNormalize(
                         List.of("--trust-all-proxy-targets"), new WireMockVersion(3, 13, 2)));
         assertEquals(List.of("--verbose"),
                 WireMockOptionCatalog.validateAndNormalize(
                         List.of("--verbose"), new WireMockVersion(3, 14, 0)));
+
+        WebApplicationException introducedLater = assertThrows(WebApplicationException.class,
+                () -> WireMockOptionCatalog.validateAndNormalize(
+                        List.of("--disable-connection-reuse", "true"), new WireMockVersion(3, 0, 0)));
+        assertEquals("Unknown WireMock option: --disable-connection-reuse", introducedLater.getMessage());
+        assertInvalid(List.of("--disable-optimize-xml-factories-loading"),
+                "Unknown WireMock option: --disable-optimize-xml-factories-loading");
+        assertInvalid(List.of("--websocket-idle-timeout", "1000"),
+                "Unknown WireMock option: --websocket-idle-timeout");
     }
 
     @Test
@@ -200,10 +210,7 @@ class WireMockOptionValidationTest {
                 Map.entry("--jetty-header-response-size", new NumericBounds(1, 1048576)),
                 Map.entry("--jetty-idle-timeout", new NumericBounds(1, 3600000)),
                 Map.entry("--jetty-stop-timeout", new NumericBounds(1, 3600000)),
-                Map.entry("--webhook-threadpool-size", new NumericBounds(1, 256)),
-                Map.entry("--websocket-idle-timeout", new NumericBounds(1, 3600000)),
-                Map.entry("--websocket-max-text-message-size", new NumericBounds(1, 16777216)),
-                Map.entry("--websocket-max-binary-message-size", new NumericBounds(1, 16777216)));
+                Map.entry("--webhook-threadpool-size", new NumericBounds(1, 256)));
 
         assertEquals(expected.size(), definitions.values().stream()
                 .filter(definition -> definition.kind().endsWith("number")).count());

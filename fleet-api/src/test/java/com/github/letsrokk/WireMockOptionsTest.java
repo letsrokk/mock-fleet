@@ -299,6 +299,8 @@ class WireMockOptionsTest {
     void rejectsInvalidRetainedBaselineOptionsAtStartup() {
         List<List<String>> invalidOptions = List.of(
                 List.of("--not-advertised"),
+                List.of("--disable-optimize-xml-factories-loading"),
+                List.of("--websocket-idle-timeout", "1000"),
                 List.of("--proxy-timeout", "soon"),
                 List.of("--async-response-threads", "1.5"),
                 List.of("--async-response-threads", "-1"),
