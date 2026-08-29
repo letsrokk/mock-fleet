@@ -80,6 +80,7 @@ class WireMockOptionValidationTest {
     @Test
     void rejectsPasswordOptionsInSplitAndEqualsFormsWithoutDisclosingValues() {
         List.of(
+                "--admin-api-basic-auth",
                 "--ca-keystore-password",
                 "--keystore-password",
                 "--key-manager-password",
@@ -129,12 +130,62 @@ class WireMockOptionValidationTest {
     }
 
     @Test
+    void treatsTimeoutAsAFlagForThePinnedWireMockVersion() {
+        Fixture fixture = fixture();
+
+        fixture.service.upsertMockConfig("demo", request(List.of("--timeout")));
+
+        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespacedConfigMaps).resource(persisted.capture());
+        assertEquals(List.of("--timeout"),
+                WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
+                        .mockConfigs().get("demo").options());
+        assertInvalid(List.of("--timeout", "10000"), "Unexpected WireMock option value: 10000");
+    }
+
+    @Test
+    void acceptsOptionalTemplateAndSystemKeyArgumentsWithOrWithoutValues() {
+        Fixture fixture = fixture();
+
+        fixture.service.upsertMockConfig("demo", request(List.of(
+                "--max-template-cache-entries",
+                "--permitted-system-keys")));
+
+        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespacedConfigMaps).resource(persisted.capture());
+        assertEquals(List.of("--max-template-cache-entries", "--permitted-system-keys"),
+                WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
+                        .mockConfigs().get("demo").options());
+
+        Fixture valuedFixture = fixture();
+        valuedFixture.service.upsertMockConfig("demo", request(List.of(
+                "--max-template-cache-entries=100",
+                "--permitted-system-keys", "wiremock.*,mock.*")));
+        verify(valuedFixture.namespacedConfigMaps).resource(any());
+    }
+
+    @Test
+    void compatibilityWarningsNeverBlockNormalization() {
+        assertEquals(List.of("--disable-connection-reuse", "true"),
+                WireMockOptionCatalog.validateAndNormalize(
+                        List.of("--disable-connection-reuse", "true"), new WireMockVersion(3, 0, 0)));
+        assertEquals(List.of("--trust-all-proxy-targets"),
+                WireMockOptionCatalog.validateAndNormalize(
+                        List.of("--trust-all-proxy-targets"), new WireMockVersion(3, 13, 2)));
+        assertEquals(List.of("--verbose"),
+                WireMockOptionCatalog.validateAndNormalize(
+                        List.of("--verbose"), new WireMockVersion(3, 14, 0)));
+    }
+
+    @Test
     void publishesIntegralBoundsFromTheOptionCatalog() {
         Map<String, WireMockOptionCatalog.OptionDefinition> definitions = WireMockOptionCatalog.definitions().stream()
                 .collect(java.util.stream.Collectors.toMap(
                         WireMockOptionCatalog.OptionDefinition::name,
                         definition -> definition));
         Map<String, NumericBounds> expected = Map.ofEntries(
+                Map.entry("--port", new NumericBounds(0, 65535)),
+                Map.entry("--https-port", new NumericBounds(1, 65535)),
                 Map.entry("--logged-response-body-size-limit", new NumericBounds(0, 16777216)),
                 Map.entry("--max-request-journal-entries", new NumericBounds(0, 100000)),
                 Map.entry("--proxy-timeout", new NumericBounds(1, 3600000)),
@@ -149,14 +200,13 @@ class WireMockOptionValidationTest {
                 Map.entry("--jetty-header-response-size", new NumericBounds(1, 1048576)),
                 Map.entry("--jetty-idle-timeout", new NumericBounds(1, 3600000)),
                 Map.entry("--jetty-stop-timeout", new NumericBounds(1, 3600000)),
-                Map.entry("--timeout", new NumericBounds(1, 3600000)),
                 Map.entry("--webhook-threadpool-size", new NumericBounds(1, 256)),
                 Map.entry("--websocket-idle-timeout", new NumericBounds(1, 3600000)),
                 Map.entry("--websocket-max-text-message-size", new NumericBounds(1, 16777216)),
                 Map.entry("--websocket-max-binary-message-size", new NumericBounds(1, 16777216)));
 
         assertEquals(expected.size(), definitions.values().stream()
-                .filter(definition -> "number".equals(definition.kind())).count());
+                .filter(definition -> definition.kind().endsWith("number")).count());
         expected.forEach((name, bounds) -> {
             assertEquals(bounds.minimum(), definitions.get(name).minimum(), name);
             assertEquals(bounds.maximum(), definitions.get(name).maximum(), name);
@@ -214,6 +264,7 @@ class WireMockOptionValidationTest {
         MockFleetConfig config = mock(MockFleetConfig.class);
         when(config.wiremockUserConfigMapName()).thenReturn(Optional.of("user-config"));
         when(config.wiremockConfigKey()).thenReturn("wiremock-options.yaml");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.13.2-2");
         MockFleetConfig.ProxyConfig proxy = mock(MockFleetConfig.ProxyConfig.class);
         MockFleetConfig.RoutingConfig routing = mock(MockFleetConfig.RoutingConfig.class);
         when(config.proxy()).thenReturn(proxy);

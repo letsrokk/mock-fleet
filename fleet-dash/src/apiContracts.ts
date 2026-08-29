@@ -20,6 +20,13 @@ export type ConfigView = {
   mockIds: string[];
   savedMockIds: string[];
   mocks: MockConfigView[];
+  wireMock: {
+    configuredImage: string;
+    version: string;
+    minimumSupportedVersion: string;
+    maximumResearchedVersion: string;
+    rangeStatus: "supported" | "newer_unresearched";
+  };
   options: OptionDefinition[];
   routing: RoutingView;
 };

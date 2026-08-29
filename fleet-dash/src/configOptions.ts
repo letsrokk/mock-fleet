@@ -1,12 +1,17 @@
 export type OptionDefinition = {
   name: string;
   label: string;
-  kind: "flag" | "input" | "number" | "select";
+  kind: "flag" | "input" | "number" | "select" | "optional_number" | "optional_input";
   group: string;
   description: string;
   values: string[];
   minimum: number | null;
   maximum: number | null;
+  available: boolean;
+  unavailableReason: "SECRET_STORAGE_REQUIRED" | null;
+  compatibility: "supported" | "unsupported" | "known_broken" | "unknown";
+  compatibilityMessage: string | null;
+  versionRanges: Array<{ minimumVersion: string; maximumVersion: string | null }>;
 };
 
 export type ResourceData = {
@@ -57,6 +62,9 @@ export function draftFromConfig(config: ConfigData, definitions: OptionDefinitio
   const draft = emptyDraft();
   const valueOptions = new Set(definitions.filter((option) => option.kind !== "flag").map((option) => option.name));
   const flagOptions = new Set(definitions.filter((option) => option.kind === "flag").map((option) => option.name));
+  const optionalOptions = new Set(definitions
+    .filter((option) => option.kind.startsWith("optional_"))
+    .map((option) => option.name));
   const rawArgs: string[] = [];
   const optionTokens = normalizeOptions(config.options);
 
@@ -74,6 +82,8 @@ export function draftFromConfig(config: ConfigData, definitions: OptionDefinitio
         if (nextValue && !nextValue.startsWith("--")) {
           draft.values[token] = nextValue;
           index += 1;
+        } else if (optionalOptions.has(name)) {
+          draft.flags[name] = true;
         } else {
           rawArgs.push(token);
         }
@@ -99,6 +109,8 @@ export function optionsFromDraft(draft: DraftConfig, definitions: OptionDefiniti
       const value = draft.values[definition.name]?.trim();
       if (value) {
         options.push(definition.name, value);
+      } else if (definition.kind.startsWith("optional_") && draft.flags[definition.name]) {
+        options.push(definition.name);
       }
     }
   });
@@ -151,10 +163,18 @@ export function resourceSummary(resources: ResourceData) {
 }
 
 export function numberInputAttributes(option: OptionDefinition) {
-  if (option.kind !== "number" || option.minimum === null || option.maximum === null) {
+  if (!option.kind.endsWith("number") || option.minimum === null || option.maximum === null) {
     return {};
   }
   return { min: option.minimum, max: option.maximum, step: 1 };
+}
+
+export function optionCompatibilityWarning(option: OptionDefinition) {
+  return option.compatibility === "supported" ? null : option.compatibilityMessage;
+}
+
+export function optionIsDisabled(option: OptionDefinition) {
+  return !option.available;
 }
 
 function cleanRecord(values: Record<string, string>) {

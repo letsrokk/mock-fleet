@@ -9,6 +9,8 @@ import {
   groupOptions,
   hasOption,
   numberInputAttributes,
+  optionCompatibilityWarning,
+  optionIsDisabled,
   optionsFromDraft,
   resourceSummary,
   resourcesFromDraft,
@@ -967,7 +969,13 @@ export default function App() {
               <div className="editor-body">
                 <div className="form-section">
                   <div className="section-title-row">
-                    <h2>Available options</h2>
+                    <span>
+                      <h2>WireMock options</h2>
+                      <span className="option-version-context">
+                        WireMock {configView.wireMock.version}; researched {configView.wireMock.minimumSupportedVersion}
+                        {" - "}{configView.wireMock.maximumResearchedVersion}
+                      </span>
+                    </span>
                     <div className="option-toolbar">
                       <button className="secondary-button small-button" type="button" onClick={expandAllOptionGroups}>
                         Expand all
@@ -977,6 +985,11 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+                  {configView.wireMock.rangeStatus === "newer_unresearched" ? (
+                    <p className="notice warning compact-notice" role="status">
+                      This WireMock version is newer than the compatibility matrix. Known options remain usable, but compatibility is unknown.
+                    </p>
+                  ) : null}
                   <div className="option-list">
                     {groupedOptions.map(([group, options]) => {
                       const collapsed = collapsedOptionGroups.has(group);
@@ -1305,6 +1318,7 @@ export default function App() {
   }
 
   function renderOptionControl(option: OptionDefinition) {
+    const unavailable = optionIsDisabled(option);
     if (option.kind === "flag") {
       const inheritedFromBaseline = selectedMock ? hasOption(selectedMock.baseline.options, option.name) : false;
       return (
@@ -1316,10 +1330,10 @@ export default function App() {
             <input
               type="checkbox"
               checked={Boolean(draft.flags[option.name])}
-              disabled={inheritedFromBaseline}
+              disabled={inheritedFromBaseline || unavailable}
               aria-label={inheritedFromBaseline
                 ? `${option.label} is inherited from default config`
-                : option.label}
+                : unavailable ? `${option.label} is unavailable: ${option.unavailableReason}` : option.label}
               onChange={(event) => {
                 setConfigDirty(true);
                 setDraft((current) => ({
@@ -1340,16 +1354,43 @@ export default function App() {
           <OptionText option={option} />
           {option.kind === "select" ? (
             <select
+              disabled={unavailable}
               value={draft.values[option.name] ?? ""}
               onChange={(event) => setDraftValue(option.name, event.target.value)}
             >
               <option value=""></option>
               {option.values.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
+          ) : option.kind.startsWith("optional_") ? (
+            <span className="optional-option-control">
+              <label className="optional-option-toggle">
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.flags[option.name])}
+                  disabled={unavailable || Boolean(draft.values[option.name]?.trim())}
+                  onChange={(event) => {
+                    setConfigDirty(true);
+                    setDraft((current) => ({
+                      ...current,
+                      flags: { ...current.flags, [option.name]: event.target.checked }
+                    }));
+                  }}
+                />
+                No value
+              </label>
+              <input
+                type={option.kind === "optional_number" ? "number" : "text"}
+                {...numberInputAttributes(option)}
+                disabled={unavailable}
+                value={draft.values[option.name] ?? ""}
+                onChange={(event) => setDraftValue(option.name, event.target.value)}
+              />
+            </span>
           ) : (
             <input
               type={option.kind === "number" ? "number" : "text"}
               {...numberInputAttributes(option)}
+              disabled={unavailable}
               value={draft.values[option.name] ?? ""}
               onChange={(event) => setDraftValue(option.name, event.target.value)}
             />
@@ -1416,11 +1457,18 @@ export default function App() {
 }
 
 function OptionText({ option }: { option: OptionDefinition }) {
+  const warning = optionCompatibilityWarning(option);
   return (
     <span className="option-text">
       <span className="option-title">
         <span>{option.label}</span>
         <span className="option-name">{option.name}</span>
+        {warning ? (
+          <span className="option-warning" title={warning} aria-label={`Compatibility warning: ${warning}`}>(!)</span>
+        ) : null}
+        {!option.available ? (
+          <span className="option-unavailable" title="Secure Secret-backed storage is required.">Unavailable</span>
+        ) : null}
       </span>
       <span className="option-description">{option.description}</span>
     </span>

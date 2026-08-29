@@ -229,5 +229,15 @@ require_command curl
 require_command docker
 require_command jq
 
-run_contract wiremock/wiremock:3.0.4-1 3.0.4 false false
-run_contract wiremock/wiremock:3.13.2-2 3.13.2 true true
+version_contracts=(
+    "wiremock/wiremock:3.0.4-1 3.0.4 false false"
+    "wiremock/wiremock:3.7.0-1 3.7.0 false true"
+    "wiremock/wiremock:3.12.1-1 3.12.1 false true"
+    "wiremock/wiremock:3.13.0-1 3.13.0 true true"
+    "wiremock/wiremock:3.13.2-2 3.13.2 true true"
+)
+
+for contract in "${version_contracts[@]}"; do
+    read -r image version unmatched body_file_read <<<"${contract}"
+    run_contract "${image}" "${version}" "${unmatched}" "${body_file_read}"
+done

@@ -135,6 +135,30 @@ class OpenApiResourceTest {
         assertTrue(schema.path("properties").has("limits"));
     }
 
+    @Test
+    void documentsWireMockVersionAndOptionCompatibilityMetadata() throws Exception {
+        String document = given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString();
+        JsonNode schemas = new ObjectMapper().readTree(document).path("components").path("schemas");
+
+        JsonNode config = schemas.path("ConfigView");
+        assertTrue(config.path("required").toString().contains("wireMock"));
+        assertEquals("#/components/schemas/WireMockVersionView",
+                config.path("properties").path("wireMock").path("$ref").asText());
+
+        JsonNode option = schemas.path("OptionDefinition");
+        assertTrue(option.path("required").toString().contains("available"));
+        assertTrue(option.path("required").toString().contains("compatibility"));
+        assertEquals("optional_number", option.path("properties").path("kind").path("enum").get(4).asText());
+        assertEquals("unknown", option.path("properties").path("compatibility").path("enum").get(3).asText());
+        assertTrue(option.path("properties").has("versionRanges"));
+    }
+
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {
         for (String status : statuses) {
             JsonNode response = root.path("paths").path(path).path(operation).path("responses").path(status);

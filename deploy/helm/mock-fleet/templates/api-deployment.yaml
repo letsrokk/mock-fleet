@@ -1,4 +1,5 @@
 {{- include "mock-fleet.validateSecurityBoundaries" . }}
+{{- include "mock-fleet.validateWireMockImage" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

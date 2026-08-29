@@ -11,12 +11,23 @@ import java.util.Set;
 public final class WireMockOptionCatalog {
 
     private static final Set<String> SENSITIVE_OPTIONS = Set.of(
+            "--admin-api-basic-auth",
             "--ca-keystore-password",
             "--keystore-password",
             "--key-manager-password",
             "--truststore-password");
 
     private static final List<OptionDefinition> DEFINITIONS = List.of(
+            input("--admin-api-basic-auth", "Admin API basic authentication", "Security", "Requires HTTP Basic authentication for WireMock Admin API calls."),
+            flag("--admin-api-require-https", "Require HTTPS for Admin API", "Security", "Requires HTTPS for WireMock Admin API calls."),
+            flag("--help", "Print help", "Process", "Prints WireMock command-line help and exits."),
+            flag("--version", "Print version", "Process", "Prints the WireMock version and exits."),
+            number("--port", "HTTP port", "Network Listeners", "Sets the HTTP listener port.", 0, 65535),
+            flag("--disable-http", "Disable HTTP", "Network Listeners", "Disables the plain HTTP listener."),
+            number("--https-port", "HTTPS port", "Network Listeners", "Enables HTTPS on the supplied port.", 1, 65535),
+            input("--bind-address", "Bind address", "Network Listeners", "Sets the listener bind address."),
+            input("--root-dir", "Root directory", "Storage", "Sets the root directory containing mappings and body files."),
+            input("--load-resources-from-classpath", "Classpath resources", "Storage", "Loads mappings and body files from a classpath location."),
             flag("--verbose", "Verbose logging", "Logging and Diagnostics", "Log more detail to stdout."),
             flag("--print-all-network-traffic", "Print network traffic", "Logging and Diagnostics", "Print raw inbound and outbound network traffic."),
             flag("--disable-request-logging", "Disable request logging", "Logging and Diagnostics", "Stops requests and responses being sent to the notifier."),
@@ -35,7 +46,7 @@ public final class WireMockOptionCatalog {
             input("--allow-proxy-targets", "Allow proxy targets", "Proxying", "Limits proxying and recording to the supplied targets."),
             input("--deny-proxy-targets", "Deny proxy targets", "Proxying", "Blocks proxying and recording to the supplied targets."),
             number("--proxy-timeout", "Proxy timeout ms", "Proxying", "Sets the proxy request timeout in milliseconds.", 1, 3600000),
-            flag("--proxy-pass-through", "Proxy pass through", "Proxying", "Allows unmatched browser proxy requests to pass through."),
+            select("--proxy-pass-through", "Proxy pass through", "Proxying", "Controls whether unmatched browser proxy requests pass through.", List.of("true", "false")),
             flag("--enable-browser-proxying", "Browser proxying", "Browser Proxy and Certificates", "Runs WireMock as a browser proxy."),
             input("--ca-keystore", "CA keystore", "Browser Proxy and Certificates", "Sets the CA keystore used for generated proxy certificates."),
             input("--ca-keystore-password", "CA keystore password", "Browser Proxy and Certificates", "Sets the CA keystore password."),
@@ -55,17 +66,17 @@ public final class WireMockOptionCatalog {
             flag("--disable-gzip", "Disable gzip", "HTTP Responses", "Prevents response bodies from being gzipped."),
             flag("--enable-stub-cors", "Enable stub CORS", "HTTP Responses", "Adds automatic CORS response headers for stubs."),
             select("--use-chunked-encoding", "Chunked encoding", "HTTP Responses", "Controls when responses use Transfer-Encoding: chunked.", List.of("always", "never", "body_file")),
-            flag("--disable-connection-reuse", "Disable connection reuse", "HTTP Responses", "Disables HTTP connection reuse."),
+            select("--disable-connection-reuse", "Disable connection reuse", "HTTP Responses", "Controls whether HTTP connection reuse is disabled.", List.of("true", "false")),
             flag("--disable-strict-http-headers", "Disable strict headers", "HTTP Responses", "Disables strict HTTP header handling."),
             flag("--global-response-templating", "Global response templating", "Templating", "Renders all response definitions with Handlebars templates."),
             flag("--local-response-templating", "Local response templating", "Templating", "Allows templating only on stub mappings that opt in."),
             flag("--disable-response-templating", "Disable response templating", "Templating", "Disables processing responses with Handlebars templates."),
-            number("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache.", 0, 100000),
-            input("--permitted-system-keys", "Permitted system keys", "Templating", "Sets permitted system property and environment variable names for templates."),
+            optionalNumber("--max-template-cache-entries", "Max template cache entries", "Templating", "Limits compiled template fragments kept in cache.", 0, 100000),
+            optionalInput("--permitted-system-keys", "Permitted system keys", "Templating", "Sets permitted system property and environment variable names for templates."),
             input("--extensions", "Extensions", "Extensions", "Sets extension class names."),
             flag("--disable-extensions-scanning", "Disable extension scanning", "Extensions", "Prevents extensions being scanned and loaded from the classpath."),
             flag("--disable-optimize-xml-factories-loading", "Disable XML factory optimization", "Extensions", "Disables optimized XML factory loading."),
-            flag("--async-response-enabled", "Async responses", "Performance and Jetty", "Enables asynchronous request processing for delayed responses."),
+            select("--async-response-enabled", "Async responses", "Performance and Jetty", "Controls asynchronous request processing for delayed responses.", List.of("true", "false")),
             number("--async-response-threads", "Async response threads", "Performance and Jetty", "Sets the number of background response threads.", 1, 256),
             number("--container-threads", "Container threads", "Performance and Jetty", "Sets the number of Jetty container threads.", 1, 512),
             number("--max-http-client-connections", "Max HTTP client connections", "Performance and Jetty", "Sets the maximum HTTP client connections.", 1, 10000),
@@ -82,15 +93,23 @@ public final class WireMockOptionCatalog {
             number("--websocket-max-text-message-size", "Max text message size", "Webhooks and WebSockets", "Sets the maximum WebSocket text message size in bytes.", 1, 16777216),
             number("--websocket-max-binary-message-size", "Max binary message size", "Webhooks and WebSockets", "Sets the maximum WebSocket binary message size in bytes.", 1, 16777216));
 
-    private static final Map<String, OptionDefinition> BY_NAME = indexDefinitions();
-
     private WireMockOptionCatalog() {
     }
 
     static List<OptionDefinition> definitions() {
-        return DEFINITIONS.stream()
-                .filter(definition -> !SENSITIVE_OPTIONS.contains(definition.name()))
-                .toList();
+        return definitions(new WireMockVersion(3, 13, 2));
+    }
+
+    static List<OptionDefinition> definitions(WireMockVersion version) {
+        return WireMockOptionMatrix.loadDefault().resolve(version).options();
+    }
+
+    static List<OptionDefinition> baseDefinitions() {
+        return DEFINITIONS;
+    }
+
+    static boolean isSensitive(String name) {
+        return SENSITIVE_OPTIONS.contains(name);
     }
 
     static void rejectSensitive(List<String> values) {
@@ -122,9 +141,14 @@ public final class WireMockOptionCatalog {
     }
 
     static List<String> validateAndNormalize(List<String> values) {
+        return validateAndNormalize(values, new WireMockVersion(3, 13, 2));
+    }
+
+    static List<String> validateAndNormalize(List<String> values, WireMockVersion version) {
         if (values == null) {
             return List.of();
         }
+        Map<String, OptionDefinition> byName = indexDefinitions(definitions(version));
         List<String> tokens = tokenize(values);
         List<String> normalized = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
@@ -140,12 +164,12 @@ public final class WireMockOptionCatalog {
                 name = raw.substring(0, equals);
                 inlineValue = raw.substring(equals + 1);
             }
-            OptionDefinition definition = BY_NAME.get(name);
+            OptionDefinition definition = byName.get(name);
             if (definition == null) {
                 throw invalid("Unknown WireMock option: " + name, name);
             }
-            if (SENSITIVE_OPTIONS.contains(name)) {
-                throw invalid("WireMock password option is not supported: " + name, name);
+            if (!definition.available()) {
+                throw invalid("WireMock option requires secure Secret storage and is unavailable: " + name, name);
             }
             if (!seen.add(name)) {
                 throw invalid("Duplicate WireMock option: " + name, name);
@@ -161,10 +185,15 @@ public final class WireMockOptionCatalog {
             if (optionValue == null && index < tokens.size() && !tokens.get(index).startsWith("--")) {
                 optionValue = tokens.get(index++);
             }
+            boolean optional = definition.kind().startsWith("optional_");
+            if (optionValue == null && optional) {
+                continue;
+            }
             if (optionValue == null || optionValue.isBlank()) {
                 throw invalid("WireMock option requires a value: " + name, name);
             }
-            if ("number".equals(definition.kind())) {
+            String valueKind = optional ? definition.kind().substring("optional_".length()) : definition.kind();
+            if ("number".equals(valueKind)) {
                 BigInteger numericValue;
                 try {
                     numericValue = new BigInteger(optionValue);
@@ -176,7 +205,7 @@ public final class WireMockOptionCatalog {
                     throw invalid(integerRangeMessage(definition), name);
                 }
             }
-            if ("select".equals(definition.kind()) && !definition.values().contains(optionValue)) {
+            if ("select".equals(valueKind) && !definition.values().contains(optionValue)) {
                 throw invalid("Unsupported value for " + name + ": " + optionValue, name);
             }
             normalized.add(optionValue);
@@ -260,9 +289,9 @@ public final class WireMockOptionCatalog {
                 + definition.maximum() + ": " + definition.name();
     }
 
-    private static Map<String, OptionDefinition> indexDefinitions() {
+    private static Map<String, OptionDefinition> indexDefinitions(List<OptionDefinition> definitions) {
         Map<String, OptionDefinition> indexed = new LinkedHashMap<>();
-        DEFINITIONS.forEach(definition -> indexed.put(definition.name(), definition));
+        definitions.forEach(definition -> indexed.put(definition.name(), definition));
         return Map.copyOf(indexed);
     }
 
@@ -274,9 +303,19 @@ public final class WireMockOptionCatalog {
         return new OptionDefinition(name, label, "input", group, description, List.of(), null, null);
     }
 
+    private static OptionDefinition optionalInput(String name, String label, String group, String description) {
+        return new OptionDefinition(name, label, "optional_input", group, description, List.of(), null, null);
+    }
+
     private static OptionDefinition number(String name, String label, String group, String description,
                                            int minimum, int maximum) {
         return new OptionDefinition(name, label, "number", group, description, List.of(), minimum, maximum);
+    }
+
+    private static OptionDefinition optionalNumber(String name, String label, String group, String description,
+                                                   int minimum, int maximum) {
+        return new OptionDefinition(name, label, "optional_number", group, description,
+                List.of(), minimum, maximum);
     }
 
     private static OptionDefinition select(String name, String label, String group, String description,
@@ -285,10 +324,22 @@ public final class WireMockOptionCatalog {
     }
 
     public record OptionDefinition(String name, String label, String kind, String group, String description,
-                                   List<String> values, Integer minimum, Integer maximum) {
+                                   List<String> values, Integer minimum, Integer maximum,
+                                   boolean available, String unavailableReason, String compatibility,
+                                   String compatibilityMessage, List<VersionRange> versionRanges) {
+        public OptionDefinition(String name, String label, String kind, String group, String description,
+                                List<String> values, Integer minimum, Integer maximum) {
+            this(name, label, kind, group, description, values, minimum, maximum,
+                    true, null, "supported", null, List.of());
+        }
+
         public OptionDefinition(String name, String label, String kind, String group, String description,
                                 List<String> values) {
-            this(name, label, kind, group, description, values, null, null);
+            this(name, label, kind, group, description, values, null, null,
+                    true, null, "supported", null, List.of());
         }
+    }
+
+    public record VersionRange(String minimumVersion, String maximumVersion) {
     }
 }

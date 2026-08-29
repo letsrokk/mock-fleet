@@ -73,13 +73,17 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 
 ## Configuration
 
+`list_option_definitions` returns the Fleet API's pinned `wireMock` version metadata and complete resolved option catalog unchanged. Compatibility warnings are advisory. An option with `available=false` is a hard security restriction and cannot be saved. The five direct credential options remain unavailable until Mock Fleet provides Secret-backed storage.
+
+MCP tool discovery uses the configured WireMock version. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls apply the same gates against the active mock's reported runtime version, so a configured/runtime mismatch fails with the tool name and required version.
+
 `update_mock_config` takes the complete mock-specific option override. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
 
 ```json
 {
   "mockId": "orders",
   "resourceVersion": "42",
-  "options": ["--verbose --filename-template 'orders {{request.method}}'"],
+  "options": ["--verbose --filename-template '{{{method}}}-{{{url}}}.json'"],
   "resources": {"requests": {}, "limits": {}},
   "applyMode": "restartActive"
 }

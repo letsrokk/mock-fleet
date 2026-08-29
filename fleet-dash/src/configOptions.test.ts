@@ -4,6 +4,8 @@ import {
   emptyUserConfig,
   hasOption,
   numberInputAttributes,
+  optionCompatibilityWarning,
+  optionIsDisabled,
   optionsFromDraft,
   overrideOptions,
   resourcesFromDraft,
@@ -20,7 +22,12 @@ const definitions: OptionDefinition[] = [
     description: "Log more detail to stdout.",
     values: [],
     minimum: null,
-    maximum: null
+    maximum: null,
+    available: true,
+    unavailableReason: null,
+    compatibility: "supported",
+    compatibilityMessage: null,
+    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
   },
   {
     name: "--max-request-journal-entries",
@@ -30,7 +37,12 @@ const definitions: OptionDefinition[] = [
     description: "Sets the maximum number of request journal entries.",
     values: [],
     minimum: 0,
-    maximum: 100000
+    maximum: 100000,
+    available: true,
+    unavailableReason: null,
+    compatibility: "supported",
+    compatibilityMessage: null,
+    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
   },
   {
     name: "--use-chunked-encoding",
@@ -40,7 +52,12 @@ const definitions: OptionDefinition[] = [
     description: "Controls when responses use Transfer-Encoding: chunked.",
     values: ["always", "never", "body_file"],
     minimum: null,
-    maximum: null
+    maximum: null,
+    available: true,
+    unavailableReason: null,
+    compatibility: "supported",
+    compatibilityMessage: null,
+    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
   },
   {
     name: "--filename-template",
@@ -50,9 +67,23 @@ const definitions: OptionDefinition[] = [
     description: "Sets the Handlebars filename template for recorded mappings.",
     values: [],
     minimum: null,
-    maximum: null
+    maximum: null,
+    available: true,
+    unavailableReason: null,
+    compatibility: "supported",
+    compatibilityMessage: null,
+    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
   }
 ];
+
+const compatibilityDefinition: OptionDefinition = {
+  ...definitions[0],
+  available: true,
+  unavailableReason: null,
+  compatibility: "unsupported",
+  compatibilityMessage: "Introduced in WireMock 3.7.0.",
+  versionRanges: [{ minimumVersion: "3.7.0", maximumVersion: null }]
+};
 
 const emptyResources = { requests: {}, limits: {} };
 
@@ -64,6 +95,43 @@ describe("config option helpers", () => {
   it("uses API-provided integer bounds for numeric inputs", () => {
     expect(numberInputAttributes(definitions[1])).toEqual({ min: 0, max: 100000, step: 1 });
     expect(numberInputAttributes(definitions[0])).toEqual({});
+  });
+
+  it("treats compatibility as advisory and availability as enforced", () => {
+    expect(optionCompatibilityWarning(compatibilityDefinition)).toBe("Introduced in WireMock 3.7.0.");
+    expect(optionIsDisabled(compatibilityDefinition)).toBe(false);
+    expect(optionIsDisabled({
+      ...compatibilityDefinition,
+      available: false,
+      unavailableReason: "SECRET_STORAGE_REQUIRED"
+    })).toBe(true);
+  });
+
+  it("uses numeric attributes for optional numeric inputs", () => {
+    expect(numberInputAttributes({
+      ...definitions[1],
+      kind: "optional_number"
+    })).toEqual({ min: 0, max: 100000, step: 1 });
+  });
+
+  it("round trips optional arguments with and without values", () => {
+    const optionalDefinitions: OptionDefinition[] = [{
+      ...definitions[1],
+      name: "--max-template-cache-entries",
+      kind: "optional_number"
+    }];
+
+    const withoutValue = draftFromConfig({
+      options: ["--max-template-cache-entries"],
+      resources: emptyResources
+    }, optionalDefinitions);
+    expect(withoutValue.flags["--max-template-cache-entries"]).toBe(true);
+    expect(optionsFromDraft(withoutValue, optionalDefinitions)).toEqual(["--max-template-cache-entries"]);
+
+    withoutValue.values["--max-template-cache-entries"] = "100";
+    expect(optionsFromDraft(withoutValue, optionalDefinitions)).toEqual([
+      "--max-template-cache-entries", "100"
+    ]);
   });
 
   it("keeps clearing inherited resources as an explicit empty override", () => {
@@ -119,13 +187,13 @@ describe("config option helpers", () => {
 
   it("does not split separate value tokens that contain spaces", () => {
     const config: ConfigData = {
-      options: ["--filename-template", "{{request.method}} {{request.url}}"],
+      options: ["--filename-template", "{{{method}}}-{{{url}}}.json"],
       resources: emptyResources
     };
 
     const draft = draftFromConfig(config, definitions);
 
-    expect(draft.values["--filename-template"]).toBe("{{request.method}} {{request.url}}");
+    expect(draft.values["--filename-template"]).toBe("{{{method}}}-{{{url}}}.json");
   });
 
   it("compares equals syntax with split value syntax", () => {
@@ -166,13 +234,13 @@ describe("config option helpers", () => {
     expect(optionsFromDraft({
       flags: {},
       values: {},
-      rawArgs: "--filename-template 'orders {{request.method}}'",
+      rawArgs: "--filename-template '{{{method}}}-{{{url}}}.json'",
       requests: {},
       limits: {}
     }, definitions, {
       options: ["--verbose"],
       resources: emptyResources
-    })).toEqual(["--filename-template 'orders {{request.method}}'"]);
+    })).toEqual(["--filename-template '{{{method}}}-{{{url}}}.json'"]);
   });
 
   it("does not hide duplicate options from server validation", () => {

@@ -78,7 +78,10 @@ class McpConfigContractTest {
 
         JsonNode metadata = structured(callTool("list_option_definitions", "{}"));
         assertEquals("--verbose", metadata.path("optionDefinitions").path(0).path("name").asText());
-        assertEquals(1, metadata.size());
+        assertEquals("3.13.2", metadata.path("wireMock").path("version").asText());
+        assertEquals("supported",
+                metadata.path("optionDefinitions").path(0).path("compatibility").asText());
+        assertEquals(2, metadata.size());
     }
 
     @Test
@@ -285,7 +288,8 @@ class McpConfigContractTest {
                 """ : "[]";
         return mapper.readTree("""
                 {"resourceVersion":"42","mockIds":%s,"savedMockIds":%s,"mocks":%s,
-                 "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging","description":"Log details","values":[]}],
+                 "wireMock":{"configuredImage":"wiremock/wiremock:3.13.2-2","version":"3.13.2","minimumSupportedVersion":"3.0.0","maximumResearchedVersion":"3.13.2","rangeStatus":"supported"},
+                 "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging","description":"Log details","values":[],"minimum":null,"maximum":null,"available":true,"unavailableReason":null,"compatibility":"supported","compatibilityMessage":null,"versionRanges":[{"minimumVersion":"3.0.0","maximumVersion":null}]}],
                  "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
                 """.formatted(includeCatalog ? "[\"catalog\"]" : "[]",
                         includeCatalog ? "[\"catalog\"]" : "[]", mocks));

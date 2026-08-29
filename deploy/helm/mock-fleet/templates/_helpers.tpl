@@ -190,9 +190,6 @@ app.kubernetes.io/component: mcp
 {{- if ne (int .Values.fleet.mcp.replicas) 1 -}}
 {{- fail "fleet.mcp.replicas must be 1 because the stable Streamable HTTP transport keeps session state" -}}
 {{- end -}}
-{{- if not (regexMatch "^.+:3\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9][A-Za-z0-9.-]*)?(@sha256:[a-fA-F0-9]{64})?$" .Values.wiremock.containerImage) -}}
-{{- fail "wiremock.containerImage must use a parseable pinned WireMock 3.x.y tag when fleet.mcp.enabled=true" -}}
-{{- end -}}
 {{- $mode := include "mock-fleet.mcpRoutingMode" . -}}
 {{- if not (has $mode (list "PATH" "HOST")) -}}
 {{- fail "fleet.mcp.routing.mode must be PATH or HOST (or empty to inherit fleet.proxy.routing.mode)" -}}
@@ -203,6 +200,12 @@ app.kubernetes.io/component: mcp
 {{- if or (lt (int .Values.fleet.mcp.defaultPageSize) 1) (gt (int .Values.fleet.mcp.defaultPageSize) (int .Values.fleet.mcp.maxPageSize)) (gt (int .Values.fleet.mcp.maxPageSize) 200) -}}
 {{- fail "fleet.mcp page sizes must satisfy 1 <= defaultPageSize <= maxPageSize <= 200" -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.validateWireMockImage" -}}
+{{- if not (regexMatch "^.+:3\\.[0-9]+\\.[0-9]+(-[0-9]+)?(@sha256:[a-fA-F0-9]{64})?$" .Values.wiremock.containerImage) -}}
+{{- fail "wiremock.containerImage must use an exact WireMock 3.x.y tag with an optional numeric image revision" -}}
 {{- end -}}
 {{- end -}}
 

@@ -76,7 +76,7 @@ class PodFactorySecurityTest {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockFleetConfig.StorageConfig storage = mock(MockFleetConfig.StorageConfig.class);
         when(config.wiremockContainerName()).thenReturn("wiremock");
-        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.13.2-2");
         when(config.wiremockImagePullPolicy()).thenReturn("IfNotPresent");
         when(config.wiremockTerminationGracePeriodSeconds()).thenReturn(5L);
         when(config.wiremockServiceAccountName()).thenReturn(Optional.of("wiremock-workload"));

@@ -332,16 +332,41 @@ components:
           $ref: "#/components/schemas/ResolvedConfigData"
     OptionDefinition:
       type: object
-      required: [name, label, kind, group, description, values]
+      required: [name, label, kind, group, description, values, available, compatibility, versionRanges]
       properties:
         name: { type: string }
         label: { type: string }
-        kind: { type: string, enum: [flag, input, number, select] }
+        kind: { type: string, enum: [flag, input, number, select, optional_number, optional_input] }
         group: { type: string }
         description: { type: string }
         values:
           type: array
           items: { type: string }
+        minimum: { type: [integer, "null"] }
+        maximum: { type: [integer, "null"] }
+        available: { type: boolean }
+        unavailableReason: { type: [string, "null"], enum: [SECRET_STORAGE_REQUIRED, null] }
+        compatibility: { type: string, enum: [supported, unsupported, known_broken, unknown] }
+        compatibilityMessage: { type: [string, "null"] }
+        versionRanges:
+          type: array
+          items:
+            $ref: "#/components/schemas/WireMockOptionVersionRange"
+    WireMockOptionVersionRange:
+      type: object
+      required: [minimumVersion]
+      properties:
+        minimumVersion: { type: string }
+        maximumVersion: { type: [string, "null"] }
+    WireMockVersionView:
+      type: object
+      required: [configuredImage, version, minimumSupportedVersion, maximumResearchedVersion, rangeStatus]
+      properties:
+        configuredImage: { type: string }
+        version: { type: string }
+        minimumSupportedVersion: { type: string }
+        maximumResearchedVersion: { type: string }
+        rangeStatus: { type: string, enum: [supported, newer_unresearched] }
     RoutingView:
       type: object
       required: [mode, host]
@@ -350,7 +375,7 @@ components:
         host: { type: string }
     ConfigView:
       type: object
-      required: [resourceVersion, mockIds, savedMockIds, mocks, options, routing]
+      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, options, routing]
       properties:
         resourceVersion: { type: [string, "null"] }
         mockIds:
@@ -363,6 +388,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MockConfigView"
+        wireMock:
+          $ref: "#/components/schemas/WireMockVersionView"
         options:
           type: array
           items:

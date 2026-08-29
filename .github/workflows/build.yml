@@ -141,6 +141,9 @@ jobs:
       - name: Build MCP
         run: ./fleet-api/mvnw -B -f fleet-mcp/pom.xml package -Dquarkus.container-image.build=false
 
+      - name: Verify WireMock 3.x option matrix
+        run: fleet-api/tests/verify-wiremock-option-matrix.sh
+
       - name: Test supported WireMock Admin contracts
         run: fleet-mcp/tests/wiremock-admin-contract.sh
 

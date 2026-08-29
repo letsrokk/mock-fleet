@@ -26,7 +26,8 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "resourceVersion", nullableString(), "mock", openObject(), "routing", openObject()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
-                    "optionDefinitions", array(openObject())), "optionDefinitions");
+                    "wireMock", openObject(), "optionDefinitions", array(openObject())),
+                    "wireMock", "optionDefinitions");
             case "UpdateMockConfig" -> strict(properties(
                     "resourceVersion", nullableString(), "mock", openObject(), "apply", openObject()),
                     "resourceVersion", "mock", "apply");
