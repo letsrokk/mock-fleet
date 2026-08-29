@@ -5,7 +5,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
@@ -30,7 +29,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 @ApplicationScoped
 public class MappingsService {
@@ -52,29 +50,40 @@ public class MappingsService {
             return new MappingsView(true, List.of(), null, routing);
         }
 
-        try (Stream<Path> children = Files.list(root)) {
-            List<Path> mockDirectories = children
-                    .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
-                    .toList();
+        TraversalBudget budget = new TraversalBudget(config.mappings().maxDepth(), config.mappings().maxEntries());
+        try (DirectoryStream<Path> children = Files.newDirectoryStream(root)) {
             List<String> mockIds = new ArrayList<>();
-            for (Path directory : mockDirectories) {
-                String mockId = directory.getFileName().toString();
-                if (VALID_MOCK_ID.matcher(mockId).matches() && containsMappingFile(directory)) {
+            for (Path child : children) {
+                budget.visit(0);
+                BasicFileAttributes attributes = Files.readAttributes(child, BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                String mockId = child.getFileName().toString();
+                if (attributes.isDirectory() && VALID_MOCK_ID.matcher(mockId).matches()
+                        && containsMappingFile(child, attributes, budget)) {
                     mockIds.add(mockId);
                 }
             }
             mockIds.sort(String::compareTo);
             return new MappingsView(true, mockIds, null, routing);
+        } catch (TraversalBudget.LimitExceeded e) {
+            throw traversalLimit(e);
+        } catch (DirectoryIteratorException e) {
+            return new MappingsView(true, List.of(),
+                    "Unable to list mappings root: " + ioErrorMessage(e.getCause()), routing);
         } catch (IOException e) {
             return new MappingsView(true, List.of(), "Unable to list mappings root: " + ioErrorMessage(e), routing);
         }
     }
 
-    private boolean containsMappingFile(Path directory) throws IOException {
-        try (Stream<Path> paths = Files.walk(directory)) {
-            return paths.anyMatch(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS));
-        } catch (UncheckedIOException e) {
-            throw e.getCause();
+    private boolean containsMappingFile(Path directory, BasicFileAttributes attributes,
+                                        TraversalBudget budget) throws IOException {
+        TraversalEntry root = entry(directory, "", 0, attributes);
+        try (SecureTraversalSession session = openSecureRoot(root)) {
+            List<TraversalEntry> manifest = discover(session, root, budget, true);
+            validateManifest(session, manifest);
+            return manifest.stream().anyMatch(entry -> entry.identity().regularFile());
+        } catch (TraversalStorageException e) {
+            throw e.ioException();
         }
     }
 
@@ -242,8 +251,15 @@ public class MappingsService {
 
     private List<TraversalEntry> discover(SecureTraversalSession session, TraversalEntry root) {
         TraversalBudget budget = new TraversalBudget(config.mappings().maxDepth(), config.mappings().maxEntries());
+        return discover(session, root, budget, false);
+    }
+
+    private List<TraversalEntry> discover(SecureTraversalSession session, TraversalEntry root,
+                                          TraversalBudget budget, boolean rootAlreadyVisited) {
         List<TraversalEntry> manifest = new ArrayList<>();
-        budget.visit(0);
+        if (!rootAlreadyVisited) {
+            budget.visit(0);
+        }
         manifest.add(root);
         discoverSecure(root.path(), root, session.root(), budget, manifest);
         return List.copyOf(manifest);
@@ -545,6 +561,12 @@ public class MappingsService {
                 "Mappings traversal exceeds configured " + e.limit() + " of " + e.maximum() + ".",
                 false, false,
                 Map.of("mockId", mockId, "limit", e.limit(), "maximum", e.maximum()));
+    }
+
+    private ApiException traversalLimit(TraversalBudget.LimitExceeded e) {
+        return error(Response.Status.BAD_REQUEST, "MAPPINGS_TRAVERSAL_LIMIT",
+                "Mappings traversal exceeds configured " + e.limit() + " of " + e.maximum() + ".",
+                false, false, Map.of("limit", e.limit(), "maximum", e.maximum()));
     }
 
     private ApiException invalidMappingRoot(String mockId, boolean includePath) {

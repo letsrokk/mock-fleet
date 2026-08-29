@@ -96,6 +96,44 @@ class MappingsServiceTest {
     }
 
     @Test
+    void rejectsMappingsIndexBeyondTheSharedDepthBudget() throws IOException {
+        createDirectoryChain("demo", 3);
+        MappingsService service = service(true, 2, 100);
+
+        ApiException exception = assertThrows(ApiException.class, service::view);
+
+        assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
+                Map.of("limit", "maxDepth", "maximum", 2));
+    }
+
+    @Test
+    void rejectsMappingsIndexBeyondOneRequestWideEntryBudget() throws IOException {
+        for (String mockId : List.of("alpha", "beta", "gamma")) {
+            Path root = Files.createDirectories(mappingsRoot.resolve(mockId));
+            Files.writeString(root.resolve("mapping.json"), "{}");
+        }
+        MappingsService service = service(true, 10, 5);
+
+        ApiException exception = assertThrows(ApiException.class, service::view);
+
+        assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
+                Map.of("limit", "maxEntries", "maximum", 5));
+    }
+
+    @Test
+    void mappingsIndexAcceptsExactlyOneRequestWideEntryBudget() throws IOException {
+        for (String mockId : List.of("alpha", "beta")) {
+            Path root = Files.createDirectories(mappingsRoot.resolve(mockId));
+            Files.writeString(root.resolve("mapping.json"), "{}");
+        }
+        MappingsService service = service(true, 10, 4);
+
+        MappingsService.MappingsView view = service.view();
+
+        assertEquals(List.of("alpha", "beta"), view.mockIds());
+    }
+
+    @Test
     void returnsSortedFileTree() throws IOException {
         Files.createDirectories(mappingsRoot.resolve("demo/nested"));
         Files.writeString(mappingsRoot.resolve("demo/z.json"), "{}");
