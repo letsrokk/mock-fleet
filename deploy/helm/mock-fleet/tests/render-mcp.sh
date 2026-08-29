@@ -377,6 +377,25 @@ for image in wiremock/wiremock:3.0.0 wiremock/wiremock:3.13.2-2 wiremock/wiremoc
     --set-json "wiremock.supportedImageTags=[\"${version}\"]" >/dev/null
 done
 
+revision_mismatch_render="$(helm template revision-mismatch "${chart_dir}" \
+  --set wiremock.containerImage=registry.example.test:5000/team/wiremock:3.13.2-7 \
+  --set-json 'wiremock.supportedImageTags=["3.13.2-2","3.12.1-2"]' \
+  --show-only templates/wiremock-version-catalog-configmap.yaml)"
+for fragment in \
+  'defaultVersion: 3.13.2' \
+  'selectable.3.13.2: registry.example.test:5000/team/wiremock:3.13.2-7' \
+  'selectable.3.12.1: registry.example.test:5000/team/wiremock:3.12.1-2'; do
+  if ! grep -Fq "${fragment}" <<<"${revision_mismatch_render}"; then
+    echo "Version catalog must preserve the exact configured default image: ${fragment}" >&2
+    exit 1
+  fi
+done
+if grep -Fq 'selectable.3.13.2: registry.example.test:5000/team/wiremock:3.13.2-2' \
+    <<<"${revision_mismatch_render}"; then
+  echo "Supported tags must not replace the configured default image revision" >&2
+  exit 1
+fi
+
 
 invalid_catalog_values=(
   '--set-json wiremock.supportedImageTags=[]'

@@ -14,7 +14,9 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,7 +33,60 @@ class WireMockVersionCatalogServiceTest {
         assertEquals("41", fixture.service.catalog().resourceVersion());
         verify(fixture.configMaps, times(2)).inNamespace("testing");
         verify(fixture.namespaced, times(2)).withName("catalog-name");
-        verify(fixture.resource).watch(any(Watcher.class));
+        verify(fixture.resource, times(2)).get();
+        verify(fixture.resource).watch(resourceVersion("41"), any(Watcher.class));
+    }
+
+    @Test
+    void resyncsAnUpdateWrittenBetweenInitialLoadAndWatchStartup() {
+        ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
+        ConfigMap updated = catalog("42", "3.12.1", "wiremock/wiremock:3.12.1-2");
+        Fixture fixture = fixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, updated);
+
+        fixture.service.loadCatalog();
+
+        assertEquals("42", fixture.service.catalog().resourceVersion());
+        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+    }
+
+    @Test
+    void resyncsAnUpdateWrittenDuringWatchDowntimeBeforeRestartingTheWatch() {
+        ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
+        ConfigMap updated = catalog("42", "3.12.1", "wiremock/wiremock:3.12.1-2");
+        Fixture fixture = fixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, updated);
+        fixture.service.loadCatalog();
+
+        fixture.service.startWatch();
+
+        assertEquals("42", fixture.service.catalog().resourceVersion());
+        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+    }
+
+    @Test
+    void restartResyncKeepsTheLastValidSnapshotWhenTheCurrentCatalogIsMissingOrInvalid() {
+        ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
+        ConfigMap invalid = catalog("42", "3.13.2", "wiremock/wiremock:3.12.1-2");
+        Fixture fixture = fixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, null, invalid);
+        fixture.service.loadCatalog();
+
+        fixture.service.startWatch();
+        fixture.service.startWatch();
+
+        assertEquals("41", fixture.service.catalog().resourceVersion());
+        verify(fixture.resource, times(4)).get();
+        verify(fixture.resource, times(3)).watch(resourceVersion("41"), any(Watcher.class));
+    }
+
+    @Test
+    void initialLoadRemainsFailClosedForMissingOrInvalidCatalogs() {
+        Fixture missing = fixture(null);
+        Fixture invalid = fixture(catalog("41", "3.13.2", "wiremock/wiremock:3.12.1-2"));
+
+        assertThrows(IllegalStateException.class, missing.service::loadCatalog);
+        assertThrows(IllegalArgumentException.class, invalid.service::loadCatalog);
     }
 
     @Test
@@ -92,6 +147,10 @@ class WireMockVersionCatalogServiceTest {
                         "defaultVersion", version,
                         "selectable." + version, image))
                 .build();
+    }
+
+    private io.fabric8.kubernetes.api.model.ListOptions resourceVersion(String resourceVersion) {
+        return argThat(options -> resourceVersion.equals(options.getResourceVersion()));
     }
 
     private record Fixture(WireMockVersionCatalogService service,

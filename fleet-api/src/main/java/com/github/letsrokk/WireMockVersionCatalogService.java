@@ -1,10 +1,12 @@
 package com.github.letsrokk;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
+import io.fabric8.kubernetes.client.dsl.Resource;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -64,12 +66,29 @@ public class WireMockVersionCatalogService {
         if (shuttingDown) {
             return;
         }
+        Resource<ConfigMap> resource = catalogResource();
+        resyncCatalog(resource);
         try {
-            watch = catalogResource().watch(catalogWatcher());
+            watch = resource.watch(new ListOptionsBuilder()
+                    .withResourceVersion(catalog().resourceVersion())
+                    .build(), catalogWatcher());
             watchRestartAttempts = 0;
         } catch (RuntimeException error) {
             LOG.warnf(error, "Failed to start WireMock version catalog watch.");
             scheduleWatchRestart();
+        }
+    }
+
+    private void resyncCatalog(Resource<ConfigMap> resource) {
+        try {
+            ConfigMap current = resource.get();
+            if (current == null) {
+                LOG.warn("WireMock version catalog is missing during watch resync; retaining the last valid snapshot.");
+                return;
+            }
+            catalog = parser.parse(current);
+        } catch (RuntimeException error) {
+            LOG.warn("WireMock version catalog resync failed; retaining the last valid snapshot.", error);
         }
     }
 
@@ -112,7 +131,7 @@ public class WireMockVersionCatalogService {
         watchExecutor.schedule(this::startWatch, delaySeconds, TimeUnit.SECONDS);
     }
 
-    private io.fabric8.kubernetes.client.dsl.Resource<ConfigMap> catalogResource() {
+    private Resource<ConfigMap> catalogResource() {
         String name = config.wiremockVersionCatalogConfigMapName()
                 .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new IllegalStateException("WireMock version catalog ConfigMap name is required."));
