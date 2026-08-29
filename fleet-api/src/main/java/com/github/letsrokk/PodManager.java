@@ -462,9 +462,14 @@ public class PodManager {
             pod.getMetadata().setGenerateName(null);
         }
 
-        pod = kubernetesClient.resource(pod)
-                .inNamespace(namespace)
-                .create();
+        var podResource = kubernetesClient.resource(pod).inNamespace(namespace);
+        try {
+            pod = attemptId == null || mockCapacity == null
+                    ? podResource.create()
+                    : mockCapacity.withReservationFence(mockId, attemptId, podResource::create);
+        } catch (MockCapacity.ReservationOwnershipLostException lostOwnership) {
+            throw new PodCreationException("Pod startup was superseded or stopped.");
+        }
         if (attemptId == null) {
             podState.markStartupPodName(mockId, pod.getMetadata().getName());
         } else if (!podState.isCurrentStartingAttempt(mockId, attemptId)) {

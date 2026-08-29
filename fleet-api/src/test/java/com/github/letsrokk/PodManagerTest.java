@@ -1423,6 +1423,133 @@ class PodManagerTest {
     }
 
     @Test
+    void supersededAttemptPausedAfterPodNamePublicationCannotCallKubernetesCreate() throws Exception {
+        HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-race-");
+        MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        CountDownLatch podNamePublished = new CountDownLatch(1);
+        CountDownLatch resumeCreate = new CountDownLatch(1);
+        CountDownLatch taskFinished = new CountDownLatch(1);
+        PodState podState = new PodState(hazelcast) {
+            @Override
+            public boolean markStartupPodName(String mockId, String attemptId, String podName) {
+                boolean marked = super.markStartupPodName(mockId, attemptId, podName);
+                if (marked) {
+                    podNamePublished.countDown();
+                    try {
+                        assertTrue(resumeCreate.await(1, TimeUnit.SECONDS));
+                    } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(error);
+                    }
+                }
+                return marked;
+            }
+
+            @Override
+            public void failStart(String mockId, String attemptId, RuntimeException exception) {
+                try {
+                    super.failStart(mockId, attemptId, exception);
+                } finally {
+                    taskFinished.countDown();
+                }
+            }
+        };
+        podState.mockCapacity = capacity;
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodFactory podFactory = mock(PodFactory.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
+        AtomicInteger createCalls = new AtomicInteger();
+        ExecutorService startExecutor = Executors.newSingleThreadExecutor();
+        PodManager podManager = new PodManager() {
+            @Override
+            boolean deletePod(Pod pod, String mockId) {
+                return true;
+            }
+        };
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podFactory = podFactory;
+        podManager.podState = podState;
+        podManager.wireMockOptions = wireMockOptions;
+        podManager.config = config;
+        podManager.mockCapacity = capacity;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        podManager.startExecutor = startExecutor;
+        Pod podSpec = podWithGenerateName("mock-fleet-demo-");
+        when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null)).thenReturn(podSpec);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
+        when(podHandle.inNamespace("test")).thenReturn(podHandle);
+        when(podHandle.create()).thenAnswer(invocation -> {
+            createCalls.incrementAndGet();
+            return managedPod(podSpec.getMetadata().getName(), "demo");
+        });
+
+        try {
+            podManager.startMock("demo");
+            assertTrue(podNamePublished.await(1, TimeUnit.SECONDS));
+            podState.stop("demo");
+            resumeCreate.countDown();
+            assertTrue(taskFinished.await(1, TimeUnit.SECONDS));
+
+            assertEquals(0, createCalls.get());
+        } finally {
+            resumeCreate.countDown();
+            startExecutor.shutdownNow();
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
+    void spawnPodRejectsOwnershipLossAtCreateBoundaryWithoutCallingKubernetes() {
+        HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-lost-");
+        MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        PodState.StartClaim claim = podState.claimStart("demo", System.currentTimeMillis(), 2_000L);
+        capacity.release("demo", claim.lifecycle().attemptId());
+        AtomicInteger createCalls = new AtomicInteger();
+        PodManager podManager = createBoundaryPodManager(config, capacity, podState, createCalls);
+
+        try {
+            assertThrows(PodCreationException.class,
+                    () -> podManager.spawnPod("demo", claim.lifecycle().attemptId()));
+            assertEquals(0, createCalls.get());
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
+    void spawnPodCallsKubernetesOnceForTheCurrentReservationOwner() {
+        HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-owner-");
+        MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
+        MockCapacity capacity = new MockCapacity(hazelcast, config);
+        PodState podState = new PodState(hazelcast);
+        podState.mockCapacity = capacity;
+        PodState.StartClaim claim = podState.claimStart("demo", System.currentTimeMillis(), 2_000L);
+        AtomicInteger createCalls = new AtomicInteger();
+        PodManager podManager = createBoundaryPodManager(config, capacity, podState, createCalls);
+
+        try {
+            MockPodRef pod = podManager.spawnPod("demo", claim.lifecycle().attemptId());
+
+            assertEquals(1, createCalls.get());
+            assertEquals("10.0.0.1", pod.podIp());
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
     void spawnPodWaitsForSupersededCreatedPodRemoval() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         PodFactory podFactory = mock(PodFactory.class);
@@ -1824,6 +1951,60 @@ class PodManagerTest {
                     .addToLabels(PodFactory.LABEL_MOCK_ID, mockId)
                 .endMetadata()
                 .build();
+    }
+
+    private HazelcastInstance newTestHazelcast(String clusterPrefix) {
+        Config hazelcastConfig = new Config();
+        hazelcastConfig.setClusterName(clusterPrefix + System.nanoTime());
+        hazelcastConfig.setProperty("hazelcast.logging.type", "none");
+        hazelcastConfig.setProperty("hazelcast.phone.home.enabled", "false");
+        hazelcastConfig.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        hazelcastConfig.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        hazelcastConfig.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        return Hazelcast.newHazelcastInstance(hazelcastConfig);
+    }
+
+    private MockFleetConfig capacityTestConfig(Duration podTimeout) {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        when(config.maxActiveMocks()).thenReturn(1);
+        when(config.maxConcurrentStarts()).thenReturn(1);
+        when(config.queuedStartCapacity()).thenReturn(1);
+        when(config.podCreationTimeout()).thenReturn(podTimeout);
+        when(config.wiremockPodNamePrefix()).thenReturn("mock-fleet");
+        return config;
+    }
+
+    private PodManager createBoundaryPodManager(MockFleetConfig config, MockCapacity capacity,
+                                                PodState podState, AtomicInteger createCalls) {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        PodFactory podFactory = mock(PodFactory.class);
+        WireMockOptions wireMockOptions = mock(WireMockOptions.class);
+        @SuppressWarnings("unchecked")
+        NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
+        PodManager podManager = new PodManager();
+        podManager.kubernetesClient = kubernetesClient;
+        podManager.podFactory = podFactory;
+        podManager.podState = podState;
+        podManager.wireMockOptions = wireMockOptions;
+        podManager.config = config;
+        podManager.mockCapacity = capacity;
+        podManager.podCreationTimeout = Duration.ofSeconds(1);
+        Pod podSpec = podWithGenerateName("mock-fleet-demo-");
+        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of());
+        when(podFactory.createPodSpec("mock-fleet-demo-", "demo", List.of(), null)).thenReturn(podSpec);
+        when(kubernetesClient.getNamespace()).thenReturn("test");
+        when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
+        when(podHandle.inNamespace("test")).thenReturn(podHandle);
+        when(podHandle.create()).thenAnswer(invocation -> {
+            createCalls.incrementAndGet();
+            String podName = podSpec.getMetadata().getName();
+            return pod(podName, "Running", true);
+        });
+        when(kubernetesClient.resource(any(Pod.class))).thenReturn(podHandle);
+        when(podHandle.get()).thenAnswer(invocation -> pod(
+                podSpec.getMetadata().getName(), "Running", true));
+        return podManager;
     }
 
     private ResourceRequirements resources(String requestCpu, String requestMemory, String limitCpu, String limitMemory) {

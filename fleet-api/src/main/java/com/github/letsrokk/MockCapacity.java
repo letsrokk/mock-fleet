@@ -157,6 +157,22 @@ public class MockCapacity {
         });
     }
 
+    <T> T withReservationFence(String mockId, String attemptId, Supplier<T> action) {
+        Objects.requireNonNull(mockId, "mockId");
+        Objects.requireNonNull(attemptId, "attemptId");
+        Objects.requireNonNull(action, "action");
+        return withCapacityLock(() -> {
+            long now = System.currentTimeMillis();
+            reconcileExpiredReservations(now);
+            if (!renewLocked(mockId, attemptId, now)) {
+                throw new ReservationOwnershipLostException();
+            }
+            T result = action.get();
+            renewLocked(mockId, attemptId, System.currentTimeMillis());
+            return result;
+        });
+    }
+
     <T> T withCapacityLock(Supplier<T> action) {
         reservations.lock(CAPACITY_LOCK_KEY);
         try {
@@ -260,6 +276,11 @@ public class MockCapacity {
 
     record ReservationLiveness(String attemptId, String ownerId,
                                long renewedAtEpochMillis) implements Serializable {
+        @Serial
+        private static final long serialVersionUID = 0L;
+    }
+
+    static final class ReservationOwnershipLostException extends RuntimeException {
         @Serial
         private static final long serialVersionUID = 0L;
     }
