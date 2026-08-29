@@ -13,6 +13,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -136,7 +137,7 @@ class OpenApiResourceTest {
     }
 
     @Test
-    void documentsWireMockVersionAndOptionCompatibilityMetadata() throws Exception {
+    void documentsConfiguredWireMockVersionMetadata() throws Exception {
         String document = given()
                 .queryParam("format", "json")
         .when()
@@ -151,12 +152,41 @@ class OpenApiResourceTest {
         assertEquals("#/components/schemas/WireMockVersionView",
                 config.path("properties").path("wireMock").path("$ref").asText());
 
-        JsonNode option = schemas.path("OptionDefinition");
-        assertTrue(option.path("required").toString().contains("available"));
-        assertTrue(option.path("required").toString().contains("compatibility"));
-        assertEquals("optional_number", option.path("properties").path("kind").path("enum").get(4).asText());
-        assertEquals("unknown", option.path("properties").path("compatibility").path("enum").get(3).asText());
-        assertTrue(option.path("properties").has("versionRanges"));
+    }
+
+    @Test
+    void documentsTheVersionedPublicOptionCatalog() throws Exception {
+        JsonNode root = new ObjectMapper().readTree(given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString());
+
+        JsonNode operation = root.path("paths").path("/__fleet/api/config/options").path("get");
+        assertEquals("getWireMockOptionCatalog", operation.path("operationId").asText());
+        assertEquals("version", operation.path("parameters").get(0).path("name").asText());
+        assertEquals("#/components/schemas/OptionCatalogView", operation.path("responses").path("200")
+                .path("content").path("application/json").path("schema").path("$ref").asText());
+        assertEquals("#/components/responses/ApiError", operation.path("responses").path("400")
+                .path("$ref").asText());
+
+        JsonNode config = root.path("components").path("schemas").path("ConfigView");
+        assertFalse(config.path("required").toString().contains("options"));
+        assertFalse(config.path("properties").has("options"));
+
+        JsonNode catalog = root.path("components").path("schemas").path("OptionCatalogView");
+        assertEquals("wireMockVersion", catalog.path("required").get(0).asText());
+        assertEquals("catalogStatus", catalog.path("required").get(1).asText());
+        assertEquals("options", catalog.path("required").get(2).asText());
+
+        JsonNode option = root.path("components").path("schemas").path("PublicOptionDefinition");
+        assertFalse(option.path("properties").has("available"));
+        assertFalse(option.path("properties").has("compatibility"));
+        assertFalse(option.path("properties").has("versionRanges"));
+        assertTrue(option.path("properties").has("minimum"));
+        assertTrue(option.path("properties").has("maximum"));
     }
 
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {

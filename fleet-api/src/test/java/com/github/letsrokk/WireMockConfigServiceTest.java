@@ -20,18 +20,58 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class WireMockConfigServiceTest {
+
+    @Test
+    void optionCatalogUsesTheConfiguredVersionForBlankRequestsAndExcludesCredentials() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        WireMockConfigService.OptionCatalogView catalog = service.optionCatalog(" ");
+
+        assertEquals("3.13.2", catalog.wireMockVersion());
+        assertEquals("supported", catalog.catalogStatus());
+        assertTrue(catalog.options().stream().anyMatch(option -> "--verbose".equals(option.name())));
+        assertTrue(catalog.options().stream().noneMatch(option -> Set.of(
+                "--admin-api-basic-auth",
+                "--ca-keystore-password",
+                "--keystore-password",
+                "--key-manager-password",
+                "--truststore-password").contains(option.name())));
+        assertTrue(catalog.options().stream().allMatch(option -> option.name() != null
+                && option.label() != null
+                && option.kind() != null
+                && option.group() != null
+                && option.description() != null
+                && option.values() != null));
+        verifyNoInteractions(kubernetesClient);
+    }
+
+    @Test
+    void optionCatalogPreservesNewerThanResearchedFallbackAndRejectsInvalidVersions() {
+        WireMockConfigService service = service(mock(KubernetesClient.class), config());
+
+        assertEquals("newer_unresearched", service.optionCatalog("3.14.0").catalogStatus());
+        for (String version : List.of("3.14", "3.01.0", "2.13.2", "4.0.0")) {
+            ApiException exception = assertThrows(ApiException.class, () -> service.optionCatalog(version));
+            assertEquals(400, exception.getResponse().getStatus());
+            assertEquals("INVALID_WIREMOCK_VERSION", ((ApiError) exception.getResponse().getEntity()).code());
+        }
+    }
 
     @Test
     void viewPreservesInheritedUserResourcesAsNull() {

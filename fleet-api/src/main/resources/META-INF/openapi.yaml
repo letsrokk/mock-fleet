@@ -83,6 +83,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConfigView"
+  /__fleet/api/config/options:
+    get:
+      operationId: getWireMockOptionCatalog
+      summary: Get the public WireMock option catalog for an exact WireMock 3.x version
+      parameters:
+        - name: version
+          in: query
+          required: false
+          description: Exact WireMock 3.x semantic version. Defaults to the configured WireMock image version when omitted or blank.
+          schema:
+            oneOf:
+              - type: string
+                pattern: '^\s*$'
+              - type: string
+                pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
+      responses:
+        "200":
+          description: Version-specific public WireMock option catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionCatalogView"
+        "400":
+          $ref: "#/components/responses/ApiError"
   /__fleet/api/config/{mockId}:
     parameters:
       - $ref: "#/components/parameters/MockId"
@@ -330,9 +354,9 @@ components:
           $ref: "#/components/schemas/UserConfigData"
         effective:
           $ref: "#/components/schemas/ResolvedConfigData"
-    OptionDefinition:
+    PublicOptionDefinition:
       type: object
-      required: [name, label, kind, group, description, values, available, compatibility, versionRanges]
+      required: [name, label, kind, group, description, values, minimum, maximum]
       properties:
         name: { type: string }
         label: { type: string }
@@ -344,20 +368,17 @@ components:
           items: { type: string }
         minimum: { type: [integer, "null"] }
         maximum: { type: [integer, "null"] }
-        available: { type: boolean }
-        unavailableReason: { type: [string, "null"], enum: [SECRET_STORAGE_REQUIRED, null] }
-        compatibility: { type: string, enum: [supported, unsupported, known_broken, unknown] }
-        compatibilityMessage: { type: [string, "null"] }
-        versionRanges:
+    OptionCatalogView:
+      type: object
+      additionalProperties: false
+      required: [wireMockVersion, catalogStatus, options]
+      properties:
+        wireMockVersion: { type: string }
+        catalogStatus: { type: string, enum: [supported, newer_unresearched] }
+        options:
           type: array
           items:
-            $ref: "#/components/schemas/WireMockOptionVersionRange"
-    WireMockOptionVersionRange:
-      type: object
-      required: [minimumVersion]
-      properties:
-        minimumVersion: { type: string }
-        maximumVersion: { type: [string, "null"] }
+            $ref: "#/components/schemas/PublicOptionDefinition"
     WireMockVersionView:
       type: object
       required: [configuredImage, version, minimumSupportedVersion, maximumResearchedVersion, rangeStatus]
@@ -375,7 +396,7 @@ components:
         host: { type: string }
     ConfigView:
       type: object
-      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, options, routing]
+      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing]
       properties:
         resourceVersion: { type: [string, "null"] }
         mockIds:
@@ -390,10 +411,6 @@ components:
             $ref: "#/components/schemas/MockConfigView"
         wireMock:
           $ref: "#/components/schemas/WireMockVersionView"
-        options:
-          type: array
-          items:
-            $ref: "#/components/schemas/OptionDefinition"
         routing:
           $ref: "#/components/schemas/RoutingView"
     ConfigUpdateRequest:

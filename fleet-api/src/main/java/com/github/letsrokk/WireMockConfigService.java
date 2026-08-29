@@ -115,7 +115,6 @@ public class WireMockConfigService {
                 savedMockIds,
                 mocks,
                 wireMockView(),
-                optionDefinitions(),
                 routingView());
     }
 
@@ -382,8 +381,22 @@ public class WireMockConfigService {
         return resourcePolicy.normalizeAndValidate(baseline, resources);
     }
 
-    private List<WireMockOptionCatalog.OptionDefinition> optionDefinitions() {
-        return resolvedCatalog().options();
+    OptionCatalogView optionCatalog(String requestedVersion) {
+        WireMockOptionMatrix.ResolvedCatalog catalog;
+        try {
+            WireMockVersion version = requestedVersion == null || requestedVersion.isBlank()
+                    ? WireMockVersion.parseImage(config.wiremockImage())
+                    : WireMockVersion.parse(requestedVersion);
+            catalog = WireMockOptionMatrix.loadDefault().resolve(version);
+        } catch (IllegalArgumentException exception) {
+            throw ApiException.badRequest("INVALID_WIREMOCK_VERSION",
+                    "WireMock version must be an exact WireMock 3.x semantic version.",
+                    Map.of("version", requestedVersion == null ? "" : requestedVersion));
+        }
+        return new OptionCatalogView(catalog.version().toString(), catalog.rangeStatus(), catalog.options().stream()
+                .filter(option -> !WireMockOptionCatalog.isSensitive(option.name()))
+                .map(PublicOptionDefinition::from)
+                .toList());
     }
 
     private WireMockOptionMatrix.ResolvedCatalog resolvedCatalog() {
@@ -401,9 +414,19 @@ public class WireMockConfigService {
     }
 
     public record ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
-                             List<MockConfigView> mocks,
-                             WireMockVersionView wireMock,
-                             List<WireMockOptionCatalog.OptionDefinition> options, RoutingView routing) {
+                             List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing) {
+    }
+
+    public record OptionCatalogView(String wireMockVersion, String catalogStatus,
+                                    List<PublicOptionDefinition> options) {
+    }
+
+    public record PublicOptionDefinition(String name, String label, String kind, String group, String description,
+                                         List<String> values, Integer minimum, Integer maximum) {
+        private static PublicOptionDefinition from(WireMockOptionCatalog.OptionDefinition option) {
+            return new PublicOptionDefinition(option.name(), option.label(), option.kind(), option.group(),
+                    option.description(), option.values(), option.minimum(), option.maximum());
+        }
     }
 
     public record WireMockVersionView(String configuredImage, String version, String minimumSupportedVersion,
