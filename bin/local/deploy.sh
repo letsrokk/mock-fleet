@@ -94,9 +94,10 @@ release_exists() {
 }
 
 current_kubernetes_minor_version() {
-    local major minor
-    major=$(kubectl version -o jsonpath='{.serverVersion.major}')
-    minor=$(kubectl version -o jsonpath='{.serverVersion.minor}')
+    local major minor version_json
+    version_json=$(kubectl get --raw=/version)
+    major=$(printf '%s\n' "${version_json}" | sed -n 's/.*"major"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    minor=$(printf '%s\n' "${version_json}" | sed -n 's/.*"minor"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
     minor=${minor%%[!0-9]*}
     [[ -n "${major}" && -n "${minor}" ]] \
         || { echo "Unable to determine the current Kubernetes minor version." >&2; return 1; }
