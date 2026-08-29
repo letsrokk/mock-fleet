@@ -11,7 +11,7 @@ The implementation targets the repository revision reviewed by the canonical rep
 The design covers these nine findings:
 
 1. Fleet Proxy accepts absolute and scheme-relative request targets that can replace the configured upstream authority.
-2. WireMock egress controls depend on MCP being enabled, and the current Minikube bridge CNI does not enforce the rendered `NetworkPolicy`.
+2. Before this change, WireMock egress controls depended on MCP being enabled; the reviewed Minikube bridge CNI also did not enforce the rendered `NetworkPolicy`.
 3. Mock provisioning uses an unbounded executor and has no hard limit on starting or active mocks. Explicitly started mocks also miss the access timestamp used by idle cleanup.
 4. Mapping-tree reads and recursive folder deletion have no depth or entry budget.
 5. Password-bearing WireMock options are stored in ConfigMaps, returned by the API, and exposed in process arguments.
@@ -50,17 +50,17 @@ Regression tests will cover both routing modes, accepted paths and queries, ever
 
 ## Enforced Network Isolation
 
-The Helm chart will render managed-WireMock egress policy whenever network policy is enabled, independent of the MCP feature flag. The policy will select the same stable labels placed on managed WireMock pods and will retain only the intended DNS and public-network egress.
+The Helm chart renders managed-WireMock egress policy whenever `fleet.mcp.outbound.networkPolicy.enabled=true`, independent of the MCP feature flag. The compatibility value remains under the MCP path, but the policy selects exactly the stable `app.kubernetes.io/name=mock-fleet-wiremock` and `app.kubernetes.io/managed-by=mock-fleet` labels placed on managed WireMock pods. It has no release label so that it also selects upgrade-era managed pods. The policy retains only the intended DNS and public-network egress.
 
 The chart will also render an API ingress policy. HTTP traffic on port 8080 remains reachable from the deployment ingress path. Hazelcast member traffic on port 5701 is allowed only between API pods from the same Helm release. Other namespace workloads cannot initiate member-protocol connections.
 
-All non-API workloads will disable the default Kubernetes API token mount. Managed WireMock pods will continue to use the dedicated service account selected by `wiremock.serviceAccount.name` or created by the chart. The chart will preserve `wiremock.serviceAccount.annotations` so a cluster owner can attach IRSA or another workload identity. When the S3 CSI volume uses `storage.s3.authenticationSource: pod`, that identity remains available to the CSI driver for the mounted PV/PVC. The API service account retains its independent annotations because API replicas mount the same volume. Disabling the default Kubernetes token must not block the separate, audience-bound token volume injected by the IRSA or EKS Pod Identity admission integration.
+All non-API workloads disable the default Kubernetes API token mount. Managed WireMock pods use the dedicated service account selected by `wiremock.serviceAccount.name` or created by the chart. The chart preserves `wiremock.serviceAccount.annotations` so a cluster owner can attach IRSA, EKS Pod Identity, or another workload identity. When the S3 CSI volume uses `storage.s3.authenticationSource: pod`, that identity remains available to the CSI driver for the mounted PV/PVC. The API service account retains its independent annotations because API replicas mount the same volume. Disabling the default Kubernetes token does not block the separate, audience-bound token volume injected by the IRSA or EKS Pod Identity admission integration.
 
 The chart and project documentation will state that Kubernetes accepts `NetworkPolicy` resources even when the installed CNI does not enforce them. It will identify a network-policy-capable CNI, such as Calico or Cilium, as a prerequisite for this boundary and give the cluster owner a small verification procedure. Mock Fleet will not inspect, reconfigure, or reject a cluster through `make local-deploy`; cluster capability and lifecycle remain the cluster owner's responsibility.
 
 ## Kubernetes Authority
 
-The API role will drop all Deployment permissions. The chart will pre-create the release-owned user ConfigMap. The role will grant `get`, `watch`, `update`, and `patch` only for that ConfigMap through `resourceNames`; it will not grant namespace-wide ConfigMap `create`, `list`, or mutation.
+The API role drops all Deployment permissions. The chart pre-creates and retains the release-owned user ConfigMap. A connected-cluster `lookup` suppresses that resource when an upgrade finds the legacy API-created object, which prevents Helm adoption or overwrite; offline rendering still emits it and requires the apply tool to reconcile it safely. The role grants `get`, `watch`, `update`, and `patch` only for that ConfigMap through `resourceNames`; it does not grant namespace-wide ConfigMap `create`, `list`, or mutation. The API returns `CONFIG_UNAVAILABLE` rather than recreating a missing object.
 
 Pod creation cannot be constrained by ordinary RBAC. The chart will install a `ValidatingAdmissionPolicy` and binding that apply only to CREATE operations by the API service-account username in the release namespace. The policy will admit only managed WireMock pods that satisfy all of these properties:
 
@@ -71,7 +71,7 @@ Pod creation cannot be constrained by ordinary RBAC. The chart will install a `V
 - containers remain inside the chart-defined resource envelope and use the hardened security context;
 - pod and container fields outside the generated WireMock shape cannot add an alternate execution path.
 
-The policy will fail closed for the scoped service account. It will allow the projected token volume, volume mount, and credential environment variables that the cluster's IRSA or EKS Pod Identity admission integration injects into an otherwise valid WireMock pod. The implementation will generate validation expressions from stable chart values where necessary and will include Helm-render and live admission tests for an accepted managed pod and rejected privileged, host-path, wrong-image, wrong-service-account, and label-spoofed pods.
+The policy fails closed for the scoped service account. It allows at most one configured audience-bound workload-identity mode. A non-EKS audience uses the IRSA-shaped read-only mount and credential environment; the reserved `pods.eks.amazonaws.com` audience requires the exact current EKS Pod Identity token name, path, mount, credential environment, and `eks.amazonaws.com/pod-identity=enabled` label. Mixed modes, extra projections, duplicate credential variables, and general Kubernetes API tokens are denied. The implementation generates validation expressions from stable chart values and includes Helm-render and live admission tests for accepted base, IRSA, and EKS shapes plus rejected privileged, host-path, wrong-image, wrong-service-account, label-spoofed, resource, sidecar, and identity-shape pods.
 
 The local namespace will receive Pod Security Admission labels for the `restricted` profile at the cluster's current Kubernetes version. Existing Mock Fleet workload templates and managed WireMock pods will be updated to comply: no privilege escalation, all capabilities dropped, and `RuntimeDefault` seccomp. A read-only root filesystem is not required because WireMock and supporting images may need writable runtime paths.
 
@@ -91,7 +91,7 @@ The chart will add a namespace `ResourceQuota` for pod count and aggregate CPU a
 
 The chart will define administrator-owned CPU and memory request floors and limit ceilings for managed WireMock pods. Editable mock configuration may select values only inside that envelope. Omitted keys inherit the chart baseline, an empty resource object cannot erase it, only `cpu` and `memory` are accepted, and every limit must be greater than or equal to its request.
 
-The API will validate the effective resource set before persistence and again before pod creation. The `ValidatingAdmissionPolicy` will enforce the same request floors and limit ceilings at the Kubernetes boundary so a compromised API cannot bypass the application check. Chart rendering will fail when the baseline lies outside the configured envelope.
+The API validates the effective resource set before persistence and again before pod creation. The `ValidatingAdmissionPolicy` enforces the same request floors and limit ceilings at the Kubernetes boundary so a compromised API cannot bypass the application check. Chart rendering fails when the baseline lies outside the configured envelope. Chart quantities accept positive DecimalSI, `Ki` through `Pi`, and bounded exponent forms; `Ei` is rejected because Fabric8 7.5.2 does not compare that multiplier with the chart's exact binary value.
 
 WireMock options that directly allocate threads, connections, queues, caches, headers, messages, journals, or timeout state will accept bounded integers rather than arbitrary `BigDecimal` values. The option catalog will own the bounds so API metadata, dashboard inputs, MCP schemas, validation, and tests use one definition.
 
@@ -123,7 +123,7 @@ The dependency upgrade is not accepted solely because the version changed. Tests
 
 The Helm chart remains the source of truth for Kubernetes controls. New values will expose capacity, traversal, resource-policy, quota, network-policy, and admission-policy settings with secure defaults. Disabling network or admission controls must require an explicit value and will be documented as weakening the corresponding security boundary.
 
-The cluster must support `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` to install the admission control. The chart will render `NetworkPolicy` independently of the installed CNI, and the documentation will make clear that live enforcement is an operator-owned cluster capability rather than a property Helm can prove.
+The cluster must run Kubernetes 1.30 or newer, where `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` is stable, to install the default admission control. Both rendered policy branches were compiled and exercised on Kubernetes 1.36.4. The chart renders `NetworkPolicy` independently of the installed CNI, and live enforcement remains an operator-owned cluster capability rather than a property Helm can prove. The reviewed Minikube bridge CNI accepted but did not enforce the policy, and `make local-deploy` neither detects nor changes that capability.
 
 ## Verification
 

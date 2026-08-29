@@ -26,6 +26,76 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --create-namespace
 ```
 
+## Cluster Security Prerequisites
+
+The chart renders `NetworkPolicy` objects, but Kubernetes accepts them even when the installed network plugin does not enforce them. A NetworkPolicy-capable CNI, such as Calico or Cilium, is a deployment prerequisite. Installing and configuring that CNI, and proving that it enforces the rendered selectors, belongs to the cluster operator. `make local-deploy` neither checks nor changes CNI capability. The bridge CNI in the Minikube cluster reviewed for this release accepted the policies but did not enforce them.
+
+The chart installs `admissionregistration.k8s.io/v1` `ValidatingAdmissionPolicy` and `ValidatingAdmissionPolicyBinding` objects by default. Use Kubernetes 1.30 or newer, where [Validating Admission Policy is stable](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/). The current policy, including both persistent and non-persistent pod shapes, was server-side compiled and exercised on Kubernetes 1.36.4.
+
+The local deployment helper labels its target namespace with `restricted` Pod Security Admission enforce, audit, and warn labels pinned to the API server's current major and minor version. For other deployment workflows, the cluster operator must apply an equivalent namespace policy. Mock Fleet workloads need writable runtime paths, so the hardened manifests do not require a read-only root filesystem.
+
+### Verify NetworkPolicy enforcement
+
+Run this probe after installation. It creates a restricted-compatible pod with exactly the two labels selected by the managed-WireMock egress policy and attempts a TCP connection to the cluster-internal Kubernetes service. `PASS` and a `Succeeded` pod prove that this connection was denied. `FAIL` or a `Failed` pod means the CNI did not enforce the boundary, the policy was disabled, or its selector no longer matches.
+
+```bash
+NAMESPACE=mock-fleet
+KUBE_API_IP="$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')"
+
+kubectl -n "$NAMESPACE" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mock-fleet-networkpolicy-probe
+  labels:
+    app.kubernetes.io/name: mock-fleet-wiremock
+    app.kubernetes.io/managed-by: mock-fleet
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: busybox:1.36
+      command:
+        - sh
+        - -ec
+        - |
+          sleep 5
+          if nc -z -w 5 ${KUBE_API_IP} 443; then
+            echo "FAIL: cluster-internal TCP connection succeeded"
+            exit 1
+          fi
+          echo "PASS: cluster-internal TCP connection was denied"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+EOF
+
+kubectl -n "$NAMESPACE" wait --for=condition=Ready pod/mock-fleet-networkpolicy-probe --timeout=60s
+kubectl -n "$NAMESPACE" logs -f pod/mock-fleet-networkpolicy-probe
+test "$(kubectl -n "$NAMESPACE" get pod mock-fleet-networkpolicy-probe -o jsonpath='{.status.phase}')" = Succeeded
+```
+
+Remove the probe in both pass and fail cases:
+
+```bash
+kubectl -n "$NAMESPACE" delete pod mock-fleet-networkpolicy-probe --ignore-not-found
+```
+
 ## Routing And Ingress
 
 Ingress is disabled by default. When enabled, the chart routes:
@@ -61,6 +131,28 @@ Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary 
 
 The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/openapi.yaml` and is served by the running API at `/__fleet/api/openapi?format=json`.
 
+## Upgrade And Security Notes
+
+- Runtime dependencies now use Quarkus 3.33.3.1 and Hazelcast 5.7.0. Fleet Proxy also rejects absolute, scheme-relative, fragmented, malformed-percent, and backslash-bearing request targets before resolution or outbound I/O, and it removes inbound authority, framing, and hop-by-hop headers before forwarding. These changes do not add API, Admin-route, or MCP authentication.
+- The plaintext WireMock options `--ca-keystore-password`, `--keystore-password`, `--key-manager-password`, and `--truststore-password` are unsupported in both `--name=value` and split-argument forms. New writes are rejected before persistence. Existing values are redacted from API output and fail closed when a mock starts. Before upgrading, remove these entries from `wiremock.default.options` and every `wiremock.mocks[].options` list in `<release-fullname>-wiremock-user-config`, and from `wiremock.config.default.options` or `wiremock.config.mocks[].options` in Helm values. Password-protected keystores are unsupported until a Secret-backed path exists. Treat the retained ConfigMap as sensitive until cleanup is complete.
+- The editable `<release-fullname>-wiremock-user-config` ConfigMap is now a retained chart resource. A connected Helm install creates it. A connected upgrade leaves an existing API-created object untouched through a `lookup` guard, so Helm does not try to adopt or overwrite saved configuration. Offline `helm template` cannot perform that lookup and renders the ConfigMap; an offline render/apply workflow must use an apply tool that safely reconciles the existing object. The API now requires the object and returns HTTP 503 `CONFIG_UNAVAILABLE` if it is absent; it no longer creates it.
+- Managed resources accept only `cpu` and `memory`. Missing or partial keys inherit the chart baseline; an empty override cannot erase it. Effective requests must meet `wiremock.resourcePolicy.requestFloor`, limits must not exceed `wiremock.resourcePolicy.limitCeiling`, and each request must not exceed its limit. Chart resource quantities must be quoted positive values. DecimalSI, `Ki` through `Pi`, and bounded exponent forms are supported; `Ei` is rejected because its comparison differs from the Kubernetes client used by the API.
+- Numeric WireMock workload-shaping options now accept only catalog-advertised integers and bounds. Existing fractional, negative, or oversized values fail validation and must be corrected before a mock can start.
+- Mock starts reserve capacity across replicas. More than `fleet.api.maxActiveMocks` distinct active/start-in-progress mocks returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. A full bounded start executor returns HTTP 503 `MOCK_START_QUEUE_FULL`. Explicit successful starts initialize their idle-cleanup timestamp.
+- Mapping tree reads and recursive folder deletion apply inclusive `fleet.api.mappings.maxDepth` and `maxEntries` budgets. Overflow returns HTTP 400 `MAPPINGS_TRAVERSAL_LIMIT`; storage or unsupported secure-traversal behavior returns retryable HTTP 503 `MAPPINGS_STORAGE_ERROR`. Recursive deletion discovers and validates the bounded set before deleting, so a traversal-limit failure deletes nothing.
+- Managed-pod deletion performs a fresh Kubernetes GET, checks the two stable ownership labels plus the expected `mock-fleet/mock-id`, and deletes with the fetched UID as a precondition. Missing pods remain idempotent; a wrong label, missing UID, or same-name replacement fails closed. The API Role has no Deployment authority and can mutate only the named retained user ConfigMap.
+- `resourceQuota.enabled=true` supplies a second boundary if application admission fails. Size pod, CPU, and memory quota for `fleet.api.maxActiveMocks`, all API replicas, every enabled fixed workload, rollout surge, and expected operational or probe pods. Quota may intentionally cap the usable mock count below `maxActiveMocks`; undersizing it can also block upgrades and probes.
+- `make local-deploy` applies `restricted` PSA enforce, audit, and warn labels at the current server minor. Before upgrading a shared namespace, verify that every non-Mock-Fleet workload also satisfies that profile; PSA can reject unrelated noncompliant pods. A direct Helm install does not manage namespace labels, so its operator must apply and maintain the equivalent policy.
+- The admission policy requires the dedicated WireMock service account, exact generated pod shape, restricted security context, configured image, resource envelope, and one supported workload-identity mode. `wiremock.admissionPolicy.enabled=false` removes the Kubernetes boundary that constrains a compromised API service account. Kubernetes 1.30 or newer is required while it is enabled; compatibility was verified on 1.36.4.
+- `fleet.api.networkPolicy.enabled=false` removes API/Hazelcast ingress isolation. `fleet.mcp.outbound.networkPolicy.enabled=false` removes managed-WireMock private/cluster-network egress isolation even when MCP itself is disabled. `resourceQuota.enabled=false` removes the namespace resource backstop. Disable any of these only when another cluster control provides the same boundary.
+
+Edit the retained configuration in place before the first post-upgrade start when it contains a prohibited password option. Replace `<release-fullname>` with the chart's resolved full name; do not copy the old plaintext values into issue trackers or command history.
+
+```bash
+NAMESPACE=mock-fleet
+kubectl -n "$NAMESPACE" edit configmap <release-fullname>-wiremock-user-config
+```
+
 ## Persistent Mappings
 
 Persistent mappings are disabled by default. To enable them, set `storage.persistent=true`, use `storage.type=s3`, and provide `storage.s3.bucket`.
@@ -69,6 +161,10 @@ The chart creates a static S3 CSI PV/PVC and mounts it into:
 
 - spawned WireMock pods at `/home/wiremock`
 - `fleet-api` at `storage.mappingsPath`
+
+`storage.s3.authenticationSource=pod` asks the S3 CSI driver to use the mounting pod's identity. API replicas use the API service account and its `serviceAccount.annotations`; managed WireMock pods use the separate service account selected by `wiremock.serviceAccount.name` and its `wiremock.serviceAccount.annotations`. IRSA or EKS Pod Identity admission can inject one audience-bound projected token plus its read-only mount and AWS credential environment variables. This token is separate from the general Kubernetes API token: managed WireMock pods keep `automountServiceAccountToken=false`.
+
+The admission policy accepts zero identity projections or exactly one projection with an audience in `wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences` and an expiry from 600 through 86400 seconds. A configured non-EKS audience must use the standard read-only `/var/run/secrets/eks.amazonaws.com/serviceaccount` mount plus one nonempty `AWS_ROLE_ARN` and one matching `AWS_WEB_IDENTITY_TOKEN_FILE`. The reserved `pods.eks.amazonaws.com` mode requires the `eks.amazonaws.com/pod-identity=enabled` label, volume and token path `eks-pod-identity-token`, the read-only `/var/run/secrets/pods.eks.amazonaws.com/serviceaccount` mount, and the standard `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` and `AWS_CONTAINER_CREDENTIALS_FULL_URI=http://169.254.170.23/v1/credentials` values. Mixed modes, extra identity volumes or mounts, duplicate credential variables, unconfigured audiences, and credential variables without their token are denied. The application container and the persistent mappings initializer must independently have the selected identity shape.
 
 `storage.s3.mountOptions` includes `allow-delete`, `allow-overwrite`, and `metadata-ttl minimal` by default. The first two options support dashboard and MCP file mutations. The minimal metadata TTL reduces cross-mount staleness while the CSI data cache is enabled; Mountpoint does not coordinate concurrent writes to the same key, so clients must not race those writes.
 
@@ -139,6 +235,12 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
 | `fleet.api.podCreationTimeout` | `1M` | Time to wait for a spawned WireMock pod to become ready. |
+| `fleet.api.maxActiveMocks` | `20` | Maximum distinct mocks that may be reserved, starting, or running across API replicas. Exhaustion returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. |
+| `fleet.api.maxConcurrentStarts` | `4` | Maximum concurrent pod-start workers; must not exceed `maxActiveMocks`. |
+| `fleet.api.queuedStartCapacity` | `16` | Maximum starts waiting behind the workers. Saturation returns HTTP 503 `MOCK_START_QUEUE_FULL`. |
+| `fleet.api.mappings.maxDepth` | `32` | Inclusive maximum relative depth for mapping tree reads and recursive deletion. |
+| `fleet.api.mappings.maxEntries` | `10000` | Inclusive maximum examined entries, including the selected mock root, for one mapping traversal. |
+| `fleet.api.networkPolicy.enabled` | `true` | Render API ingress isolation. Disabling it exposes HTTP and Hazelcast to any connectivity the cluster otherwise permits. |
 | `fleet.api.logging.json` | `false` | Enable JSON console logging for the API. |
 | `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
@@ -194,7 +296,7 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.allowedOrigins` | `[]` | Browser origins allowed to initialize MCP sessions; empty derives the ingress origin. |
 | `fleet.mcp.outbound.exceptions` | `[]` | Explicit target hosts allowed through recorder, proxy, and webhook target checks. |
 | `fleet.mcp.outbound.allowedListeners` | `[]` | WireMock serve-event listener names allowed in mappings, such as `webhook`. |
-| `fleet.mcp.outbound.networkPolicy.enabled` | `true` | Enforce the outbound address policy at connection time for managed WireMock pods. Requires a NetworkPolicy-capable CNI. |
+| `fleet.mcp.outbound.networkPolicy.enabled` | `true` | Render managed-WireMock egress isolation independently of `fleet.mcp.enabled`. A NetworkPolicy-capable CNI must enforce it. |
 | `fleet.mcp.outbound.networkPolicy.dnsNamespace` | `kube-system` | Namespace containing the cluster DNS pods allowed by the WireMock egress policy. |
 | `fleet.mcp.outbound.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | Labels selecting the cluster DNS pods allowed by the WireMock egress policy. |
 | `fleet.mcp.outbound.networkPolicy.allowedCidrs` | `[]` | Private or special-use CIDRs explicitly allowed at connection time. Configure the corresponding host in `outbound.exceptions` too. |
@@ -212,7 +314,7 @@ MCP is disabled by default. It uses Streamable HTTP and must run with one replic
 | `fleet.mcp.service.ports.http` | `80` | MCP service HTTP port. |
 | `fleet.mcp.service.ports.targetHttp` | `8080` | MCP container HTTP port. |
 
-The MCP pod does not receive Kubernetes RBAC or a mounted service-account token. Only HTTP and HTTPS targets are accepted. MCP validates target hostnames before configuration, and the enabled-by-default WireMock egress NetworkPolicy enforces the public-address boundary again when WireMock connects. Private, loopback, link-local, multicast, metadata, and special-use destinations remain blocked unless both the host is listed in `outbound.exceptions` and its address range is listed in `outbound.networkPolicy.allowedCidrs`. Configure the DNS namespace and pod selector for clusters that do not label CoreDNS as `k8s-app=kube-dns`; disable this policy only when another connection-time egress control provides the same boundary.
+The MCP pod does not receive Kubernetes RBAC or a mounted service-account token. Only HTTP and HTTPS targets are accepted. MCP validates target hostnames before configuration, and the enabled-by-default WireMock egress `NetworkPolicy` renders independently of MCP. A capable CNI must enforce that policy when WireMock connects. Private, loopback, link-local, multicast, metadata, and special-use destinations remain blocked unless both the host is listed in `outbound.exceptions` and its address range is listed in `outbound.networkPolicy.allowedCidrs`. Configure the DNS namespace and pod selector for clusters that do not label CoreDNS as `k8s-app=kube-dns`; disable this policy only when another connection-time egress control provides the same boundary.
 
 MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `recording_status` is not an alias. Every WireMock Admin and traffic tool starts or checks the mock first. STARTING becomes a structured, retryable `MOCK_STARTING` result without proxying Admin traffic. Tool successes use strict tool-specific wrappers, and every failure uses `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Byte-bearing inputs and results use `{body:{encoding:utf8|base64,data,sizeBytes}}`. Recording stop/snapshot returns candidate IDs, count, and explicit match status. See `docs/mcp-contract.md` for examples and recovery behavior.
 
@@ -227,7 +329,13 @@ MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `reco
 | `wiremock.terminationGracePeriodSeconds` | `5` | Graceful shutdown window for spawned WireMock pods. Fleet waits for full pod removal before replacement. |
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
 | `wiremock.serviceAccount.name` | `""` | Service account name. A generated name is used when creation is enabled and this is empty. |
-| `wiremock.serviceAccount.annotations` | `{}` | Annotations for workload identity or other integrations. |
+| `wiremock.serviceAccount.annotations` | `{}` | Dedicated WireMock service-account annotations for IRSA, EKS Pod Identity, or another workload-identity integration. |
+| `wiremock.admissionPolicy.enabled` | `true` | Install fail-closed admission policy and binding for API-created managed pods. Requires Kubernetes 1.30 or newer; disabling it removes pod-shape enforcement. |
+| `wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences` | `[sts.amazonaws.com, pods.eks.amazonaws.com]` | Audiences accepted for one injected identity token. Adding an audience expands the admitted workload-identity boundary. Non-EKS audiences use the IRSA-shaped contract; `pods.eks.amazonaws.com` is reserved for the exact EKS Pod Identity shape. |
+| `wiremock.resourcePolicy.requestFloor.cpu` | `"100m"` | Minimum effective WireMock CPU request. |
+| `wiremock.resourcePolicy.requestFloor.memory` | `128Mi` | Minimum effective WireMock memory request. |
+| `wiremock.resourcePolicy.limitCeiling.cpu` | `"4"` | Maximum effective WireMock CPU limit. |
+| `wiremock.resourcePolicy.limitCeiling.memory` | `4Gi` | Maximum effective WireMock memory limit. |
 | `wiremock.config.default.options` | `[]` | Default WireMock CLI options for all mocks. |
 | `wiremock.config.default.resources.requests.cpu` | `"0.5"` | Default WireMock CPU request. |
 | `wiremock.config.default.resources.requests.memory` | `512Mi` | Default WireMock memory request. |
@@ -235,7 +343,7 @@ MCP publishes 32 tools, including `start_mock` and `get_recording_status`; `reco
 | `wiremock.config.default.resources.limits.memory` | `1Gi` | Default WireMock memory limit. |
 | `wiremock.config.mocks` | `[]` | Per-mock WireMock config overrides. |
 
-Set `wiremock.serviceAccount.create=false` with a name to use an existing service account. If both creation and the name are disabled, managed pods use the namespace's default service account.
+Set `wiremock.serviceAccount.create=false` with a name to use an existing dedicated service account. When admission is enabled, the resolved WireMock and API service-account names must differ, and WireMock must resolve to a nonempty name. The chart rejects a shared identity instead of falling back to the namespace default service account.
 
 ### Dashboard
 
@@ -312,16 +420,22 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing servic
 | `serviceAccount.name` | `""` | Existing service account name, or generated name when empty. |
 | `serviceAccount.annotations` | `{}` | Service account annotations. |
 | `rbac.create` | `true` | Create role and role binding for mock pod management. |
+| `resourceQuota.enabled` | `true` | Create the namespace quota backstop. Disabling it removes the cluster-side aggregate pod/CPU/memory boundary. |
+| `resourceQuota.hard.pods` | `30` | Namespace pod quota; size for active mocks, fixed workloads, and rollout or operator pods. |
+| `resourceQuota.hard.requests.cpu` | `"8"` | Aggregate namespace CPU-request quota. |
+| `resourceQuota.hard.requests.memory` | `12Gi` | Aggregate namespace memory-request quota. |
+| `resourceQuota.hard.limits.cpu` | `"16"` | Aggregate namespace CPU-limit quota. |
+| `resourceQuota.hard.limits.memory` | `24Gi` | Aggregate namespace memory-limit quota. |
 | `hazelcast.clusterName` | `mock-fleet` | Cluster name used by embedded Hazelcast members. |
 | `hazelcast.port` | `5701` | Embedded Hazelcast member and headless-service port. |
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
-| `hazelcast.gracefulShutdownMaxWaitSeconds` | `300` | Maximum wait for graceful member shutdown. |
+| `hazelcast.gracefulShutdownMaxWaitSeconds` | `30` | Maximum wait for graceful member shutdown. |
 
-The UI-editable WireMock user ConfigMap is managed by `fleet-api` at runtime, not by Helm. On boot, `fleet-api` creates `<fullname>-wiremock-user-config` when it is missing and then persists UI configuration changes to that ConfigMap. For ArgoCD or other GitOps installs, do not add this ConfigMap to desired state; reconciling it from Git can overwrite UI-saved configuration. If `rbac.create=false`, the API service account must still be allowed to `get`, `list`, `watch`, `create`, `update`, and `patch` ConfigMaps in the release namespace.
+The chart creates `<fullname>-wiremock-user-config` for a new release and marks it `helm.sh/resource-policy: keep`. The API persists UI changes with named `get`, `watch`, `update`, and `patch` operations; it does not create, list, or delete ConfigMaps. A connected upgrade retains a pre-existing object instead of adopting it. For ArgoCD or another offline render/apply workflow, configure reconciliation so it does not overwrite UI-saved data. If `rbac.create=false`, grant the API service account those four named operations on this ConfigMap and pod `get`, `list`, `create`, and `delete`; do not restore namespace-wide ConfigMap or Deployment authority.
 
 ## Local Minikube Values
 
-`values.minikube.yaml` enables a Traefik ingress and MCP at `mock-fleet.minikube.localhost`, attaches the ingress to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`.
+`values.minikube.yaml` enables a Traefik ingress and MCP at `mock-fleet.minikube.localhost`, attaches the ingress to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`. `make local-deploy` applies restricted PSA labels but does not inspect or alter Minikube's CNI; run the denial probe above before relying on NetworkPolicy.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
