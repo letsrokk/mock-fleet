@@ -157,6 +157,43 @@ class MockCapacityTest {
     }
 
     @Test
+    void reserveReconcilesAnAttemptThatExpiresAfterFreshStartupReconciliation() {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast,
+                config(1, 1, 1, Duration.ofMillis(5)));
+        var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
+                HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        long startedAt = System.currentTimeMillis();
+        reservations.put("alpha", "attempt-alpha");
+        lifecycles.put("alpha", MockPodLifecycle.starting("attempt-alpha", null, startedAt));
+
+        capacity.reconcile();
+        assertEquals("attempt-alpha", reservations.get("alpha"));
+        awaitAfter(startedAt + 10L);
+
+        capacity.reserve("beta", "attempt-beta");
+
+        assertEquals(null, reservations.get("alpha"));
+        assertEquals("attempt-beta", reservations.get("beta"));
+    }
+
+    @Test
+    void activeCountRemovesExpiredReservationsWithoutAReplicaRestart() {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
+                HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        reservations.put("alpha", "attempt-alpha");
+        lifecycles.put("alpha", MockPodLifecycle.starting(
+                "attempt-alpha", null, System.currentTimeMillis() - Duration.ofMinutes(3).toMillis()));
+
+        assertEquals(0, capacity.activeCount());
+        assertEquals(null, reservations.get("alpha"));
+    }
+
+    @Test
     void reconciledStaleAttemptCannotCompleteAfterAnotherMockTakesItsSlot() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
@@ -275,11 +312,26 @@ class MockCapacityTest {
     }
 
     private MockFleetConfig config(int maxActive, int maxConcurrent, int queuedCapacity) {
+        return config(maxActive, maxConcurrent, queuedCapacity, Duration.ofMinutes(1));
+    }
+
+    private MockFleetConfig config(int maxActive, int maxConcurrent, int queuedCapacity,
+                                   Duration podCreationTimeout) {
         MockFleetConfig config = mock(MockFleetConfig.class);
         when(config.maxActiveMocks()).thenReturn(maxActive);
         when(config.maxConcurrentStarts()).thenReturn(maxConcurrent);
         when(config.queuedStartCapacity()).thenReturn(queuedCapacity);
-        when(config.podCreationTimeout()).thenReturn(Duration.ofMinutes(1));
+        when(config.podCreationTimeout()).thenReturn(podCreationTimeout);
         return config;
+    }
+
+    private void awaitAfter(long epochMillis) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (System.currentTimeMillis() <= epochMillis) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Clock did not advance past the startup lease deadline.");
+            }
+            Thread.onSpinWait();
+        }
     }
 }

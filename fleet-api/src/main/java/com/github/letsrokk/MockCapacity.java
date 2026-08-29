@@ -52,8 +52,10 @@ public class MockCapacity {
         Objects.requireNonNull(publishStarting, "publishStarting");
         reservations.lock(CAPACITY_LOCK_KEY);
         try {
+            long now = System.currentTimeMillis();
+            reconcileExpiredReservations(now, false);
             String currentAttempt = reservations.get(mockId);
-            Set<String> activeMockIds = activeMockIds();
+            Set<String> activeMockIds = activeMockIds(now);
             if (!attemptId.equals(currentAttempt)
                     && currentAttempt == null
                     && !activeMockIds.contains(mockId)
@@ -111,7 +113,9 @@ public class MockCapacity {
     public int activeCount() {
         reservations.lock(CAPACITY_LOCK_KEY);
         try {
-            return activeMockIds().size();
+            long now = System.currentTimeMillis();
+            reconcileExpiredReservations(now, false);
+            return activeMockIds(now).size();
         } finally {
             reservations.unlock(CAPACITY_LOCK_KEY);
         }
@@ -120,20 +124,23 @@ public class MockCapacity {
     public void reconcile() {
         reservations.lock(CAPACITY_LOCK_KEY);
         try {
-            long now = System.currentTimeMillis();
-            reservations.entrySet().forEach(entry -> {
-                MockPodLifecycle lifecycle = lifecycles.get(entry.getKey());
-                if (!isFreshStartingAttempt(lifecycle, entry.getValue(), now)) {
-                    reservations.remove(entry.getKey(), entry.getValue());
-                }
-            });
+            reconcileExpiredReservations(System.currentTimeMillis(), true);
         } finally {
             reservations.unlock(CAPACITY_LOCK_KEY);
         }
     }
 
-    private Set<String> activeMockIds() {
-        long now = System.currentTimeMillis();
+    private void reconcileExpiredReservations(long now, boolean removeOrphans) {
+        reservations.entrySet().forEach(entry -> {
+            MockPodLifecycle lifecycle = lifecycles.get(entry.getKey());
+            if ((lifecycle != null || removeOrphans)
+                    && !isFreshStartingAttempt(lifecycle, entry.getValue(), now)) {
+                reservations.remove(entry.getKey(), entry.getValue());
+            }
+        });
+    }
+
+    private Set<String> activeMockIds(long now) {
         Set<String> active = new HashSet<>(reservations.keySet());
         active.addAll(pods.keySet());
         lifecycles.forEach((mockId, lifecycle) -> {
