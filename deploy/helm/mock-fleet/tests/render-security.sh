@@ -77,7 +77,7 @@ admission_fixture() {
 
   case "${variant}" in
     accepted) ;;
-    accepted-workload-identity|identity-alternate-mount|identity-init-subpath|irsa-duplicate-role-env)
+    accepted-workload-identity|identity-alternate-mount|identity-init-subpath|irsa-duplicate-role-env|second-irsa-identity)
       fixture=$(jq -c '
         .spec.volumes += [{
           name:"aws-iam-token",
@@ -97,7 +97,7 @@ admission_fixture() {
           else . end
       ' <<<"${fixture}")
       ;;
-    accepted-eks-pod-identity|eks-token-without-label|eks-label-wrong-value|eks-nonstandard-token-path|eks-alternate-volume-name|eks-dual-irsa-mount|eks-second-mount|eks-duplicate-full-uri|eks-duplicate-token-file)
+    accepted-eks-pod-identity|eks-token-without-label|eks-label-wrong-value|eks-nonstandard-token-path|eks-alternate-volume-name|eks-dual-irsa-mount|eks-second-mount|eks-duplicate-full-uri|eks-duplicate-token-file|mixed-eks-irsa-identity)
       fixture=$(jq -c '
         .metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"
         | .spec.volumes += [{
@@ -107,13 +107,19 @@ admission_fixture() {
         | .spec.containers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
         | .spec.containers[0].env = [
             {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
-            {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+            {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"},
+            {name:"AWS_DEFAULT_REGION",value:"us-east-1"},
+            {name:"AWS_REGION",value:"us-east-1"},
+            {name:"AWS_STS_REGIONAL_ENDPOINTS",value:"regional"}
           ]
         | if (.spec | has("initContainers")) then
             .spec.initContainers[0].volumeMounts += [{name:"eks-pod-identity-token",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
             | .spec.initContainers[0].env = [
                 {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
-                {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+                {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"},
+                {name:"AWS_DEFAULT_REGION",value:"us-east-1"},
+                {name:"AWS_REGION",value:"us-east-1"},
+                {name:"AWS_STS_REGIONAL_ENDPOINTS",value:"regional"}
               ]
           else . end
       ' <<<"${fixture}")
@@ -141,6 +147,20 @@ admission_fixture() {
     container-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.containers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     init-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.initContainers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     eks-label-without-token) fixture=$(jq -c '.metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"' <<<"${fixture}") ;;
+    eks-env-without-label)
+      fixture=$(jq -c '
+        .spec.containers[0].env = [
+          {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
+          {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+        ]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].env = [
+              {name:"AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",value:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token"},
+              {name:"AWS_CONTAINER_CREDENTIALS_FULL_URI",value:"http://169.254.170.23/v1/credentials"}
+            ]
+          else . end
+      ' <<<"${fixture}")
+      ;;
     extra-unrelated-label) fixture=$(jq -c '.metadata.labels["attacker.example/unrelated"] = "enabled"' <<<"${fixture}") ;;
     *) printf 'Unknown admission fixture: %s\n' "${variant}" >&2; return 1 ;;
   esac
@@ -191,6 +211,38 @@ admission_fixture() {
       ;;
     irsa-duplicate-role-env)
       fixture=$(jq -c '.spec.containers[0].env += [{name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/shadow"}]' <<<"${fixture}")
+      ;;
+    second-irsa-identity)
+      fixture=$(jq -c '
+        .spec.volumes += [{
+          name:"aws-iam-token-shadow",
+          projected:{sources:[{serviceAccountToken:{audience:"sts.amazonaws.com",expirationSeconds:86400,path:"token"}}]}
+        }]
+        | .spec.containers[0].volumeMounts += [{name:"aws-iam-token-shadow",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts += [{name:"aws-iam-token-shadow",mountPath:"/var/run/secrets/pods.eks.amazonaws.com/serviceaccount",readOnly:true}]
+          else . end
+      ' <<<"${fixture}")
+      ;;
+    mixed-eks-irsa-identity)
+      fixture=$(jq -c '
+        .spec.volumes += [{
+          name:"aws-iam-token",
+          projected:{sources:[{serviceAccountToken:{audience:"sts.amazonaws.com",expirationSeconds:86400,path:"token"}}]}
+        }]
+        | .spec.containers[0].volumeMounts += [{name:"aws-iam-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+        | .spec.containers[0].env += [
+            {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+            {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+          ]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].volumeMounts += [{name:"aws-iam-token",mountPath:"/var/run/secrets/eks.amazonaws.com/serviceaccount",readOnly:true}]
+            | .spec.initContainers[0].env += [
+                {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+                {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+              ]
+          else . end
+      ' <<<"${fixture}")
       ;;
     eks-token-without-label)
       fixture=$(jq -c 'del(.metadata.labels["eks.amazonaws.com/pod-identity"])' <<<"${fixture}")
@@ -280,6 +332,9 @@ for fragment in \
   "volume.name == 'eks-pod-identity-token'" \
   "serviceAccountToken.path == 'eks-pod-identity-token'" \
   'variables.wiremock.env.filter(other, other.name == env.name).size() == 1' \
+  'variables.identityVolumes.size() <= 1' \
+  'variables.eksIdentityEnvNames' \
+  'variables.irsaIdentityEnvNames' \
   'custom-fleet-wiremock' \
   'wiremock/wiremock:3.13.2-2' \
   'automountServiceAccountToken' \
@@ -340,7 +395,7 @@ jq -e '
   .spec.volumes[0].projected.sources[0].serviceAccountToken.path == "eks-pod-identity-token" and
   ([.spec.containers[0].volumeMounts[] | select(.name == "eks-pod-identity-token")] | length) == 1
 ' >/dev/null <<<"${eks_fixture}" || fail 'EKS Pod Identity fixture does not match the current upstream mutation'
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env; do
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env mixed-eks-irsa-identity eks-env-without-label second-irsa-identity; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"

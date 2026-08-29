@@ -42,6 +42,18 @@ spec:
           volume.projected.sources.size() == 1 &&
           has(volume.projected.sources[0].serviceAccountToken) &&
           volume.projected.sources[0].serviceAccountToken.audience == 'pods.eks.amazonaws.com')
+    - name: stsIdentityVolumes
+      expression: >-
+        variables.identityVolumes.filter(volume,
+          volume.projected.sources.size() == 1 &&
+          has(volume.projected.sources[0].serviceAccountToken) &&
+          volume.projected.sources[0].serviceAccountToken.audience == 'sts.amazonaws.com')
+    - name: irsaIdentityEnvNames
+      expression: >-
+        ['AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE']
+    - name: eksIdentityEnvNames
+      expression: >-
+        ['AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE', 'AWS_CONTAINER_CREDENTIALS_FULL_URI']
     - name: allowedIdentityEnvNames
       expression: >-
         ['AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_STS_REGIONAL_ENDPOINTS',
@@ -189,6 +201,23 @@ spec:
           volume.projected.sources[0].serviceAccountToken.expirationSeconds >= 600 &&
           volume.projected.sources[0].serviceAccountToken.expirationSeconds <= 86400)
       message: Only audience-bound IRSA or EKS Pod Identity token projections are allowed.
+    - expression: >-
+        (variables.eksPodIdentityLabelPresent &&
+          variables.identityVolumes.size() == 1 &&
+          (!has(variables.wiremock.env) || variables.wiremock.env.all(env,
+            !(env.name in variables.irsaIdentityEnvNames))) &&
+          (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
+            !has(container.env) || container.env.all(env,
+              !(env.name in variables.irsaIdentityEnvNames))))) ||
+        (!variables.eksPodIdentityLabelPresent &&
+          variables.identityVolumes.size() <= 1 &&
+          (variables.identityVolumes.size() == 0 || variables.stsIdentityVolumes.size() == 1) &&
+          (!has(variables.wiremock.env) || variables.wiremock.env.all(env,
+            !(env.name in variables.eksIdentityEnvNames))) &&
+          (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
+            !has(container.env) || container.env.all(env,
+              !(env.name in variables.eksIdentityEnvNames)))))
+      message: Workload identity volumes and environment variables must use one credential mode.
     - expression: >-
         variables.eksPodIdentityLabelPresent == (variables.eksIdentityVolumes.size() > 0) &&
         (!variables.eksPodIdentityLabelPresent ||
