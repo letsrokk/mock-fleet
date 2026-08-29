@@ -74,7 +74,7 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --set fleet.mcp.enabled=true
 ```
 
-The MCP service uses stateful Streamable HTTP and therefore runs one replica. Every deployment requires an exact WireMock 3.x image tag; the default is `wiremock/wiremock:3.13.2-2`. Mock Fleet resolves the option catalog against that version. Known incompatible options remain selectable with warnings, while direct credential options remain visible but unavailable until Secret-backed storage exists.
+The MCP service uses stateful Streamable HTTP and therefore runs one replica. Every deployment requires an exact WireMock 3.x image tag; the default is `wiremock/wiremock:3.13.2-2`. Mock Fleet resolves the option catalog against that version. Options absent from the configured version are hidden and rejected, while direct credential options remain visible but unavailable until Secret-backed storage exists.
 
 The REST lifecycle is asynchronous and idempotent. `POST /__fleet/api/mocks/{mockId}/start` returns 200 for RUNNING or 202 for STARTING with `retryAfterMs`; poll the same endpoint until RUNNING. DELETE waits for an existing pod to be removed before it returns STOPPED, and also returns STOPPED when the mock is starting, failed, already stopped, or absent. Config rows expose `lifecycle`, and config mutations return `{config,apply:{mockId,mode,lifecycle}}`. All lifecycle/config errors use `ApiError {code,message,retryable,stateMayHaveChanged,details}`; `CONFIG_CONFLICT` includes expected and current versions.
 

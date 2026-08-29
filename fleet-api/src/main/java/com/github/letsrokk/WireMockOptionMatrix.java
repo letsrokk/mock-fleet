@@ -56,11 +56,22 @@ final class WireMockOptionMatrix {
             throw new IllegalArgumentException("WireMock version must be at least " + minimumSupportedVersion);
         }
         boolean future = version.compareTo(maximumResearchedVersion) > 0;
+        WireMockVersion catalogVersion = future ? maximumResearchedVersion : version;
         List<WireMockOptionCatalog.OptionDefinition> resolved = WireMockOptionCatalog.baseDefinitions().stream()
+                .filter(option -> isPresent(options.get(option.name()), catalogVersion))
                 .map(option -> resolve(option, options.get(option.name()), version, future))
                 .toList();
         return new ResolvedCatalog(version, minimumSupportedVersion, maximumResearchedVersion,
                 future ? "newer_unresearched" : "supported", resolved);
+    }
+
+    private boolean isPresent(MatrixOption option, WireMockVersion version) {
+        if (option.unsupported()) {
+            return false;
+        }
+        WireMockVersion minimum = versionOrDefault(option.minimumVersion(), minimumSupportedVersion);
+        WireMockVersion maximum = versionOrNull(option.maximumVersion());
+        return version.compareTo(minimum) >= 0 && (maximum == null || version.compareTo(maximum) <= 0);
     }
 
     private WireMockOptionCatalog.OptionDefinition resolve(WireMockOptionCatalog.OptionDefinition presentation,
@@ -69,35 +80,8 @@ final class WireMockOptionMatrix {
                                                              boolean future) {
         WireMockVersion minimum = versionOrDefault(matrixOption.minimumVersion(), minimumSupportedVersion);
         WireMockVersion maximum = versionOrNull(matrixOption.maximumVersion());
-        boolean inRange = version.compareTo(minimum) >= 0 && (maximum == null || version.compareTo(maximum) <= 0);
-        String compatibility = "supported";
-        String message = null;
-        if (future) {
-            compatibility = "unknown";
-            message = "This option has not been verified with WireMock " + version + ".";
-        } else if (matrixOption.unsupported()) {
-            compatibility = "unsupported";
-            message = "This option is not part of the WireMock Java 3.x command line.";
-        } else if (!inRange) {
-            compatibility = "unsupported";
-            message = version.compareTo(minimum) < 0
-                    ? "This option was introduced in WireMock " + minimum + "."
-                    : "This option is not present after WireMock " + maximum + ".";
-        } else if (matrixOption.knownIssue() != null
-                && (matrixOption.knownIssueVersion() == null
-                || version.equals(WireMockVersion.parse(matrixOption.knownIssueVersion())))) {
-            compatibility = "known_broken";
-            message = matrixOption.knownIssue();
-        }
-
-        String kind = presentation.kind();
-        Integer numericMinimum = presentation.minimum();
-        Integer numericMaximum = presentation.maximum();
-        if ("--timeout".equals(presentation.name())) {
-            kind = "flag";
-            numericMinimum = null;
-            numericMaximum = null;
-        }
+        String compatibility = future ? "unknown" : "supported";
+        String message = future ? "This option has not been verified with WireMock " + version + "." : null;
 
         boolean available = matrixOption.unavailableReason() == null;
         List<WireMockOptionCatalog.VersionRange> ranges = matrixOption.unsupported()
@@ -105,8 +89,8 @@ final class WireMockOptionMatrix {
                 : List.of(new WireMockOptionCatalog.VersionRange(
                         minimum.toString(), maximum == null ? null : maximum.toString()));
         return new WireMockOptionCatalog.OptionDefinition(
-                presentation.name(), presentation.label(), kind, presentation.group(), presentation.description(),
-                presentation.values(), numericMinimum, numericMaximum, available,
+                presentation.name(), presentation.label(), presentation.kind(), presentation.group(),
+                presentation.description(), presentation.values(), presentation.minimum(), presentation.maximum(), available,
                 matrixOption.unavailableReason(), compatibility, message, ranges);
     }
 

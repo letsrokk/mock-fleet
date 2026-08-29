@@ -9,6 +9,7 @@ import {
   optionsFromDraft,
   overrideOptions,
   resourcesFromDraft,
+  wireMockVersionLabel,
   type ConfigData,
   type OptionDefinition
 } from "./configOptions";
@@ -88,6 +89,10 @@ const compatibilityDefinition: OptionDefinition = {
 const emptyResources = { requests: {}, limits: {} };
 
 describe("config option helpers", () => {
+  it("shows only the configured WireMock version in the catalog heading", () => {
+    expect(wireMockVersionLabel("3.13.2")).toBe("WireMock 3.13.2");
+  });
+
   it("represents inherited user resources as null", () => {
     expect(emptyUserConfig()).toEqual({ options: [], resources: null });
   });
@@ -132,6 +137,21 @@ describe("config option helpers", () => {
     expect(optionsFromDraft(withoutValue, optionalDefinitions)).toEqual([
       "--max-template-cache-entries", "100"
     ]);
+  });
+
+  it("emits timeout only when its value field is non-empty", () => {
+    const timeoutDefinitions: OptionDefinition[] = [{
+      ...definitions[3],
+      name: "--timeout",
+      label: "Timeout ms"
+    }];
+
+    expect(optionsFromDraft({
+      flags: {}, values: {}, rawArgs: "", requests: {}, limits: {}
+    }, timeoutDefinitions)).toEqual([]);
+    expect(optionsFromDraft({
+      flags: {}, values: { "--timeout": "10000" }, rawArgs: "", requests: {}, limits: {}
+    }, timeoutDefinitions)).toEqual(["--timeout", "10000"]);
   });
 
   it("keeps clearing inherited resources as an explicit empty override", () => {

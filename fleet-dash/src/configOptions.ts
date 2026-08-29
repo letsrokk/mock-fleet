@@ -162,6 +162,10 @@ export function resourceSummary(resources: ResourceData) {
   return `requests: ${requestText || "none"}; limits: ${limitText || "none"}`;
 }
 
+export function wireMockVersionLabel(version: string) {
+  return `WireMock ${version}`;
+}
+
 export function numberInputAttributes(option: OptionDefinition) {
   if (!option.kind.endsWith("number") || option.minimum === null || option.maximum === null) {
     return {};

@@ -96,17 +96,14 @@
     { "name": "--record-mappings" },
     { "name": "--root-dir" },
     { "name": "--supported-proxy-encodings", "minimumVersion": "3.6.0" },
-    { "name": "--timeout", "knownIssue": "WireMock declares this as a flag but reads it as a numeric value at runtime." },
-    { "name": "--trust-all-proxy-targets", "knownIssueVersion": "3.13.2", "knownIssue": "WireMock 3.13.2 advertises this option but fails during startup when it is used." },
+    { "name": "--timeout" },
+    { "name": "--trust-all-proxy-targets" },
     { "name": "--trust-proxy-target" },
     { "name": "--truststore-password", "unavailableReason": "SECRET_STORAGE_REQUIRED" },
     { "name": "--truststore-type" },
     { "name": "--use-chunked-encoding" },
     { "name": "--verbose" },
     { "name": "--version", "minimumVersion": "3.4.0" },
-    { "name": "--webhook-threadpool-size", "minimumVersion": "3.13.0" },
-    { "name": "--websocket-idle-timeout", "unsupported": true },
-    { "name": "--websocket-max-binary-message-size", "unsupported": true },
-    { "name": "--websocket-max-text-message-size", "unsupported": true }
+    { "name": "--webhook-threadpool-size", "minimumVersion": "3.13.0" }
   ]
 }

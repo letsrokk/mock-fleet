@@ -14,6 +14,7 @@ import {
   optionsFromDraft,
   resourceSummary,
   resourcesFromDraft,
+  wireMockVersionLabel,
   type ConfigData,
   type DraftConfig,
   type OptionDefinition
@@ -972,8 +973,7 @@ export default function App() {
                     <span>
                       <h2>WireMock options</h2>
                       <span className="option-version-context">
-                        WireMock {configView.wireMock.version}; researched {configView.wireMock.minimumSupportedVersion}
-                        {" - "}{configView.wireMock.maximumResearchedVersion}
+                        {wireMockVersionLabel(configView.wireMock.version)}
                       </span>
                     </span>
                     <div className="option-toolbar">

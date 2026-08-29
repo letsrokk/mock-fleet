@@ -5,7 +5,8 @@ Use a disposable namespace and unique mock IDs. Record the build SHA, WireMock i
 - [ ] The chart runs two ready API replicas, one MCP replica, and persistent S3 storage on SeaweedFS.
 - [ ] A configuration saved through the API service is visible from each API pod's direct endpoint, including a newly restarted API replica.
 - [ ] Invalid options return `ApiError` with `INVALID_OPTIONS`; `resourceVersion` and saved config remain unchanged.
-- [ ] `list_option_definitions` and the dashboard show the pinned WireMock version, researched range, supported/unsupported/known-broken states, and exactly five `SECRET_STORAGE_REQUIRED` options.
+- [ ] `list_option_definitions` and the dashboard show only options present in the pinned WireMock version, display the configured version without the researched range, and retain exactly five visible `SECRET_STORAGE_REQUIRED` options.
+- [ ] Options hidden for the pinned WireMock version are rejected through dashboard Advanced arguments, REST, and MCP without changing `resourceVersion` or saved configuration.
 - [ ] Every name from MCP `tools/list` appears in the live coverage manifest. The 3.7.0 `get_body_file` and 3.13.0 `list_unmatched_stubs` boundaries agree between discovery and direct calls.
 - [ ] A stale config write returns `CONFIG_CONFLICT` with exact `expectedVersion` and `currentVersion` details.
 - [ ] First `start_mock` on a cold mock returns RUNNING or STARTING. When STARTING, a WireMock tool returns retryable `MOCK_STARTING`, sends no Admin traffic, and succeeds after polling.

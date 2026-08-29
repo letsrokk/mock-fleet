@@ -2,28 +2,26 @@
 
 ## Goal
 
-Mock Fleet exposes a complete, version-aware WireMock 3.x command-line option catalog through Fleet API, the dashboard, and MCP. The catalog is resolved against the deployment's pinned WireMock image and remains honest about unsupported, broken, unresearched, and secret-bearing options.
+Mock Fleet exposes a version-aware WireMock 3.x command-line option catalog through Fleet API, the dashboard, and MCP. The catalog is resolved against the deployment's pinned WireMock image, hides options absent from that version, and preserves security restrictions for secret-bearing options.
 
 ## Supported versions
 
 - The minimum supported WireMock version is `3.0.0`.
 - The initial maximum researched version is `3.13.2`, the latest stable 3.x release when this design was approved.
 - Exact, immutable WireMock 3.x image tags remain required. Docker image revisions such as `3.13.2-2` resolve to WireMock `3.13.2`.
-- Future 3.x versions above the researched maximum may run. Their known catalog entries use the latest known control shape and report compatibility as `unknown`.
+- Future 3.x versions above the researched maximum may run. They use the option set present in the latest researched version and report those entries as `unknown`.
 - WireMock 2.x and 4.x are outside this design.
 
 ## Matrix behavior
 
 Fleet API owns a checked-in compatibility matrix derived from tagged WireMock source, release notes, documentation, CLI help, and container smoke tests for stable 3.x releases. Each option records its UI metadata, argument shape, version ranges, security availability, and known defects.
 
-The resolved catalog contains every known option:
+The resolved catalog contains only options present in the configured version:
 
-- `supported`: WireMock accepts the option for the pinned version.
-- `unsupported`: the option belongs to another researched 3.x version.
-- `known_broken`: upstream advertises or parses the option incorrectly for the pinned version and a smoke test reproduces the failure.
+- `supported`: WireMock advertises the option for the pinned version.
 - `unknown`: the pinned version is newer than the researched maximum.
 
-Compatibility is advisory. The dashboard warns with a `(!)` indicator, but the API accepts catalogued unsupported, known-broken, and unknown options and passes them to WireMock. Users can therefore exercise upstream behavior at their discretion. Unknown option names remain invalid.
+Options outside the configured version's range are omitted from dashboard and MCP discovery and rejected by Fleet API validation. Options advertised for the configured version remain visible and accepted without startup-compatibility warnings. Unknown option names remain invalid.
 
 ## Secret handling
 
@@ -41,9 +39,9 @@ MCP Admin API capability gates remain distinct from CLI option compatibility. Th
 
 The first matrix must encode and test these live findings:
 
-- `--timeout` has the actual version-specific argument shape; on 3.13.2 it must not be emitted with the invalid numeric value shape used by the old catalog.
-- `--disable-optimize-xml-factories-loading`, `--websocket-idle-timeout`, `--websocket-max-text-message-size`, and `--websocket-max-binary-message-size` are unsupported on 3.13.2.
-- `--trust-all-proxy-targets` is known-broken on 3.13.2 because the pinned image fails during startup despite advertising it.
+- `--timeout` is a required-value text option and is emitted only when a value is provided, despite WireMock 3.13.2's inconsistent upstream parser declaration.
+- `--disable-optimize-xml-factories-loading` is hidden after 3.12.1. The three WebSocket options are absent from the researched 3.13.2 CLI and are not catalogued.
+- `--trust-all-proxy-targets` remains visible and accepted without a warning because WireMock 3.13.2 advertises it.
 - Recording filename examples use WireMock's triple-brace form, for example `{{{method}}}-{{{url}}}.json`.
 
 ## Acceptance

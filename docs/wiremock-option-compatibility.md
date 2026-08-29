@@ -1,8 +1,10 @@
 # WireMock option compatibility
 
-Mock Fleet supports exact WireMock versions from 3.0.0 through the latest researched stable 3.x release. The packaged matrix currently covers every stable release through 3.13.2. A future exact 3.x pin is allowed, but every known option reports `unknown` compatibility until the matrix is advanced.
+Mock Fleet supports exact WireMock versions from 3.0.0 through the latest researched stable 3.x release. The packaged matrix currently covers every stable release through 3.13.2. A future exact 3.x pin is allowed; it uses the option set from the latest researched version and reports those options with `unknown` compatibility until the matrix is advanced.
 
-Fleet API owns the matrix in `fleet-api/src/main/resources/wiremock-option-compatibility.json`. The dashboard and `list_option_definitions` MCP tool consume the resolved API response. They do not maintain separate version rules. Compatibility is advisory: `unsupported`, `known_broken`, and `unknown` options can still be saved and passed to WireMock. Unknown option names are rejected.
+Fleet API owns the matrix in `fleet-api/src/main/resources/wiremock-option-compatibility.json`. The dashboard and `list_option_definitions` MCP tool consume the resolved API response. They do not maintain separate version rules. Options outside the configured version's supported range are omitted and rejected if submitted directly. Options advertised by WireMock remain available without warnings even when startup testing finds an upstream defect. Unknown option names are rejected.
+
+`--timeout` is exposed as a required-value text option and is emitted only when its field contains a value. WireMock 3.13.2 advertises the option without declaring its required argument even though startup reads a numeric value, so a submitted value can still fail in WireMock itself.
 
 The following direct credential options are catalogued but unavailable with `SECRET_STORAGE_REQUIRED`: `--admin-api-basic-auth`, `--ca-keystore-password`, `--keystore-password`, `--key-manager-password`, and `--truststore-password`. Mock Fleet rejects them before ConfigMap persistence or pod creation. `--proxy-via` remains available.
 
@@ -10,7 +12,7 @@ To advance the researched maximum:
 
 1. Enumerate every intervening stable WireMock 3.x tag and exclude prereleases.
 2. Compare tagged `CommandLineOptions`, standalone documentation, release notes, and container `--help` output.
-3. Add every stable tag to `stableReleases`, then update option bounds and reviewed known issues.
+3. Add every stable tag to `stableReleases`, then update option bounds and reviewed upstream behavior.
 4. Run `fleet-api/tests/verify-wiremock-option-matrix.sh` and all API, dashboard, MCP, Helm, Docker Admin API, and Minikube suites.
 5. Update the documented researched maximum and release notes in the same change.
 
