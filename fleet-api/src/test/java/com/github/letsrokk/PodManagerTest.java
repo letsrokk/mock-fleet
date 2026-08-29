@@ -62,7 +62,7 @@ class PodManagerTest {
         MockFleetConfig config = mock(MockFleetConfig.class);
         CountDownLatch workerEntered = new CountDownLatch(1);
         CountDownLatch releaseWorker = new CountDownLatch(1);
-        CountDownLatch workersFinished = new CountDownLatch(2);
+        CountDownLatch startsCompleted = new CountDownLatch(2);
         AtomicInteger spawned = new AtomicInteger();
         PodManager podManager = new PodManager() {
             @Override
@@ -75,7 +75,6 @@ class PodManagerTest {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(error);
                 }
-                workersFinished.countDown();
                 return new MockPodRef("mock-fleet-" + mockId + "-1", "10.0.0.1");
             }
         };
@@ -91,7 +90,10 @@ class PodManagerTest {
         when(podState.claimStart(eq("third"), anyLong(), eq(2_000L))).thenReturn(
                 new PodState.StartClaim(true, MockPodLifecycle.starting("attempt-third", null, 1_000L), null));
         when(podState.isCurrentStartingAttempt(any(), any())).thenReturn(true);
-        when(podState.completeStart(any(), any(), any(), any())).thenReturn(true);
+        when(podState.completeStart(any(), any(), any(), any())).thenAnswer(invocation -> {
+            startsCompleted.countDown();
+            return true;
+        });
         when(podState.lifecycle(any())).thenAnswer(invocation -> MockPodLifecycle.starting(
                 "attempt-" + invocation.getArgument(0), null, 1_000L));
         podManager.initializeStartExecutor();
@@ -112,7 +114,7 @@ class PodManagerTest {
             verify(podState).failStart(eq("third"), eq("attempt-third"), any());
         } finally {
             releaseWorker.countDown();
-            assertTrue(workersFinished.await(2, TimeUnit.SECONDS));
+            assertTrue(startsCompleted.await(2, TimeUnit.SECONDS));
             verify(podState, times(2)).completeStart(any(), any(), any(), any());
             podManager.closeStartExecutor();
             assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isShutdown());
