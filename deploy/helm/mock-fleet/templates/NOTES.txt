@@ -4,9 +4,8 @@ Security prerequisites:
   - Kubernetes 1.30 or newer is required by the default-on ValidatingAdmissionPolicy.
   - The cluster CNI must enforce Kubernetes NetworkPolicy. Kubernetes can accept
     the rendered policies while the CNI ignores them; Calico and Cilium are
-    examples of capable CNIs. Run:
-      helm show readme oci://ghcr.io/letsrokk/charts/mock-fleet --version {{ .Chart.Version }}
-    and follow "Verify NetworkPolicy enforcement" in the returned chart README.
+    examples of capable CNIs. Follow the current verification procedure at:
+      https://github.com/letsrokk/mock-fleet/blob/master/deploy/helm/mock-fleet/README.md#verify-networkpolicy-enforcement
   - Cluster operators must apply restricted Pod Security Admission to namespaces
     not created by the repository deployment helpers.
 
