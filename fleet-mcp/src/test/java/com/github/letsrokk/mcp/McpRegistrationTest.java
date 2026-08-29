@@ -220,6 +220,9 @@ class McpRegistrationTest {
                 Set.copyOf(textValues(optionCatalog.path("required"))));
         assertFalse(optionCatalog.path("properties").path("options").path("items")
                 .path("additionalProperties").asBoolean(true));
+        assertEquals(List.of("flag", "input", "number", "select", "optional_number", "optional_input"),
+                textValues(optionCatalog.path("properties").path("options").path("items")
+                        .path("properties").path("kind").path("enum")));
     }
 
     @Test

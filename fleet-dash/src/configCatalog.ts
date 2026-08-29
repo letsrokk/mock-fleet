@@ -3,6 +3,11 @@ import { errorMessage, type ConfigView, type OptionCatalogView } from "./apiCont
 const CONFIG_API_PATH = "/__fleet/api/config";
 const CONFIG_OPTIONS_API_PATH = "/__fleet/api/config/options";
 
+export type ConfigCatalogLoad = {
+  config: ConfigView;
+  optionCatalog: OptionCatalogView;
+};
+
 export async function loadConfigAndOptionCatalog(fetcher: typeof fetch = fetch) {
   const configResponse = await fetcher(CONFIG_API_PATH);
   if (!configResponse.ok) {
@@ -21,4 +26,19 @@ export async function loadConfigAndOptionCatalog(fetcher: typeof fetch = fetch) 
     config: (await configResponse.json()) as ConfigView,
     optionCatalog: (await optionCatalogResponse.json()) as OptionCatalogView
   };
+}
+
+export async function refreshConfigAndOptionCatalog(
+  previous: ConfigCatalogLoad | null,
+  fetcher: typeof fetch = fetch
+): Promise<{ ok: true; state: ConfigCatalogLoad } | { ok: false; state: ConfigCatalogLoad | null; error: string }> {
+  try {
+    return { ok: true, state: await loadConfigAndOptionCatalog(fetcher) };
+  } catch (error) {
+    return {
+      ok: false,
+      state: previous,
+      error: error instanceof Error ? error.message : "Unable to load config."
+    };
+  }
 }

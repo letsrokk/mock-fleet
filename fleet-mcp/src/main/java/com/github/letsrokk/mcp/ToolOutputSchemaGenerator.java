@@ -135,7 +135,8 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
         return strict(properties(
                 "name", string(),
                 "label", string(),
-                "kind", string(),
+                "kind", string().put("enum", new JsonArray().add("flag").add("input").add("number")
+                        .add("select").add("optional_number").add("optional_input")),
                 "group", string(),
                 "description", string(),
                 "values", array(string()),

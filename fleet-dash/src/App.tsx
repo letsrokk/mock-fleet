@@ -12,12 +12,12 @@ import {
   optionsFromDraft,
   resourceSummary,
   resourcesFromDraft,
-  wireMockVersionLabel,
   type ConfigData,
   type DraftConfig,
   type OptionDefinition
 } from "./configOptions";
-import { loadConfigAndOptionCatalog } from "./configCatalog";
+import { refreshConfigAndOptionCatalog } from "./configCatalog";
+import { OptionCatalogPresentation } from "./optionCatalogPresentation";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 import {
   configMutation,
@@ -63,6 +63,11 @@ type MappingFileNode = {
   children: MappingFileNode[];
 };
 
+type ConfigCatalogState = {
+  configView: ConfigView;
+  optionCatalog: OptionCatalogView;
+};
+
 const MOCKS_API_PATH = "/__fleet/api/mocks";
 const MOCKS_STREAM_PATH = `${MOCKS_API_PATH}/stream`;
 const CONFIG_API_PATH = "/__fleet/api/config";
@@ -81,8 +86,9 @@ type Tab = "mocks" | "config" | "mappings";
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash());
   const [rows, setRows] = useState<MockRow[]>([]);
-  const [configView, setConfigView] = useState<ConfigView | null>(null);
-  const [optionCatalog, setOptionCatalog] = useState<OptionCatalogView | null>(null);
+  const [configCatalogState, setConfigCatalogState] = useState<ConfigCatalogState | null>(null);
+  const configView = configCatalogState?.configView ?? null;
+  const optionCatalog = configCatalogState?.optionCatalog ?? null;
   const [mappingsView, setMappingsView] = useState<MappingsView>({
     enabled: false,
     mockIds: [],
@@ -132,8 +138,17 @@ export default function App() {
     }
 
     try {
-      setOptionCatalog(null);
-      const response = await loadConfigAndOptionCatalog();
+      const refresh = await refreshConfigAndOptionCatalog(
+        configCatalogState === null ? null : {
+          config: configCatalogState.configView,
+          optionCatalog: configCatalogState.optionCatalog
+        }
+      );
+      if (!refresh.ok) {
+        setError(refresh.error);
+        return;
+      }
+      const response = refresh.state;
       const data = normalizeConfigView(response.config as ConfigView & { routing?: RoutingView });
       const catalog = response.optionCatalog;
       const preserveDraft = configDirty && selectedMockId !== null;
@@ -143,8 +158,7 @@ export default function App() {
       const nextSelected = selectedMockId && nextData.mockIds.includes(selectedMockId)
         ? selectedMockId
         : nextData.mockIds[0] ?? null;
-      setConfigView(nextData);
-      setOptionCatalog(catalog);
+      setConfigCatalogState({ configView: nextData, optionCatalog: catalog });
       setSelectedMockId(nextSelected);
       if (nextSelected && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
@@ -272,7 +286,7 @@ export default function App() {
       }
       const mutation = configMutation((await response.json()) as ConfigMutationResult);
       const data = normalizeConfigView(mutation.config);
-      setConfigView(data);
+      setConfigCatalogState((current) => current ? { ...current, configView: data } : current);
       setSelectedMockId(selectedMockId);
       const mock = data.mocks.find((item) => item.mockId === selectedMockId);
       setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
@@ -302,7 +316,7 @@ export default function App() {
       }
       const mutation = configMutation((await response.json()) as ConfigMutationResult);
       const data = normalizeConfigView(mutation.config);
-      setConfigView(data);
+      setConfigCatalogState((current) => current ? { ...current, configView: data } : current);
       const nextSelected = data.mockIds.includes(selectedMockId) ? selectedMockId : data.mockIds[0] ?? null;
       setSelectedMockId(nextSelected);
       const mock = data.mocks.find((item) => item.mockId === nextSelected);
@@ -377,14 +391,17 @@ export default function App() {
       setConfigDirty(false);
       return;
     }
-    setConfigView({
-      ...configView,
-      mockIds: [...configView.mockIds, mockId].sort(),
-      mocks: [
-        ...configView.mocks,
-        emptyMockConfigView(mockId)
-      ].sort((left, right) => left.mockId.localeCompare(right.mockId))
-    });
+    setConfigCatalogState((current) => current ? {
+      ...current,
+      configView: {
+        ...current.configView,
+        mockIds: [...current.configView.mockIds, mockId].sort(),
+        mocks: [
+          ...current.configView.mocks,
+          emptyMockConfigView(mockId)
+        ].sort((left, right) => left.mockId.localeCompare(right.mockId))
+      }
+    } : current);
     setSelectedMockId(mockId);
     setDraft(emptyDraft());
     setConfigDirty(true);
@@ -893,7 +910,6 @@ export default function App() {
       );
     }
 
-    const groupedOptions = groupOptions(catalog.options);
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
@@ -971,29 +987,18 @@ export default function App() {
               </div>
               <div className="editor-body">
                 <div className="form-section">
-                  <div className="section-title-row">
-                    <span>
-                      <h2>WireMock options</h2>
-                      <span className="option-version-context">
-                        {wireMockVersionLabel(catalog.wireMockVersion)}
-                      </span>
-                    </span>
-                    <div className="option-toolbar">
+                  <OptionCatalogPresentation
+                    catalog={catalog}
+                    toolbar={<div className="option-toolbar">
                       <button className="secondary-button small-button" type="button" onClick={expandAllOptionGroups}>
                         Expand all
                       </button>
                       <button className="secondary-button small-button" type="button" onClick={collapseAllOptionGroups}>
                         Collapse all
                       </button>
-                    </div>
-                  </div>
-                  {catalog.catalogStatus === "newer_unresearched" ? (
-                    <p className="notice warning compact-notice" role="status">
-                      This WireMock version is newer than the compatibility matrix. Known options remain usable, but compatibility is unknown.
-                    </p>
-                  ) : null}
-                  <div className="option-list">
-                    {groupedOptions.map(([group, options]) => {
+                    </div>}
+                    renderOptions={(options) => <>
+                    {groupOptions(options).map(([group, options]) => {
                       const collapsed = collapsedOptionGroups.has(group);
                       return (
                       <section className="option-group" key={group}>
@@ -1054,7 +1059,8 @@ export default function App() {
                         </div>
                       ) : null}
                     </section>
-                  </div>
+                    </>}
+                  />
                 </div>
 
                 <section className="option-group">
