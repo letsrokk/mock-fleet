@@ -79,9 +79,9 @@ Deletion remains limited by the role to pods. Application code must verify relea
 
 ## Provisioning Capacity
 
-Mock startup will use a bounded executor with a bounded queue. Configuration will define maximum active mocks, maximum concurrent starts, and queued start capacity. Values will have conservative defaults and explicit validation.
+Mock startup uses one bounded executor and bounded queue per API replica. Configuration defines the cluster-wide maximum active mocks and the per-replica maximum concurrent starts and queued start capacity. Aggregate worker and queue bounds are the respective per-replica values multiplied by the API replica count, while Hazelcast-backed active capacity remains cluster-wide. Values have conservative defaults and explicit validation.
 
-A start request reserves capacity atomically before asynchronous work begins. It releases the reservation on every success, rejection, timeout, and failure path. Requests above the active-mock limit return HTTP 429. Requests rejected because the start queue or worker pool is saturated return HTTP 503 with a stable error code. Concurrent requests cannot exceed either limit through a check-then-act race.
+A start request reserves capacity atomically before asynchronous work begins. It releases the reservation on every success, rejection, timeout, and failure path. Requests above the cluster-wide active-mock limit return HTTP 429. Requests rejected because a replica's start queue or worker pool is saturated return HTTP 503 with a stable error code. Concurrent requests cannot bypass the cluster-wide capacity or per-replica executor bounds through a check-then-act race.
 
 A successful explicit start will set `lastAccess` immediately so the existing idle-cleanup policy can reclaim it. Tests will cover races, queue saturation, failed starts, reservation release, and idle cleanup.
 

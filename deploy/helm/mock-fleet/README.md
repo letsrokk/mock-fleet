@@ -36,9 +36,12 @@ The local deployment helper labels its target namespace with `restricted` Pod Se
 
 ### Verify NetworkPolicy enforcement
 
-Run this probe after installation. It creates a restricted-compatible pod with exactly the two labels selected by the managed-WireMock egress policy and attempts a TCP connection to the cluster-internal Kubernetes service. `PASS` and a `Succeeded` pod prove that this connection was denied. `FAIL` or a `Failed` pod means the CNI did not enforce the boundary, the policy was disabled, or its selector no longer matches.
+Run this two-pod test after installation. The first pod is an otherwise equivalent unselected positive control. It must reach the cluster-internal Kubernetes service on TCP 443. If it cannot, the result is inconclusive: fix baseline pod-to-service networking before evaluating NetworkPolicy. The second pod has exactly the two labels selected by the managed-WireMock egress policy. Only a successful control followed by a denied selected connection proves enforcement.
+
+The commands use explicit exit states. `mock-fleet-networkpolicy-control` exits 0 only when baseline connectivity works and exits 2 when the test is inconclusive. `mock-fleet-networkpolicy-selected` exits 0 only when policy denies the connection and exits 1 when the internal connection succeeds. `set -e` stops the procedure before the selected test if the control is inconclusive.
 
 ```bash
+set -euo pipefail
 NAMESPACE=mock-fleet
 KUBE_API_IP="$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}')"
 
@@ -46,7 +49,51 @@ kubectl -n "$NAMESPACE" apply -f - <<EOF
 apiVersion: v1
 kind: Pod
 metadata:
-  name: mock-fleet-networkpolicy-probe
+  name: mock-fleet-networkpolicy-control
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: busybox:1.36
+      command:
+        - sh
+        - -ec
+        - |
+          if nc -z -w 5 ${KUBE_API_IP} 443; then
+            echo "CONTROL PASS: baseline cluster-internal TCP connection succeeded"
+            exit 0
+          fi
+          echo "INCONCLUSIVE: baseline cluster-internal TCP connection failed"
+          exit 2
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          cpu: 50m
+          memory: 32Mi
+EOF
+
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.containerStatuses[0].state.terminated}' pod/mock-fleet-networkpolicy-control --timeout=60s
+kubectl -n "$NAMESPACE" logs pod/mock-fleet-networkpolicy-control
+test "$(kubectl -n "$NAMESPACE" get pod mock-fleet-networkpolicy-control -o jsonpath='{.status.phase}')" = Succeeded
+
+kubectl -n "$NAMESPACE" apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mock-fleet-networkpolicy-selected
   labels:
     app.kubernetes.io/name: mock-fleet-wiremock
     app.kubernetes.io/managed-by: mock-fleet
@@ -64,12 +111,12 @@ spec:
         - sh
         - -ec
         - |
-          sleep 5
           if nc -z -w 5 ${KUBE_API_IP} 443; then
-            echo "FAIL: cluster-internal TCP connection succeeded"
+            echo "POLICY FAIL: selected cluster-internal TCP connection succeeded"
             exit 1
           fi
-          echo "PASS: cluster-internal TCP connection was denied"
+          echo "POLICY PASS: selected cluster-internal TCP connection was denied"
+          exit 0
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -85,15 +132,18 @@ spec:
           memory: 32Mi
 EOF
 
-kubectl -n "$NAMESPACE" wait --for=condition=Ready pod/mock-fleet-networkpolicy-probe --timeout=60s
-kubectl -n "$NAMESPACE" logs -f pod/mock-fleet-networkpolicy-probe
-test "$(kubectl -n "$NAMESPACE" get pod mock-fleet-networkpolicy-probe -o jsonpath='{.status.phase}')" = Succeeded
+kubectl -n "$NAMESPACE" wait --for=jsonpath='{.status.containerStatuses[0].state.terminated}' pod/mock-fleet-networkpolicy-selected --timeout=60s
+kubectl -n "$NAMESPACE" logs pod/mock-fleet-networkpolicy-selected
+test "$(kubectl -n "$NAMESPACE" get pod mock-fleet-networkpolicy-selected -o jsonpath='{.status.phase}')" = Succeeded
 ```
 
-Remove the probe in both pass and fail cases:
+Remove both pods after a pass, failure, or inconclusive result:
 
 ```bash
-kubectl -n "$NAMESPACE" delete pod mock-fleet-networkpolicy-probe --ignore-not-found
+kubectl -n "$NAMESPACE" delete pod \
+  mock-fleet-networkpolicy-control \
+  mock-fleet-networkpolicy-selected \
+  --ignore-not-found
 ```
 
 ## Routing And Ingress
@@ -136,12 +186,12 @@ The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/ope
 - Runtime dependencies now use Quarkus 3.33.3.1 and Hazelcast 5.7.0. Fleet Proxy also rejects absolute, scheme-relative, fragmented, malformed-percent, and backslash-bearing request targets before resolution or outbound I/O, and it removes inbound authority, framing, and hop-by-hop headers before forwarding. These changes do not add API, Admin-route, or MCP authentication.
 - The plaintext WireMock options `--ca-keystore-password`, `--keystore-password`, `--key-manager-password`, and `--truststore-password` are unsupported in both `--name=value` and split-argument forms. New writes are rejected before persistence. Existing values are redacted from API output and fail closed when a mock starts. Before upgrading, remove these entries from `wiremock.default.options` and every `wiremock.mocks[].options` list in `<release-fullname>-wiremock-user-config`, and from `wiremock.config.default.options` or `wiremock.config.mocks[].options` in Helm values. Password-protected keystores are unsupported until a Secret-backed path exists. Treat the retained ConfigMap as sensitive until cleanup is complete.
 - The editable `<release-fullname>-wiremock-user-config` ConfigMap is now a retained chart resource. A connected Helm install creates it. A connected upgrade leaves an existing API-created object untouched through a `lookup` guard, so Helm does not try to adopt or overwrite saved configuration. Offline `helm template` cannot perform that lookup and renders the ConfigMap; an offline render/apply workflow must use an apply tool that safely reconciles the existing object. The API now requires the object and returns HTTP 503 `CONFIG_UNAVAILABLE` if it is absent; it no longer creates it.
-- Managed resources accept only `cpu` and `memory`. Missing or partial keys inherit the chart baseline; an empty override cannot erase it. Effective requests must meet `wiremock.resourcePolicy.requestFloor`, limits must not exceed `wiremock.resourcePolicy.limitCeiling`, and each request must not exceed its limit. Chart resource quantities must be quoted positive values. DecimalSI, `Ki` through `Pi`, and bounded exponent forms are supported; `Ei` is rejected because its comparison differs from the Kubernetes client used by the API.
+- Managed resources accept only `cpu` and `memory`. Missing or partial keys inherit the chart baseline; an empty override cannot erase it. Effective requests must meet `wiremock.resourcePolicy.requestFloor`, limits must not exceed `wiremock.resourcePolicy.limitCeiling`, and each request must not exceed its limit. Numeric-looking quantities such as `4` or `0.5` must be quoted so YAML supplies strings to chart validation; unit-bearing values such as `128Mi` are already strings and need no quotes. DecimalSI, `Ki` through `Pi`, and bounded exponent forms are supported; `Ei` is rejected because its comparison differs from the Kubernetes client used by the API.
 - Numeric WireMock workload-shaping options now accept only catalog-advertised integers and bounds. Existing fractional, negative, or oversized values fail validation and must be corrected before a mock can start.
-- Mock starts reserve capacity across replicas. More than `fleet.api.maxActiveMocks` distinct active/start-in-progress mocks returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. A full bounded start executor returns HTTP 503 `MOCK_START_QUEUE_FULL`. Explicit successful starts initialize their idle-cleanup timestamp.
+- Mock starts reserve cluster-wide capacity across replicas. `fleet.api.maxActiveMocks` is the cluster-wide maximum for distinct reserved, starting, or running mocks; exceeding it returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. Each API replica has its own executor with `fleet.api.maxConcurrentStarts` workers and `fleet.api.queuedStartCapacity` waiting positions. Aggregate executor capacity is each value multiplied by the API replica count, while the cluster-wide active limit still applies. The default Minikube deployment has two API replicas, so it provides up to 8 start workers and 32 queue positions, subject to the 20-mock cluster-wide limit. A full replica-local queue returns HTTP 503 `MOCK_START_QUEUE_FULL`. Explicit successful starts initialize their idle-cleanup timestamp.
 - Mapping tree reads and recursive folder deletion apply inclusive `fleet.api.mappings.maxDepth` and `maxEntries` budgets. Overflow returns HTTP 400 `MAPPINGS_TRAVERSAL_LIMIT`; storage or unsupported secure-traversal behavior returns retryable HTTP 503 `MAPPINGS_STORAGE_ERROR`. Recursive deletion discovers and validates the bounded set before deleting, so a traversal-limit failure deletes nothing.
 - Managed-pod deletion performs a fresh Kubernetes GET, checks the two stable ownership labels plus the expected `mock-fleet/mock-id`, and deletes with the fetched UID as a precondition. Missing pods remain idempotent; a wrong label, missing UID, or same-name replacement fails closed. The API Role has no Deployment authority and can mutate only the named retained user ConfigMap.
-- `resourceQuota.enabled=true` supplies a second boundary if application admission fails. Size pod, CPU, and memory quota for `fleet.api.maxActiveMocks`, all API replicas, every enabled fixed workload, rollout surge, and expected operational or probe pods. Quota may intentionally cap the usable mock count below `maxActiveMocks`; undersizing it can also block upgrades and probes.
+- `resourceQuota.enabled=true` supplies a second boundary if application admission fails. Size pod, CPU, and memory quota for `fleet.api.maxActiveMocks`, all API replicas, the aggregate per-replica start burst, every enabled fixed workload, rollout surge, and expected operational or probe pods. Quota may intentionally cap the usable mock count below `maxActiveMocks`; undersizing it can also block starts, upgrades, and probes.
 - `make local-deploy` applies `restricted` PSA enforce, audit, and warn labels at the current server minor. Before upgrading a shared namespace, verify that every non-Mock-Fleet workload also satisfies that profile; PSA can reject unrelated noncompliant pods. A direct Helm install does not manage namespace labels, so its operator must apply and maintain the equivalent policy.
 - The admission policy requires the dedicated WireMock service account, exact generated pod shape, restricted security context, configured image, resource envelope, and one supported workload-identity mode. `wiremock.admissionPolicy.enabled=false` removes the Kubernetes boundary that constrains a compromised API service account. Kubernetes 1.30 or newer is required while it is enabled; compatibility was verified on 1.36.4.
 - `fleet.api.networkPolicy.enabled=false` removes API/Hazelcast ingress isolation. `fleet.mcp.outbound.networkPolicy.enabled=false` removes managed-WireMock private/cluster-network egress isolation even when MCP itself is disabled. `resourceQuota.enabled=false` removes the namespace resource backstop. Disable any of these only when another cluster control provides the same boundary.
@@ -236,8 +286,8 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 | `fleet.api.podInactivityThreshold` | `1M` | Time before inactive mock pods are eligible for cleanup. |
 | `fleet.api.podCreationTimeout` | `1M` | Time to wait for a spawned WireMock pod to become ready. |
 | `fleet.api.maxActiveMocks` | `20` | Maximum distinct mocks that may be reserved, starting, or running across API replicas. Exhaustion returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. |
-| `fleet.api.maxConcurrentStarts` | `4` | Maximum concurrent pod-start workers; must not exceed `maxActiveMocks`. |
-| `fleet.api.queuedStartCapacity` | `16` | Maximum starts waiting behind the workers. Saturation returns HTTP 503 `MOCK_START_QUEUE_FULL`. |
+| `fleet.api.maxConcurrentStarts` | `4` | Pod-start workers per API replica; must not exceed cluster-wide `maxActiveMocks`. Aggregate workers equal this value times the API replica count. |
+| `fleet.api.queuedStartCapacity` | `16` | Waiting start positions per API replica. Aggregate positions equal this value times the API replica count; replica-local saturation returns HTTP 503 `MOCK_START_QUEUE_FULL`. |
 | `fleet.api.mappings.maxDepth` | `32` | Inclusive maximum relative depth for mapping tree reads and recursive deletion. |
 | `fleet.api.mappings.maxEntries` | `10000` | Inclusive maximum examined entries, including the selected mock root, for one mapping traversal. |
 | `fleet.api.networkPolicy.enabled` | `true` | Render API ingress isolation. Disabling it exposes HTTP and Hazelcast to any connectivity the cluster otherwise permits. |
