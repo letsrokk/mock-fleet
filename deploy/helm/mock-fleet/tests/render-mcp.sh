@@ -117,6 +117,16 @@ if grep -Fq 'automountServiceAccountToken: false' <<<"${api_render}"; then
   exit 1
 fi
 
+expected_api_strategy=$'  strategy:\n    type: Recreate'
+if ! grep -Fq "${expected_api_strategy}" <<<"${api_render}"; then
+  echo "API upgrades must replace the whole embedded Hazelcast cluster before starting new members" >&2
+  exit 1
+fi
+if grep -Fq 'rollingUpdate:' <<<"${api_render}"; then
+  echo "Default API upgrades must not mix incompatible Hazelcast member versions" >&2
+  exit 1
+fi
+
 for workload in api proxy dash mcp; do
   case "${workload}" in
     api) workload_render="${api_render}" ;;

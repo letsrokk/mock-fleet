@@ -295,9 +295,9 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 | `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
 | `fleet.api.terminationGracePeriodSeconds` | `30` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
-| `fleet.api.updateStrategy.type` | `RollingUpdate` | API deployment update strategy. |
-| `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods during rollout. |
-| `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods during rollout. |
+| `fleet.api.updateStrategy.type` | `Recreate` | API deployment update strategy. The default stops the embedded Hazelcast cluster before starting a new version because Hazelcast Community Edition does not support mixed-version rolling member upgrades. |
+| `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods when `updateStrategy.type=RollingUpdate`; ignored by the default `Recreate` strategy. |
+| `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods when `updateStrategy.type=RollingUpdate`; ignored by the default `Recreate` strategy. |
 | `fleet.api.pdb.enabled` | `true` | Create a PodDisruptionBudget for API/Hazelcast members. |
 | `fleet.api.pdb.minAvailable` | `1` | Minimum API pods available during voluntary disruptions. |
 | `fleet.api.service.type` | `ClusterIP` | API service type. |

@@ -80,7 +80,9 @@ fleet:
     replicas: 2
     terminationGracePeriodSeconds: 30
     updateStrategy:
-      type: RollingUpdate
+      # Community Hazelcast members cannot join a cluster running another minor version.
+      # Recreate prevents dependency upgrades from deadlocking on mixed member versions.
+      type: Recreate
       rollingUpdate:
         maxUnavailable: 1
         maxSurge: 1
