@@ -6,13 +6,16 @@ import jakarta.ws.rs.core.Response;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
@@ -25,6 +28,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -119,32 +123,53 @@ public class MappingsService {
         }
     }
 
-    Path file(String mockId, String relativePath) {
-        Path file = resolveFile(mockId, relativePath);
-        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-            throw error(Response.Status.NOT_FOUND, "MAPPING_FILE_NOT_FOUND", "Mapping file not found.",
-                    false, false, mappingDetails(mockId, relativePath));
+    OpenedFile file(String mockId, String relativePath) {
+        ResolvedFile file = resolveFile(mockId, relativePath);
+        OpenedFile opened = null;
+        try (SecureFileParent parent = openSecureFileParent(file)) {
+            BasicFileAttributes attributes = secureAttributes(parent.stream(), parent.name());
+            if (!attributes.isRegularFile()) {
+                throw new MappingFileMissingException();
+            }
+            EntryIdentity identity = EntryIdentity.from(attributes);
+            Set<OpenOption> options = Set.of(StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+            SeekableByteChannel channel = parent.stream().newByteChannel(parent.name(), options);
+            try {
+                validateIdentity(identity, secureAttributes(parent.stream(), parent.name()));
+            } catch (IOException | RuntimeException e) {
+                channel.close();
+                throw e;
+            }
+            opened = new OpenedFile(file.path().getFileName().toString(), channel);
+        } catch (MappingFileMissingException | NoSuchFileException e) {
+            closeOpenedFile(opened);
+            throw mappingFileNotFound(mockId, relativePath);
+        } catch (DirectoryIteratorException e) {
+            closeOpenedFile(opened);
+            throw mappingFileStorageError(mockId, relativePath, e.getCause());
+        } catch (IOException e) {
+            closeOpenedFile(opened);
+            throw mappingFileStorageError(mockId, relativePath, e);
         }
-        return file;
+        return opened;
     }
 
     void deleteFile(String mockId, String relativePath) {
-        Path file = resolveFile(mockId, relativePath);
-        try {
-            if (!Files.deleteIfExists(file)) {
-                if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-                    return;
-                }
-                throw error(Response.Status.NOT_FOUND, "MAPPING_FILE_NOT_FOUND", "Mapping file not found.",
-                        false, false, mappingDetails(mockId, relativePath));
+        ResolvedFile file = resolveFile(mockId, relativePath);
+        try (SecureFileParent parent = openSecureFileParent(file)) {
+            BasicFileAttributes attributes = secureAttributes(parent.stream(), parent.name());
+            if (!attributes.isRegularFile()) {
+                throw new MappingFileMissingException();
             }
+            parent.stream().deleteFile(parent.name());
+        } catch (MappingFileMissingException e) {
+            throw mappingFileNotFound(mockId, relativePath);
+        } catch (NoSuchFileException e) {
+            return;
+        } catch (DirectoryIteratorException e) {
+            throw mappingFileStorageError(mockId, relativePath, e.getCause());
         } catch (IOException e) {
-            if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
-                return;
-            }
-            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
-                    "Unable to delete mapping file: " + ioErrorMessage(e), true, false,
-                    mappingDetails(mockId, relativePath));
+            throw mappingFileStorageError(mockId, relativePath, e);
         }
     }
 
@@ -530,7 +555,7 @@ public class MappingsService {
                 "Mappings root must be a real directory, not a symbolic link.", true, false, details);
     }
 
-    private Path resolveFile(String mockId, String relativePath) {
+    private ResolvedFile resolveFile(String mockId, String relativePath) {
         ensureEnabled();
         validateMockId(mockId);
         if (relativePath == null || relativePath.isBlank()) {
@@ -547,7 +572,81 @@ public class MappingsService {
         ensureInside(mappingsRoot(), mockRoot);
         Path file = mockRoot.resolve(requestedPath).normalize();
         ensureInside(mockRoot, file, mockId, relativePath);
-        return file;
+        if (file.equals(mockRoot)) {
+            throw error(Response.Status.BAD_REQUEST, "INVALID_MAPPING_PATH", "Mapping file path is required.",
+                    false, false, mappingDetails(mockId, relativePath));
+        }
+        return new ResolvedFile(mockRoot, file, mockRoot.relativize(file));
+    }
+
+    private SecureFileParent openSecureFileParent(ResolvedFile file) throws IOException {
+        BasicFileAttributes rootAttributes;
+        try {
+            rootAttributes = Files.readAttributes(file.mockRoot(), BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
+            throw new MappingFileMissingException();
+        }
+        if (!rootAttributes.isDirectory()) {
+            throw new MappingFileMissingException();
+        }
+
+        TraversalEntry root = entry(file.mockRoot(), "", 0, rootAttributes);
+        SecureTraversalSession session = openSecureRoot(root);
+        Deque<SecureDirectoryStream<Path>> opened = new ArrayDeque<>();
+        SecureDirectoryStream<Path> current = session.root();
+        try {
+            for (int index = 0; index < file.relative().getNameCount() - 1; index++) {
+                Path name = file.relative().getName(index);
+                BasicFileAttributes attributes = secureAttributes(current, name);
+                if (!attributes.isDirectory()) {
+                    throw new MappingFileMissingException();
+                }
+                EntryIdentity identity = EntryIdentity.from(attributes);
+                SecureDirectoryStream<Path> child = current.newDirectoryStream(name, LinkOption.NOFOLLOW_LINKS);
+                opened.addLast(child);
+                validateIdentity(identity, secureAttributes(child));
+                current = child;
+            }
+            return new SecureFileParent(session, opened, current, file.relative().getFileName());
+        } catch (IOException | RuntimeException e) {
+            IOException closeFailure = closeOpened(opened);
+            try {
+                session.close();
+            } catch (IOException sessionCloseFailure) {
+                if (closeFailure == null) {
+                    closeFailure = sessionCloseFailure;
+                } else {
+                    closeFailure.addSuppressed(sessionCloseFailure);
+                }
+            }
+            if (closeFailure != null) {
+                e.addSuppressed(closeFailure);
+            }
+            throw e;
+        }
+    }
+
+    private ApiException mappingFileNotFound(String mockId, String relativePath) {
+        return error(Response.Status.NOT_FOUND, "MAPPING_FILE_NOT_FOUND", "Mapping file not found.",
+                false, false, mappingDetails(mockId, relativePath));
+    }
+
+    private ApiException mappingFileStorageError(String mockId, String relativePath, IOException error) {
+        return error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                "Unable to access mapping file: " + ioErrorMessage(error), true, false,
+                mappingDetails(mockId, relativePath));
+    }
+
+    private void closeOpenedFile(OpenedFile opened) {
+        if (opened == null) {
+            return;
+        }
+        try {
+            opened.close();
+        } catch (IOException ignored) {
+            // Preserve the storage error that prevented the file handle from being returned.
+        }
     }
 
     private void ensureEnabled() {
@@ -626,11 +725,73 @@ public class MappingsService {
     public record FileNode(String name, String path, boolean directory, List<FileNode> children) {
     }
 
+    public record OpenedFile(String fileName, SeekableByteChannel channel) implements AutoCloseable {
+        @Override
+        public void close() throws IOException {
+            channel.close();
+        }
+    }
+
     public record RoutingView(String mode, String host) {
     }
 
     private record TraversalEntry(Path path, String relativePath, int relativeDepth, boolean directory,
                                   EntryIdentity identity) {
+    }
+
+    private record ResolvedFile(Path mockRoot, Path path, Path relative) {
+    }
+
+    private static final class SecureFileParent implements AutoCloseable {
+
+        private final SecureTraversalSession session;
+        private final Deque<SecureDirectoryStream<Path>> opened;
+        private final SecureDirectoryStream<Path> stream;
+        private final Path name;
+
+        private SecureFileParent(SecureTraversalSession session, Deque<SecureDirectoryStream<Path>> opened,
+                                 SecureDirectoryStream<Path> stream, Path name) {
+            this.session = session;
+            this.opened = opened;
+            this.stream = stream;
+            this.name = name;
+        }
+
+        SecureDirectoryStream<Path> stream() {
+            return stream;
+        }
+
+        Path name() {
+            return name;
+        }
+
+        @Override
+        public void close() throws IOException {
+            IOException failure = null;
+            while (!opened.isEmpty()) {
+                try {
+                    opened.removeLast().close();
+                } catch (IOException e) {
+                    if (failure == null) {
+                        failure = e;
+                    } else {
+                        failure.addSuppressed(e);
+                    }
+                }
+            }
+            try {
+                session.close();
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
     }
 
     private record SecureTraversalFrame(TraversalEntry directory, SecureDirectoryStream<Path> stream,
@@ -707,5 +868,8 @@ public class MappingsService {
         IOException ioException() {
             return (IOException) getCause();
         }
+    }
+
+    private static final class MappingFileMissingException extends IOException {
     }
 }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 
@@ -80,7 +81,7 @@ class MappingsResourceTest {
     void streamsMappingFile() throws IOException {
         Path file = Files.createTempFile("mapping", ".json");
         Files.writeString(file, "{\"request\":{}}");
-        when(mappingsService.file("demo", "mapping.json")).thenReturn(file);
+        when(mappingsService.file("demo", "mapping.json")).thenReturn(opened("mapping.json", file));
 
         given()
                 .queryParam("path", "mapping.json")
@@ -105,7 +106,7 @@ class MappingsResourceTest {
     void streamsUnknownFileTypesAsAttachments() throws IOException {
         Path file = Files.createTempFile("mapping", ".bin");
         Files.writeString(file, "binary");
-        when(mappingsService.file("demo", "mapping.bin")).thenReturn(file);
+        when(mappingsService.file("demo", "mapping.bin")).thenReturn(opened("mapping.bin", file));
 
         given()
                 .queryParam("path", "mapping.bin")
@@ -165,7 +166,7 @@ class MappingsResourceTest {
     private void assertInlineFileResponse(String fileName, Matcher<? super String> contentTypeMatcher) throws IOException {
         Path file = Files.createTempFile("mapping", ".tmp");
         Files.writeString(file, "content");
-        when(mappingsService.file("demo", fileName)).thenReturn(file);
+        when(mappingsService.file("demo", fileName)).thenReturn(opened(fileName, file));
 
         given()
                 .queryParam("path", fileName)
@@ -177,5 +178,9 @@ class MappingsResourceTest {
                 .header("Content-Disposition", startsWith("inline;"));
 
         verify(mappingsService).file("demo", fileName);
+    }
+
+    private MappingsService.OpenedFile opened(String fileName, Path file) throws IOException {
+        return new MappingsService.OpenedFile(fileName, Files.newByteChannel(file, StandardOpenOption.READ));
     }
 }

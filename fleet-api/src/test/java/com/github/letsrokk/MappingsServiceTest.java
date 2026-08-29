@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.MockedStatic;
 
 import java.io.IOException;
+import java.nio.channels.Channels;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.ClosedDirectoryStreamException;
@@ -293,11 +294,99 @@ class MappingsServiceTest {
         Files.writeString(file, "{}");
         MappingsService service = service(true);
 
-        assertEquals(file.toAbsolutePath().normalize(), service.file("demo", "mapping.json"));
+        try (MappingsService.OpenedFile opened = service.file("demo", "mapping.json")) {
+            assertEquals("{}", new String(Channels.newInputStream(opened.channel()).readAllBytes()));
+        }
 
         service.deleteFile("demo", "mapping.json");
 
         assertFalse(Files.exists(file));
+    }
+
+    @Test
+    void rejectsFinalSymlinksForFileReadsAndDeletes() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path target = Files.writeString(mappingsRoot.resolve("target.json"), "outside");
+        Path link = createSymbolicLink(root.resolve("mapping.json"), target);
+        MappingsService service = service(true);
+
+        ApiException readError = assertThrows(ApiException.class,
+                () -> service.file("demo", "mapping.json"));
+        ApiException deleteError = assertThrows(ApiException.class,
+                () -> service.deleteFile("demo", "mapping.json"));
+
+        assertApiError(readError, 404, "MAPPING_FILE_NOT_FOUND", false,
+                Map.of("mockId", "demo", "path", "mapping.json"));
+        assertApiError(deleteError, 404, "MAPPING_FILE_NOT_FOUND", false,
+                Map.of("mockId", "demo", "path", "mapping.json"));
+        assertTrue(Files.isSymbolicLink(link));
+        assertEquals("outside", Files.readString(target));
+    }
+
+    @Test
+    void rejectsIntermediateSymlinksForFileReadsAndDeletes() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path target = Files.createDirectories(mappingsRoot.resolve("target"));
+        Path targetFile = Files.writeString(target.resolve("mapping.json"), "outside");
+        Path link = createSymbolicLink(root.resolve("nested"), target);
+        MappingsService service = service(true);
+
+        ApiException readError = assertThrows(ApiException.class,
+                () -> service.file("demo", "nested/mapping.json"));
+        ApiException deleteError = assertThrows(ApiException.class,
+                () -> service.deleteFile("demo", "nested/mapping.json"));
+
+        assertApiError(readError, 404, "MAPPING_FILE_NOT_FOUND", false,
+                Map.of("mockId", "demo", "path", "nested/mapping.json"));
+        assertApiError(deleteError, 404, "MAPPING_FILE_NOT_FOUND", false,
+                Map.of("mockId", "demo", "path", "nested/mapping.json"));
+        assertTrue(Files.isSymbolicLink(link));
+        assertEquals("outside", Files.readString(targetFile));
+    }
+
+    @Test
+    void openedFileCannotBeRedirectedByAPathSwapBeforeStreaming() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path original = Files.writeString(root.resolve("mapping.json"), "original");
+        Path moved = root.resolve("moved.json");
+        Path target = Files.writeString(mappingsRoot.resolve("target.json"), "outside");
+        MappingsService service = service(true);
+
+        Object opened = service.file("demo", "mapping.json");
+        Files.move(original, moved, StandardCopyOption.ATOMIC_MOVE);
+        createSymbolicLink(original, target);
+
+        assertEquals("original", readOpenedFile(opened));
+    }
+
+    @Test
+    void deleteUsesTheVerifiedIntermediateDirectoryHandleDuringAPathSwap() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path nested = Files.createDirectories(root.resolve("nested"));
+        Path original = Files.writeString(nested.resolve("mapping.json"), "original");
+        Path moved = root.resolve("moved");
+        Path target = Files.createDirectories(mappingsRoot.resolve("target"));
+        Path targetFile = Files.writeString(target.resolve("mapping.json"), "outside");
+        AtomicBoolean swapped = new AtomicBoolean();
+        SecureStreamObserver observer = new SecureStreamObserver() {
+            @Override
+            public void beforeFileDelete(Path parent, Path name) throws IOException {
+                swapDirectoryForSymlink(parent, name, nested, moved, target, swapped);
+            }
+        };
+        MappingsService service = service(true, 32, 10_000,
+                directory -> new TestSecureDirectoryStream(directory, observer));
+
+        try (MockedStatic<Files> files = mockStatic(Files.class, CALLS_REAL_METHODS)) {
+            files.when(() -> Files.deleteIfExists(original)).thenAnswer(invocation -> {
+                swapDirectoryForSymlink(nested, original.getFileName(), nested, moved, target, swapped);
+                return original.getFileSystem().provider().deleteIfExists(original);
+            });
+            service.deleteFile("demo", "nested/mapping.json");
+        }
+
+        assertTrue(Files.exists(targetFile), "the symlink target must not be deleted");
+        assertFalse(Files.exists(moved.resolve("mapping.json")));
     }
 
     @Test
@@ -574,6 +663,21 @@ class MappingsServiceTest {
         }
     }
 
+    private String readOpenedFile(Object opened) throws IOException {
+        try (MappingsService.OpenedFile file = (MappingsService.OpenedFile) opened) {
+            return new String(Channels.newInputStream(file.channel()).readAllBytes());
+        }
+    }
+
+    private void swapDirectoryForSymlink(Path parent, Path name, Path nested, Path moved, Path target,
+                                         AtomicBoolean swapped) throws IOException {
+        if (parent.equals(nested) && name.equals(Path.of("mapping.json"))
+                && swapped.compareAndSet(false, true)) {
+            Files.move(nested, moved, StandardCopyOption.ATOMIC_MOVE);
+            createSymbolicLink(nested, target);
+        }
+    }
+
     private Path createSymbolicLink(Path link, Path target) throws IOException {
         try {
             return Files.createSymbolicLink(link, target);
@@ -644,6 +748,9 @@ class MappingsServiceTest {
 
         default void beforeAttributeRead(Path parent, Path name) throws IOException {
         }
+
+        default void beforeFileDelete(Path parent, Path name) throws IOException {
+        }
     }
 
     private static final class TestSecureDirectoryStream implements SecureDirectoryStream<Path> {
@@ -688,6 +795,7 @@ class MappingsServiceTest {
         @Override
         public void deleteFile(Path path) throws IOException {
             ensureOpen();
+            observer.beforeFileDelete(directory, path);
             Path child = directory.resolve(path);
             child.getFileSystem().provider().delete(child);
         }
