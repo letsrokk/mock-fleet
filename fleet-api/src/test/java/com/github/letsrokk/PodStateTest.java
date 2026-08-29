@@ -1,5 +1,7 @@
 package com.github.letsrokk;
 
+import com.hazelcast.config.Config;
+import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.EntryEvent;
 import com.hazelcast.map.IMap;
@@ -13,6 +15,9 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -20,13 +25,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.ArgumentCaptor;
 
 class PodStateTest {
 
     @Test
-    void failedLifecycleWithCleanupTargetDoesNotExpire() {
+    void failedLifecycleWithCleanupTargetExpiresAfterRetentionWindow() {
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap(), lifecycleMap);
         when(lifecycleMap.get("demo")).thenReturn(MockPodLifecycle.starting("mock-fleet-demo-1"));
@@ -35,7 +41,9 @@ class PodStateTest {
 
         verify(lifecycleMap).put(
                 "demo",
-                MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"));
+                MockPodLifecycle.failed("mock-fleet-demo-1", "image pull failed"),
+                30,
+                TimeUnit.SECONDS);
     }
 
     @Test
@@ -53,6 +61,20 @@ class PodStateTest {
     }
 
     @Test
+    void failedLifecycleMessageIsBounded() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap);
+        when(lifecycleMap.get("demo")).thenReturn(
+                MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L));
+
+        podState.failStart("demo", "attempt-1", new RuntimeException("x".repeat(500)));
+
+        ArgumentCaptor<MockPodLifecycle> failed = ArgumentCaptor.forClass(MockPodLifecycle.class);
+        verify(lifecycleMap).put(eq("demo"), failed.capture(), eq(30L), eq(TimeUnit.SECONDS));
+        assertEquals(200, failed.getValue().message().length());
+    }
+
+    @Test
     void claimStartDoesNotCreateADuplicateAttemptWhileStartupIsInProgress() {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
@@ -65,6 +87,37 @@ class PodStateTest {
         assertEquals(false, claim.claimed());
         assertEquals(starting, claim.lifecycle());
         verify(lifecycleMap, never()).put(eq("demo"), any());
+        verify(podState.mockCapacity, never()).reserve(any(), any());
+    }
+
+    @Test
+    void newStartReservesCapacityBeforePublishingStartingState() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap, capacity);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(2).run();
+            return null;
+        }).when(capacity).reserve(eq("demo"), any(), any());
+
+        PodState.StartClaim claim = podState.claimStart("demo", 1_000L, 2_000L);
+
+        verify(capacity).reserve(eq("demo"), eq(claim.lifecycle().attemptId()), any());
+        verify(lifecycleMap).put("demo", claim.lifecycle());
+    }
+
+    @Test
+    void capacityRejectionDoesNotPublishStartingState() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap, capacity);
+        org.mockito.Mockito.doThrow(mock(MockCapacity.CapacityExceededException.class))
+                .when(capacity).reserve(eq("demo"), any(), any());
+
+        org.junit.jupiter.api.Assertions.assertThrows(MockCapacity.CapacityExceededException.class,
+                () -> podState.claimStart("demo", 1_000L, 2_000L));
+
+        verify(lifecycleMap, never()).put(eq("demo"), any());
     }
 
     @Test
@@ -74,6 +127,7 @@ class PodStateTest {
         PodState podState = podStateWithMaps(podMap, lifecycleMap);
         MockPodLifecycle stale = MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L);
         when(lifecycleMap.get("demo")).thenReturn(stale);
+        when(podState.mockCapacity.isCurrentReservation("demo", "attempt-1")).thenReturn(false);
 
         PodState.StartClaim claim = podState.claimStart("demo", 2_000L, 1_000L);
 
@@ -190,6 +244,109 @@ class PodStateTest {
     }
 
     @Test
+    void rejectedRestartRestoresItsPriorRunningPodAndReleasesTheReplacementAttempt() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        @SuppressWarnings("unchecked")
+        IMap<String, Long> lastAccessMap = mock(IMap.class);
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap, lifecycleMap, lastAccessMap, capacity);
+        MockPodRef previousPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        MockPodLifecycle previousLifecycle = MockPodLifecycle.running(
+                "attempt-old", previousPod.podName());
+        when(podMap.get("demo")).thenReturn(previousPod);
+        when(lifecycleMap.get("demo")).thenReturn(previousLifecycle);
+        when(lastAccessMap.remove(previousPod.podName())).thenReturn(1_234L);
+
+        PodState.RestartClaim replacement = podState.claimRestart("demo");
+        when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
+
+        assertEquals(true, podState.rollbackRejectedRestart("demo", replacement));
+        verify(podMap).put("demo", previousPod);
+        verify(lastAccessMap).merge(eq(previousPod.podName()), eq(1_234L), any());
+        verify(lifecycleMap).put("demo", previousLifecycle);
+        verify(capacity).release("demo", replacement.lifecycle().attemptId());
+    }
+
+    @Test
+    void restartClaimAtomicallyCapturesAnAccessRefreshAtTheOldReadRemoveBoundary() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        @SuppressWarnings("unchecked")
+        IMap<String, Long> lastAccessMap = mock(IMap.class);
+        PodState podState = podStateWithMaps(
+                podMap, lifecycleMap, lastAccessMap, mock(MockCapacity.class));
+        MockPodRef previousPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        MockPodLifecycle previousLifecycle = MockPodLifecycle.running(
+                "attempt-old", previousPod.podName());
+        AtomicReference<Long> access = new AtomicReference<>(1_234L);
+        AtomicBoolean separateReadObserved = new AtomicBoolean();
+        when(podMap.get("demo")).thenReturn(previousPod);
+        when(lifecycleMap.get("demo")).thenReturn(previousLifecycle);
+        when(lastAccessMap.get(previousPod.podName())).thenAnswer(invocation -> {
+            separateReadObserved.set(true);
+            Long snapshot = access.get();
+            access.set(2_000L);
+            return snapshot;
+        });
+        when(lastAccessMap.remove(previousPod.podName())).thenAnswer(invocation -> {
+            if (!separateReadObserved.get()) {
+                access.set(2_000L);
+            }
+            return access.getAndSet(null);
+        });
+        when(lastAccessMap.merge(eq(previousPod.podName()), anyLong(), any()))
+                .thenAnswer(invocation -> {
+                    Long saved = invocation.getArgument(1);
+                    BiFunction<Long, Long, Long> merge = invocation.getArgument(2);
+                    return access.updateAndGet(current -> current == null
+                            ? saved
+                            : merge.apply(current, saved));
+                });
+
+        PodState.RestartClaim replacement = podState.claimRestart("demo");
+        when(lifecycleMap.get("demo")).thenReturn(replacement.lifecycle());
+        boolean rolledBack = podState.rollbackRejectedRestart("demo", replacement);
+
+        assertEquals(true, rolledBack);
+        assertEquals(2_000L, replacement.previousLastAccessEpochMillis());
+        assertEquals(2_000L, access.get());
+    }
+
+    @Test
+    void rejectedRestartRestoresLastAccessWithoutOverwritingAConcurrentRefresh() {
+        Config config = new Config();
+        config.setClusterName("pod-state-access-rollback-" + System.nanoTime());
+        config.setProperty("hazelcast.logging.type", "none");
+        config.setProperty("hazelcast.phone.home.enabled", "false");
+        config.getNetworkConfig().setPort(0).setPortAutoIncrement(true);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(false);
+        HazelcastInstance hazelcast = Hazelcast.newHazelcastInstance(config);
+        PodState podState = new PodState(hazelcast);
+        MockCapacity capacity = mock(MockCapacity.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(2).run();
+            return null;
+        }).when(capacity).reserve(any(), any(), any());
+        runUnderCapacityLock(capacity);
+        podState.mockCapacity = capacity;
+
+        try {
+            assertRejectedRestartAccess(podState, "newer", 1_234L, 2_000L, 2_000L);
+            assertRejectedRestartAccess(podState, "older", 1_234L, 1_000L, 1_234L);
+            assertRejectedRestartAccess(podState, "equal", 1_234L, 1_234L, 1_234L);
+            assertRejectedRestartAccess(podState, "missing-current", 1_234L, null, 1_234L);
+            assertRejectedRestartAccess(podState, "missing-saved", null, 2_000L, 2_000L);
+            assertRejectedRestartAccess(podState, "missing-both", null, null, null);
+        } finally {
+            podState.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
     void failedRestartRetainsPreviousPodForTheNextStartAttempt() {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
@@ -204,7 +361,7 @@ class PodStateTest {
 
         MockPodLifecycle failed = MockPodLifecycle.failed(
                 restart.lifecycle().attemptId(), previousPod.podName(), "deletion timed out");
-        verify(lifecycleMap).put("demo", failed);
+        verify(lifecycleMap).put("demo", failed, 30, TimeUnit.SECONDS);
         when(podMap.get("demo")).thenReturn(null);
         when(lifecycleMap.get("demo")).thenReturn(failed);
 
@@ -227,6 +384,79 @@ class PodStateTest {
 
         assertEquals(false, accepted);
         verify(podMap, never()).put("demo", latePod);
+    }
+
+    @Test
+    void successfulStartPublishesRunningInsideCapacityCompletion() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        @SuppressWarnings("unchecked")
+        IMap<String, Long> lastAccessMap = mock(IMap.class);
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap, lifecycleMap, lastAccessMap, capacity);
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null, 1_000L);
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(lifecycleMap.get("demo")).thenReturn(starting);
+
+        assertEquals(true, podState.completeStart("demo", "attempt-1", pod, 2_000L));
+
+        verify(capacity).complete(eq("demo"), eq("attempt-1"), any());
+        var order = org.mockito.Mockito.inOrder(lastAccessMap, podMap, lifecycleMap);
+        order.verify(lastAccessMap).put(pod.podName(), 2_000L);
+        order.verify(podMap).put("demo", pod);
+        order.verify(lifecycleMap).put("demo", MockPodLifecycle.running("attempt-1", pod.podName()));
+    }
+
+    @Test
+    void failedRunningPublicationRollsBackPodAndLastAccessBeforeReleasingCapacity() {
+        IMap<String, MockPodRef> podMap = podMap();
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        @SuppressWarnings("unchecked")
+        IMap<String, Long> lastAccessMap = mock(IMap.class);
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap, lifecycleMap, lastAccessMap, capacity);
+        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null, 1_000L);
+        MockPodRef pod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(lifecycleMap.get("demo")).thenReturn(starting);
+        org.mockito.Mockito.doThrow(new IllegalStateException("lifecycle map unavailable"))
+                .when(lifecycleMap).put(
+                        "demo", MockPodLifecycle.running("attempt-1", pod.podName()));
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> podState.completeStart("demo", "attempt-1", pod, 2_000L));
+
+        var order = org.mockito.Mockito.inOrder(lifecycleMap, podMap, lastAccessMap, capacity);
+        order.verify(lifecycleMap).put("demo", MockPodLifecycle.running("attempt-1", pod.podName()));
+        order.verify(podMap).remove("demo", pod);
+        order.verify(lastAccessMap).remove(pod.podName(), 2_000L);
+        order.verify(capacity).release("demo", "attempt-1");
+    }
+
+    @Test
+    void failedStartReleasesOnlyItsAttemptReservation() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap, capacity);
+        when(lifecycleMap.get("demo")).thenReturn(
+                MockPodLifecycle.starting("attempt-1", "mock-fleet-demo-1", 1_000L));
+
+        podState.failStart("demo", "attempt-1", new RuntimeException("create rejected"));
+
+        verify(capacity).release("demo", "attempt-1");
+    }
+
+    @Test
+    void supersededStartStillReleasesItsAttemptReservation() {
+        IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
+        MockCapacity capacity = mock(MockCapacity.class);
+        PodState podState = podStateWithMaps(podMap(), lifecycleMap, capacity);
+        when(lifecycleMap.get("demo")).thenReturn(
+                MockPodLifecycle.starting("attempt-2", "mock-fleet-demo-2", 2_000L));
+
+        podState.failStart("demo", "attempt-1", new RuntimeException("superseded"));
+
+        verify(capacity).release("demo", "attempt-1");
+        verify(lifecycleMap, never()).put(eq("demo"), any(), anyLong(), any());
     }
 
     @Test
@@ -275,6 +505,7 @@ class PodStateTest {
         assertEquals(false, accepted);
         verify(lifecycleMap).remove("demo");
         verify(podMap, never()).put(eq("demo"), any());
+        verify(podState.mockCapacity).release("demo", "attempt-1");
     }
 
     @Test
@@ -333,15 +564,66 @@ class PodStateTest {
         return podStateWithMaps(podMap, lifecycleMap());
     }
 
+    private void assertRejectedRestartAccess(PodState podState, String mockId,
+                                             Long savedAccess, Long concurrentAccess,
+                                             Long expectedAccess) {
+        MockPodRef pod = new MockPodRef("mock-fleet-" + mockId, "10.0.0.1");
+        podState.getPods().put(mockId, pod);
+        podState.getPodLifecycles().put(mockId,
+                MockPodLifecycle.running("attempt-old-" + mockId, pod.podName()));
+        if (savedAccess != null) {
+            podState.setLastAccessTime(pod.podName(), savedAccess);
+        }
+
+        PodState.RestartClaim replacement = podState.claimRestart(mockId);
+        if (concurrentAccess != null) {
+            podState.setLastAccessTime(pod.podName(), concurrentAccess);
+        }
+
+        assertEquals(true, podState.rollbackRejectedRestart(mockId, replacement));
+        assertEquals(expectedAccess, podState.getLastAccessTime(pod.podName()));
+    }
+
     private PodState podStateWithMaps(IMap<String, MockPodRef> podMap,
                                        IMap<String, MockPodLifecycle> lifecycleMap) {
-        HazelcastInstance hazelcastInstance = mock(HazelcastInstance.class);
+        return podStateWithMaps(podMap, lifecycleMap, mock(MockCapacity.class));
+    }
+
+    private PodState podStateWithMaps(IMap<String, MockPodRef> podMap,
+                                       IMap<String, MockPodLifecycle> lifecycleMap,
+                                       MockCapacity capacity) {
         @SuppressWarnings("unchecked")
         IMap<String, Long> lastAccessTimeMap = mock(IMap.class);
+        return podStateWithMaps(podMap, lifecycleMap, lastAccessTimeMap, capacity);
+    }
+
+    private PodState podStateWithMaps(IMap<String, MockPodRef> podMap,
+                                       IMap<String, MockPodLifecycle> lifecycleMap,
+                                       IMap<String, Long> lastAccessTimeMap,
+                                       MockCapacity capacity) {
+        runUnderCapacityLock(capacity);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(2).run();
+            return null;
+        }).when(capacity).reserve(any(), any(), any());
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<Runnable>getArgument(2).run();
+            return true;
+        }).when(capacity).complete(any(), any(), any());
+        HazelcastInstance hazelcastInstance = mock(HazelcastInstance.class);
         when(hazelcastInstance.<String, MockPodRef>getMap("mock-pod-name-map")).thenReturn(podMap);
         when(hazelcastInstance.<String, Long>getMap("last-access-time-map")).thenReturn(lastAccessTimeMap);
         when(hazelcastInstance.<String, MockPodLifecycle>getMap("mock-pod-lifecycle-map")).thenReturn(lifecycleMap);
-        return new PodState(hazelcastInstance);
+        PodState podState = new PodState(hazelcastInstance);
+        podState.mockCapacity = capacity;
+        return podState;
+    }
+
+    private void runUnderCapacityLock(MockCapacity capacity) {
+        org.mockito.Mockito.doAnswer(invocation ->
+                invocation.<java.util.function.Supplier<?>>getArgument(0).get())
+                .when(capacity).withCapacityLock(any());
+        when(capacity.isCurrentReservation(any(), any())).thenReturn(true);
     }
 
     private IMap<String, MockPodRef> podMap() {

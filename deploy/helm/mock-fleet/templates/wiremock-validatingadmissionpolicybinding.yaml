@@ -1,0 +1,26 @@
+{{- if .Values.wiremock.admissionPolicy.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "mock-fleet.wiremockAdmissionPolicyBindingName" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "mock-fleet.wiremockAdmissionPolicyName" . }}
+  validationActions:
+    - Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ include "mock-fleet.namespace" . | quote }}
+    resourceRules:
+      - apiGroups:
+          - ""
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+        resources:
+          - pods
+        scope: Namespaced
+{{- end }}

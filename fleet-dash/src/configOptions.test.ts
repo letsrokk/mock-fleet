@@ -3,6 +3,7 @@ import {
   draftFromConfig,
   emptyUserConfig,
   hasOption,
+  numberInputAttributes,
   optionsFromDraft,
   overrideOptions,
   resourcesFromDraft,
@@ -17,7 +18,9 @@ const definitions: OptionDefinition[] = [
     kind: "flag",
     group: "Logging",
     description: "Log more detail to stdout.",
-    values: []
+    values: [],
+    minimum: null,
+    maximum: null
   },
   {
     name: "--max-request-journal-entries",
@@ -25,7 +28,9 @@ const definitions: OptionDefinition[] = [
     kind: "number",
     group: "Request Journal",
     description: "Sets the maximum number of request journal entries.",
-    values: []
+    values: [],
+    minimum: 0,
+    maximum: 100000
   },
   {
     name: "--use-chunked-encoding",
@@ -33,7 +38,9 @@ const definitions: OptionDefinition[] = [
     kind: "select",
     group: "HTTP",
     description: "Controls when responses use Transfer-Encoding: chunked.",
-    values: ["always", "never", "body_file"]
+    values: ["always", "never", "body_file"],
+    minimum: null,
+    maximum: null
   },
   {
     name: "--filename-template",
@@ -41,7 +48,9 @@ const definitions: OptionDefinition[] = [
     kind: "input",
     group: "Request Journal",
     description: "Sets the Handlebars filename template for recorded mappings.",
-    values: []
+    values: [],
+    minimum: null,
+    maximum: null
   }
 ];
 
@@ -50,6 +59,11 @@ const emptyResources = { requests: {}, limits: {} };
 describe("config option helpers", () => {
   it("represents inherited user resources as null", () => {
     expect(emptyUserConfig()).toEqual({ options: [], resources: null });
+  });
+
+  it("uses API-provided integer bounds for numeric inputs", () => {
+    expect(numberInputAttributes(definitions[1])).toEqual({ min: 0, max: 100000, step: 1 });
+    expect(numberInputAttributes(definitions[0])).toEqual({});
   });
 
   it("keeps clearing inherited resources as an explicit empty override", () => {

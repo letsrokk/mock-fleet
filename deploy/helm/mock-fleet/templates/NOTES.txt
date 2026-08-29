@@ -1,5 +1,41 @@
 Mock Fleet chart installed.
 
+Security prerequisites:
+  - Kubernetes 1.30 or newer is required by the default-on ValidatingAdmissionPolicy.
+  - The cluster CNI must enforce Kubernetes NetworkPolicy. Kubernetes can accept
+    the rendered policies while the CNI ignores them; Calico and Cilium are
+    examples of capable CNIs. Follow the current verification procedure at:
+      https://github.com/letsrokk/mock-fleet/blob/master/deploy/helm/mock-fleet/README.md#verify-networkpolicy-enforcement
+  - Cluster operators must apply restricted Pod Security Admission to namespaces
+    not created by the repository deployment helpers.
+
+`make local-deploy` neither checks nor changes CNI capability. The bridge CNI in
+the Minikube cluster reviewed for this release did not enforce the policies.
+
+Managed WireMock pods use service account:
+  {{ include "mock-fleet.wiremockServiceAccountName" . }}
+Its general Kubernetes API token is disabled. Configure
+wiremock.serviceAccount.annotations and storage.s3.authenticationSource=pod when
+the S3 CSI driver should use IRSA, EKS Pod Identity, or another pod identity.
+Admission-injected audience-bound identity tokens remain separate from the
+disabled general API token.
+
+{{- if not .Values.wiremock.admissionPolicy.enabled }}
+WARNING: wiremock.admissionPolicy.enabled=false; API-created pod shape is not
+constrained at the Kubernetes admission boundary.
+{{- end }}
+{{- if not .Values.fleet.api.networkPolicy.enabled }}
+WARNING: fleet.api.networkPolicy.enabled=false; API and Hazelcast ingress
+isolation is not rendered.
+{{- end }}
+{{- if not .Values.fleet.mcp.outbound.networkPolicy.enabled }}
+WARNING: fleet.mcp.outbound.networkPolicy.enabled=false; managed WireMock egress
+isolation is not rendered, independently of whether MCP is enabled.
+{{- end }}
+{{- if not .Values.resourceQuota.enabled }}
+WARNING: resourceQuota.enabled=false; the namespace resource backstop is absent.
+{{- end }}
+
 If ingress is enabled, the app is exposed at:
   http://{{ .Values.ingress.host }}
 

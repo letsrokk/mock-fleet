@@ -78,6 +78,11 @@ write_executable "${FAKE_BIN}/docker" \
     'printf "docker %s\n" "$*" >>"${CALLS_FILE}"'
 write_executable "${FAKE_BIN}/kubectl" \
     '#!/usr/bin/env bash' \
+    'printf "kubectl %s\n" "$*" >>"${CALLS_FILE}"' \
+    'if [[ "$*" == "get --raw=/version" ]]; then' \
+    '  printf "%s\n" "{\"major\":\"1\",\"minor\":\"36+\"}"' \
+    '  exit 0' \
+    'fi' \
     'if [[ "$1" == "create" ]]; then printf "apiVersion: v1\n"; exit 0; fi' \
     'if [[ "$1" == "get" ]]; then' \
     '  for argument in "$@"; do' \
@@ -105,7 +110,12 @@ run_deploy() {
 
 output=$(run_deploy false)
 assert_contains "${output}" "Modules selected for image rebuild: none."
-[[ ! -s "${CALLS_FILE}" ]] || fail "Expected the default deployment to skip image builds in a clean existing release"
+calls=$(<"${CALLS_FILE}")
+assert_not_contains "${calls}" "mvnw"
+assert_not_contains "${calls}" "docker build"
+assert_contains "${calls}" "kubectl get --raw=/version"
+assert_not_contains "${calls}" "jsonpath"
+assert_contains "${calls}" "kubectl label namespace mock-fleet --overwrite pod-security.kubernetes.io/enforce=restricted pod-security.kubernetes.io/enforce-version=v1.36 pod-security.kubernetes.io/audit=restricted pod-security.kubernetes.io/audit-version=v1.36 pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/warn-version=v1.36"
 
 output=$(run_deploy mcp)
 assert_contains "${output}" "Modules selected for image rebuild: mcp."

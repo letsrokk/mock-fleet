@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -227,6 +228,132 @@ class WireMockOptionsTest {
                 """));
 
         assertResourceValue("1", options.resourcesFor("demo"), false, "cpu");
+    }
+
+    @Test
+    void userResourceOverridesInheritOmittedBaselineKeys() {
+        WireMockOptions options = new WireMockOptions();
+        options.load(input("""
+                wiremock:
+                  default:
+                    options: []
+                    resources:
+                      requests:
+                        cpu: "0.5"
+                        memory: 512Mi
+                      limits:
+                        cpu: "1"
+                        memory: 1Gi
+                  mocks: []
+                """));
+        options.setUserConfig(WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: []
+                      resources:
+                        requests:
+                          cpu: "0.75"
+                        limits: {}
+                """));
+
+        ResourceRequirements effective = options.resourcesFor("demo");
+        assertResourceValue("0.75", effective, false, "cpu");
+        assertResourceValue("512Mi", effective, false, "memory");
+        assertResourceValue("1", effective, true, "cpu");
+        assertResourceValue("1Gi", effective, true, "memory");
+    }
+
+    @Test
+    void rejectsLegacyPasswordOptionsBeforeReturningStartupArguments() {
+        WireMockOptions options = new WireMockOptions();
+        String secret = "legacy-startup-secret";
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --truststore-password=%s
+                  mocks: []
+                """.formatted(secret)));
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> options.optionsFor("demo"));
+
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("--truststore-password"));
+        org.junit.jupiter.api.Assertions.assertFalse(exception.getMessage().contains(secret));
+    }
+
+    @Test
+    void rejectsInvalidRetainedBaselineOptionsAtStartup() {
+        List<List<String>> invalidOptions = List.of(
+                List.of("--not-advertised"),
+                List.of("--proxy-timeout", "soon"),
+                List.of("--async-response-threads", "1.5"),
+                List.of("--async-response-threads", "-1"),
+                List.of("--verbose", "--verbose"),
+                List.of("--proxy-timeout", "100", "--proxy-timeout", "200"));
+
+        invalidOptions.forEach(options -> {
+            WireMockOptions wireMockOptions = new WireMockOptions();
+            wireMockOptions.load(input(WireMockConfigDocument.of(options, null, Map.of()).toYaml()));
+
+            jakarta.ws.rs.WebApplicationException exception = assertThrows(
+                    jakarta.ws.rs.WebApplicationException.class,
+                    () -> wireMockOptions.optionsFor("demo"), options.toString());
+
+            assertEquals(400, exception.getResponse().getStatus(), options.toString());
+        });
+    }
+
+    @Test
+    void rejectsInvalidRetainedUserConfigOptionsAtStartup() {
+        WireMockOptions options = new WireMockOptions();
+        options.setUserConfig(WireMockConfigDocument.of(List.of(), null, Map.of(
+                "demo", new WireMockPodConfig(
+                        List.of("--proxy-timeout", "100", "--proxy-timeout", "200"), null))));
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(
+                jakarta.ws.rs.WebApplicationException.class, () -> options.optionsFor("demo"));
+
+        assertEquals(400, exception.getResponse().getStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("Duplicate WireMock option"));
+    }
+
+    @Test
+    void normalizesValidatedEffectiveOptionsAtStartup() {
+        WireMockOptions options = new WireMockOptions();
+        options.load(input(WireMockConfigDocument.of(
+                List.of("--verbose --proxy-timeout=100"), null, Map.of()).toYaml()));
+
+        assertEquals(List.of("--verbose", "--proxy-timeout", "100"), options.optionsFor("demo"));
+    }
+
+    @Test
+    void podFactoryRejectsPasswordArgumentsBeforeBuildingThePod() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        PodFactory podFactory = new PodFactory(config);
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo",
+                        List.of("--key-manager-password", "direct-secret"), null));
+
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("--key-manager-password"));
+        org.junit.jupiter.api.Assertions.assertFalse(exception.getMessage().contains("direct-secret"));
+    }
+
+    @Test
+    void podFactoryRejectsInvalidArgumentsBeforeBuildingThePod() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        PodFactory podFactory = new PodFactory(config);
+
+        jakarta.ws.rs.WebApplicationException exception = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> podFactory.createPodSpec("mock-fleet-demo-", "demo",
+                        List.of("--async-response-threads", "1.5"), null));
+
+        assertEquals(400, exception.getResponse().getStatus());
+        org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains("requires an integer"));
     }
 
     private void assertResourceValue(String expected, ResourceRequirements resources, boolean limit, String key) {

@@ -26,6 +26,9 @@ mock-fleet:
   namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}
+  max-active-mocks: ${MOCK_FLEET_MAX_ACTIVE_MOCKS:20}
+  max-concurrent-starts: ${MOCK_FLEET_MAX_CONCURRENT_STARTS:4}
+  queued-start-capacity: ${MOCK_FLEET_QUEUED_START_CAPACITY:16}
   wiremock-pod-name-prefix: ${MOCK_FLEET_WIREMOCK_POD_NAME_PREFIX:mock-fleet}
   wiremock-container-name: ${MOCK_FLEET_WIREMOCK_CONTAINER_NAME:wiremock}
   wiremock-image: ${MOCK_FLEET_WIREMOCK_IMAGE:wiremock/wiremock:3.13.2-2}
@@ -35,11 +38,21 @@ mock-fleet:
   wiremock-config-path: ${MOCK_FLEET_WIREMOCK_CONFIG_PATH:}
   wiremock-user-config-map-name: ${MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME:}
   wiremock-config-key: ${MOCK_FLEET_WIREMOCK_CONFIG_KEY:wiremock-options.yaml}
+  wiremock-resource-policy:
+    request-floor:
+      cpu: ${MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_CPU:100m}
+      memory: ${MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_MEMORY:128Mi}
+    limit-ceiling:
+      cpu: ${MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_CPU:4}
+      memory: ${MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_MEMORY:4Gi}
   proxy-deployment-name: ${MOCK_FLEET_PROXY_DEPLOYMENT_NAME:}
   proxy:
     routing:
       mode: ${MOCK_FLEET_PROXY_ROUTING_MODE:HOST}
       host: ${MOCK_FLEET_PROXY_ROUTING_HOST:mock-fleet.localhost}
+  mappings:
+    max-depth: ${MOCK_FLEET_MAPPINGS_MAX_DEPTH:32}
+    max-entries: ${MOCK_FLEET_MAPPINGS_MAX_ENTRIES:10000}
   hazelcast:
     cluster-name: ${MOCK_FLEET_HAZELCAST_CLUSTER_NAME:mock-fleet}
     service-dns: ${MOCK_FLEET_HAZELCAST_SERVICE_DNS:}

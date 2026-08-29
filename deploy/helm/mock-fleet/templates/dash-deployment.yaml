@@ -18,12 +18,23 @@ spec:
       labels:
         {{- include "mock-fleet.dashSelectorLabels" . | nindent 8 }}
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: dash
           image: {{ printf "%s:%s" .Values.fleet.dash.image.repository (.Values.fleet.dash.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.dash.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - name: http
               containerPort: {{ .Values.fleet.dash.service.ports.targetHttp }}

@@ -14,6 +14,12 @@ public interface MockFleetConfig {
 
     Duration podCreationTimeout();
 
+    int maxActiveMocks();
+
+    int maxConcurrentStarts();
+
+    int queuedStartCapacity();
+
     String wiremockPodNamePrefix();
 
     String wiremockContainerName();
@@ -33,6 +39,10 @@ public interface MockFleetConfig {
     String wiremockConfigKey();
 
     Optional<String> proxyDeploymentName();
+
+    WireMockResourcePolicyConfig wiremockResourcePolicy();
+
+    MappingsConfig mappings();
 
     ProxyConfig proxy();
 
@@ -56,6 +66,11 @@ public interface MockFleetConfig {
         RoutingConfig routing();
     }
 
+    interface MappingsConfig {
+        int maxDepth();
+        int maxEntries();
+    }
+
     interface RoutingConfig {
         RoutingMode mode();
         String host();
@@ -72,6 +87,16 @@ public interface MockFleetConfig {
         int port();
         int backupCount();
         int gracefulShutdownMaxWaitSeconds();
+    }
+
+    interface WireMockResourcePolicyConfig {
+        ResourceValues requestFloor();
+        ResourceValues limitCeiling();
+    }
+
+    interface ResourceValues {
+        String cpu();
+        String memory();
     }
 
 }

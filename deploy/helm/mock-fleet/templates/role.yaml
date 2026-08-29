@@ -20,19 +20,11 @@ rules:
       - ""
     resources:
       - configmaps
+    resourceNames:
+      - {{ include "mock-fleet.wiremockUserConfigMapName" . }}
     verbs:
       - get
-      - list
       - watch
-      - create
       - update
       - patch
-  - apiGroups:
-      - apps
-    resources:
-      - deployments
-    verbs:
-      - get
-      - patch
-      - update
 {{- end }}

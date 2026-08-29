@@ -5,6 +5,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "${script_dir}/.." && pwd)
 chart_dir="${repo_root}/deploy/helm/mock-fleet"
 fixture_dir="${repo_root}/tests/cluster/fixtures"
+security_render_script="${repo_root}/deploy/helm/mock-fleet/tests/render-security.sh"
 
 mode=live
 keep=false
@@ -44,6 +45,7 @@ api_pf_pid=""
 mcp_session=""
 namespace_created=false
 bucket_created=false
+admission_policy_name=""
 
 usage() {
   cat <<EOF
@@ -81,6 +83,137 @@ fail() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Missing prerequisite '$1'. Install it and retry."
+}
+
+current_kubernetes_minor_version() {
+  local major minor
+  major=$(kubectl version -o jsonpath='{.serverVersion.major}')
+  minor=$(kubectl version -o jsonpath='{.serverVersion.minor}')
+  minor=${minor%%[!0-9]*}
+  [[ -n "${major}" && -n "${minor}" ]] || fail "Unable to determine the current Kubernetes minor version."
+  printf 'v%s.%s\n' "${major}" "${minor}"
+}
+
+label_namespace_for_restricted_psa() {
+  local target_namespace=$1
+  local version
+  version=$(current_kubernetes_minor_version)
+  kubectl label namespace "${target_namespace}" --overwrite \
+    pod-security.kubernetes.io/enforce=restricted \
+    "pod-security.kubernetes.io/enforce-version=${version}" \
+    pod-security.kubernetes.io/audit=restricted \
+    "pod-security.kubernetes.io/audit-version=${version}" \
+    pod-security.kubernetes.io/warn=restricted \
+    "pod-security.kubernetes.io/warn-version=${version}"
+}
+
+admission_fixture() {
+  local variant=$1
+  "${security_render_script}" --admission-fixture "${variant}" "${namespace}" mock-fleet \
+    "${release}-wiremock" "${wiremock_image}" true "${release}-pvc" "/mock-fleet/${run_id}"
+}
+
+server_dry_run_admission_fixture() {
+  local variant=$1
+  local expectation=$2
+  local output
+  if output=$(admission_fixture "${variant}" | kubectl create --dry-run=server \
+      --as="system:serviceaccount:${namespace}:${release}-pod-manager" -f - 2>&1); then
+    [[ "${expectation}" == accepted ]] \
+      || fail "Admission accepted rejected fixture ${variant}."
+  else
+    [[ "${expectation}" == rejected ]] || {
+      printf '%s\n' "${output}" >&2
+      fail "Admission rejected accepted fixture ${variant}."
+    }
+    if [[ "${variant}" != privileged && "${variant}" != hostpath ]]; then
+      grep -Fq "${admission_policy_name}" <<<"${output}" \
+        || fail "Fixture ${variant} was rejected before the Mock Fleet admission policy evaluated it."
+    fi
+  fi
+}
+
+verify_admission_dry_runs() {
+  local variant
+  if [[ -z "${admission_policy_name}" ]]; then
+    admission_policy_name=$(kubectl get validatingadmissionpolicy \
+      -l "app.kubernetes.io/instance=${release}" -o json | jq -er '
+        [.items[].metadata.name] | if length == 1 then .[0] else empty end') \
+      || fail "Unable to resolve the release-scoped WireMock admission policy."
+  fi
+  server_dry_run_admission_fixture accepted accepted
+  server_dry_run_admission_fixture accepted-workload-identity accepted
+  server_dry_run_admission_fixture accepted-eks-pod-identity accepted
+  for variant in privileged hostpath wrong-image wrong-service-account label-spoofing \
+      missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath \
+      native-init-sidecar pod-apparmor-unconfined container-apparmor-unconfined \
+      init-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user \
+      container-selinux-type init-selinux-role container-procmount-unmasked init-procmount-unmasked \
+      missing-init-resources wrong-run-as-user \
+      eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label \
+      eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount \
+      eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env \
+      mixed-eks-irsa-identity eks-env-without-label irsa-env-without-volume \
+      second-irsa-identity unconfigured-custom-audience-irsa; do
+    server_dry_run_admission_fixture "${variant}" rejected
+  done
+}
+
+verify_api_rbac() {
+  local api_username="system:serviceaccount:${namespace}:${release}-pod-manager"
+  [[ $(kubectl auth can-i create pods --namespace "${namespace}" --as="${api_username}") == yes ]] \
+    || fail "The API service account cannot create managed pods."
+  [[ $(kubectl auth can-i create deployments.apps --namespace "${namespace}" --as="${api_username}") == no ]] \
+    || fail "The API service account can create deployments."
+  [[ $(kubectl auth can-i patch deployments.apps --namespace "${namespace}" --as="${api_username}") == no ]] \
+    || fail "The API service account can patch deployments."
+  [[ $(kubectl auth can-i create configmaps --namespace "${namespace}" --as="${api_username}") == no ]] \
+    || fail "The API service account can create arbitrary ConfigMaps."
+  [[ $(kubectl auth can-i patch "configmap/${release}-wiremock-user-config" \
+      --namespace "${namespace}" --as="${api_username}") == yes ]] \
+    || fail "The API service account cannot patch the release-owned user ConfigMap."
+  [[ $(kubectl auth can-i patch configmap/unrelated \
+      --namespace "${namespace}" --as="${api_username}") == no ]] \
+    || fail "The API service account can patch an unrelated ConfigMap."
+}
+
+pods_have_no_general_api_token() {
+  jq -e '
+    all(.items[];
+      .spec.automountServiceAccountToken == false and
+      all(.spec.volumes[]?;
+        (.projected.sources // [])
+        | all(.[]; (.serviceAccountToken // null) == null or
+            (.serviceAccountToken.audience == "sts.amazonaws.com" or
+             .serviceAccountToken.audience == "pods.eks.amazonaws.com"))))
+  ' >/dev/null
+}
+
+verify_fixed_workloads_are_tokenless() {
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" \
+    -l 'app.kubernetes.io/component in (proxy,dash,mcp)' -o json)
+  jq -e '
+    (["proxy", "dash", "mcp"] -
+      ([.items[].metadata.labels["app.kubernetes.io/component"]] | unique) | length) == 0
+  ' >/dev/null <<<"${pods}" \
+    || fail "Expected Proxy, Dash, and MCP Pods are not all present for token verification."
+  pods_have_no_general_api_token <<<"${pods}" \
+    || fail "Proxy, Dash, or MCP received a general Kubernetes API token volume."
+}
+
+verify_wiremock_workload_identity() {
+  local mock_id=$1
+  local pods
+  pods=$(kubectl get pods --namespace "${namespace}" \
+    -l "mock-fleet/mock-id=${mock_id}" -o json)
+  jq -e --arg service_account "${release}-wiremock" '
+    (.items | length) == 1 and
+    .items[0].spec.serviceAccountName == $service_account and
+    .items[0].spec.automountServiceAccountToken == false
+  ' >/dev/null <<<"${pods}" || fail "Managed WireMock did not retain its dedicated tokenless service account."
+  pods_have_no_general_api_token <<<"${pods}" \
+    || fail "Managed WireMock received a general Kubernetes API token volume."
 }
 
 assert_jq() {
@@ -139,8 +272,26 @@ run_s3_cli() {
   local suffix=$1
   shift
   local pod="${release}-s3-${suffix}"
+  local overrides
+  overrides=$(jq -cn --arg pod "${pod}" '{
+    spec:{
+      securityContext:{runAsNonRoot:true,seccompProfile:{type:"RuntimeDefault"}},
+      containers:[{
+        name:$pod,
+        securityContext:{
+          runAsNonRoot:true,
+          runAsUser:1000,
+          allowPrivilegeEscalation:false,
+          capabilities:{drop:["ALL"]},
+          seccompProfile:{type:"RuntimeDefault"}
+        },
+        resources:{requests:{cpu:"25m",memory:"32Mi"},limits:{cpu:"250m",memory:"256Mi"}}
+      }]
+    }
+  }')
   kubectl delete pod "${pod}" --namespace "${namespace}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   kubectl run "${pod}" --namespace "${namespace}" --restart=Never --image="${s3_admin_image}" \
+    --overrides="${overrides}" --override-type=strategic \
     --env="AWS_ACCESS_KEY_ID=${s3_access_key}" \
     --env="AWS_SECRET_ACCESS_KEY=${s3_secret_key}" \
     --env="AWS_DEFAULT_REGION=us-east-1" \
@@ -211,7 +362,17 @@ write_bucket_ownership_marker() {
 
 create_recording_target() {
   kubectl create deployment recording-target --namespace "${namespace}" \
-    --image=hashicorp/http-echo:0.2.3 -- /http-echo --listen=:5678 --text=recorded
+    --image=hashicorp/http-echo:0.2.3 --dry-run=client -o json \
+    -- /http-echo --listen=:5678 --text=recorded \
+    | jq '.spec.template.spec.securityContext = {runAsNonRoot:true,seccompProfile:{type:"RuntimeDefault"}}
+      | .spec.template.spec.containers[0].securityContext = {
+          runAsNonRoot:true,
+          runAsUser:1000,
+          allowPrivilegeEscalation:false,
+          capabilities:{drop:["ALL"]},
+          seccompProfile:{type:"RuntimeDefault"}
+        }' \
+    | kubectl apply -f -
 }
 
 helm_deploy() {
@@ -577,6 +738,7 @@ run_contracts() {
   assert_jq "${result}" ".mockIds | index(\"${config_mock}\") != null" "Saved MCP config was not listed"
   mcp_success start_mock "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
   poll_mcp_success list_stubs "$(jq -cn --arg id "${config_mock}" '{mockId:$id,limit:1}')" >/dev/null
+  verify_wiremock_workload_identity "${config_mock}"
   result=$(mcp_success delete_mock_config "$(jq -cn --arg id "${config_mock}" --arg rv "${rv}" \
     '{mockId:$id,resourceVersion:$rv,applyMode:"restartActive"}')")
   assert_jq "${result}" ".mockId == \"${config_mock}\" and .deleted == true" \
@@ -828,6 +990,33 @@ self_test() {
       || fail "Live S3 storage is missing its multi-writer mount option: ${mount_option}"
   done
   log "S3 multi-writer mount contract passed."
+  if ! (
+    kubectl() {
+      local arg overrides=""
+      if [[ "$1" == run ]]; then
+        for arg in "$@"; do
+          [[ "${arg}" == --overrides=* ]] && overrides=${arg#--overrides=}
+        done
+        jq -e '
+          .spec.securityContext.runAsNonRoot == true and
+          .spec.securityContext.seccompProfile.type == "RuntimeDefault" and
+          .spec.containers[0].securityContext.runAsUser == 1000 and
+          .spec.containers[0].securityContext.allowPrivilegeEscalation == false and
+          .spec.containers[0].securityContext.capabilities.drop == ["ALL"] and
+          .spec.containers[0].resources.requests.cpu == "25m" and
+          .spec.containers[0].resources.limits.memory == "256Mi"
+        ' >/dev/null <<<"${overrides}"
+      elif [[ "$1" == wait ]]; then
+        return 0
+      elif [[ "$1" == logs ]]; then
+        return 0
+      fi
+    }
+    run_s3_cli self-test sts get-caller-identity
+  ); then
+    fail "S3 helper pod does not satisfy restricted PSA and quota resources."
+  fi
+  log "S3 helper restricted PSA contract passed."
   local dry_output
   dry_output=$(MOCK_FLEET_E2E_RUN_ID=self-test "$0" --dry-run)
   grep -Fq 'No cluster changes were made.' <<<"${dry_output}" || fail "Dry-run did not confirm no changes."
@@ -841,12 +1030,149 @@ self_test() {
   log "Ownership marker upload contract passed."
   local recording_command
   recording_command=$(
-    kubectl() { printf '%s\n' "$*"; }
+    kubectl() {
+      if [[ "$*" == 'create deployment recording-target '* ]]; then
+        [[ "$*" == *'-- /http-echo --listen=:5678 --text=recorded'* ]] || return 1
+        printf '%s\n' '{"spec":{"template":{"spec":{"containers":[{"name":"http-echo"}]}}}}'
+      else
+        cat
+      fi
+    }
     create_recording_target
   )
-  grep -Fq -- '-- /http-echo --listen=:5678 --text=recorded' <<<"${recording_command}" \
-    || fail "Recording target does not invoke the image binary explicitly."
+  jq -e '
+    .spec.template.spec.securityContext.runAsNonRoot == true and
+    .spec.template.spec.securityContext.seccompProfile.type == "RuntimeDefault" and
+    .spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation == false and
+    .spec.template.spec.containers[0].securityContext.capabilities.drop == ["ALL"]
+  ' >/dev/null <<<"${recording_command}" \
+    || fail "Recording target does not satisfy restricted PSA."
   log "Recording target command contract passed."
+  local psa_command
+  psa_command=$(
+    kubectl() {
+      if [[ "$*" == 'version -o jsonpath={.serverVersion.major}' ]]; then
+        printf '1'
+      elif [[ "$*" == 'version -o jsonpath={.serverVersion.minor}' ]]; then
+        printf '36+'
+      else
+        printf '%s\n' "$*"
+      fi
+    }
+    label_namespace_for_restricted_psa self-test-namespace
+  )
+  for psa_label in \
+    'pod-security.kubernetes.io/enforce=restricted' \
+    'pod-security.kubernetes.io/enforce-version=v1.36' \
+    'pod-security.kubernetes.io/audit=restricted' \
+    'pod-security.kubernetes.io/audit-version=v1.36' \
+    'pod-security.kubernetes.io/warn=restricted' \
+    'pod-security.kubernetes.io/warn-version=v1.36'; do
+    grep -Fq "${psa_label}" <<<"${psa_command}" \
+      || fail "Restricted PSA setup omitted ${psa_label}."
+  done
+  log "Restricted PSA namespace label contract passed."
+  local admission_matrix
+  admission_matrix=$(
+    admission_policy_name=self-test-policy
+    server_dry_run_admission_fixture() { printf '%s %s\n' "$1" "$2"; }
+    verify_admission_dry_runs
+  )
+  for expected_fixture in \
+    'accepted accepted' \
+    'accepted-workload-identity accepted' \
+    'accepted-eks-pod-identity accepted' \
+    'privileged rejected' \
+    'hostpath rejected' \
+    'wrong-image rejected' \
+    'wrong-service-account rejected' \
+    'label-spoofing rejected' \
+    'missing-limits rejected' \
+    'excessive-limits rejected' \
+    'alternate-sidecar rejected' \
+    'identity-alternate-mount rejected' \
+    'identity-init-subpath rejected' \
+    'native-init-sidecar rejected' \
+    'pod-apparmor-unconfined rejected' \
+    'container-apparmor-unconfined rejected' \
+    'init-apparmor-unconfined rejected' \
+    'deprecated-apparmor-annotation rejected' \
+    'pod-selinux-user rejected' \
+    'container-selinux-type rejected' \
+    'init-selinux-role rejected' \
+    'container-procmount-unmasked rejected' \
+    'init-procmount-unmasked rejected' \
+    'missing-init-resources rejected' \
+    'wrong-run-as-user rejected' \
+    'eks-label-without-token rejected' \
+    'eks-token-without-label rejected' \
+    'eks-label-wrong-value rejected' \
+    'extra-unrelated-label rejected' \
+    'eks-nonstandard-token-path rejected' \
+    'eks-alternate-volume-name rejected' \
+    'eks-dual-irsa-mount rejected' \
+    'eks-second-mount rejected' \
+    'eks-duplicate-full-uri rejected' \
+    'eks-duplicate-token-file rejected' \
+    'irsa-duplicate-role-env rejected' \
+    'mixed-eks-irsa-identity rejected' \
+    'eks-env-without-label rejected' \
+    'irsa-env-without-volume rejected' \
+    'second-irsa-identity rejected' \
+    'unconfigured-custom-audience-irsa rejected'; do
+    grep -Fxq "${expected_fixture}" <<<"${admission_matrix}" \
+      || fail "Admission dry-run matrix omitted ${expected_fixture}."
+  done
+  log "Admission dry-run fixture contract passed."
+  if ! (
+    kubectl() {
+      case "$*" in
+        *'auth can-i create pods '*) printf 'yes\n' ;;
+        *'auth can-i patch configmap/'*'-wiremock-user-config '*) printf 'yes\n' ;;
+        *'auth can-i '*) printf 'no\n' ;;
+        *) return 1 ;;
+      esac
+    }
+    verify_api_rbac
+  ); then
+    fail "API RBAC can-i contract rejected the minimized role."
+  fi
+  log "API RBAC can-i contract passed."
+  local identity_pods
+  identity_pods=$(jq -cn --arg service_account "${release}-wiremock" '{items:[{spec:{
+    serviceAccountName:$service_account,
+    automountServiceAccountToken:false,
+    volumes:[{name:"aws-iam-token",projected:{sources:[{serviceAccountToken:{audience:"sts.amazonaws.com"}}]}}]
+  }}]}')
+  if ! (
+    kubectl() { printf '%s\n' "${identity_pods}"; }
+    verify_wiremock_workload_identity self-test
+  ); then
+    fail "Dedicated WireMock identity rejected an audience-bound workload token."
+  fi
+  if pods_have_no_general_api_token <<<"$(jq -c '.items[0].spec.volumes[0].projected.sources[0].serviceAccountToken.audience = "https://kubernetes.default.svc"' <<<"${identity_pods}")"; then
+    fail "Tokenless workload assertion accepted a general Kubernetes API token."
+  fi
+  log "Tokenless workload identity contract passed."
+  local fixed_workload_pods
+  fixed_workload_pods='{"items":[
+    {"metadata":{"labels":{"app.kubernetes.io/component":"proxy"}},"spec":{"automountServiceAccountToken":false}},
+    {"metadata":{"labels":{"app.kubernetes.io/component":"dash"}},"spec":{"automountServiceAccountToken":false}},
+    {"metadata":{"labels":{"app.kubernetes.io/component":"mcp"}},"spec":{"automountServiceAccountToken":false}}
+  ]}'
+  if ! (
+    kubectl() { printf '%s\n' "${fixed_workload_pods}"; }
+    verify_fixed_workloads_are_tokenless
+  ); then
+    fail "Fixed workload presence rejected the E2E profile's enabled components."
+  fi
+  if (
+    kubectl() { printf '%s\n' '{"items":[]}' ; }
+    verify_fixed_workloads_are_tokenless >/dev/null 2>&1
+  ); then
+    fail "Fixed workload token assertion accepted a vacuous empty Pod set."
+  fi
+  log "Fixed workload presence contract passed."
   local parsed_session
   parsed_session=$(printf 'mcp-session-id: self-test-session\r\n' | extract_mcp_session_id)
   [[ "${parsed_session}" == self-test-session ]] \
@@ -1038,6 +1364,7 @@ work_dir=$(mktemp -d "${TMPDIR:-/tmp}/mock-fleet-e2e.XXXXXX")
 trap cleanup EXIT INT TERM
 kubectl create namespace "${namespace}" >/dev/null
 namespace_created=true
+label_namespace_for_restricted_psa "${namespace}" >/dev/null
 
 log "Creating isolated SeaweedFS bucket ${bucket}."
 bucket_listing=""
@@ -1075,6 +1402,9 @@ helm_deploy "${wiremock_image}" IfNotPresent
 kubectl get deployment --namespace "${namespace}" -l 'app.kubernetes.io/component=api' \
   -o jsonpath='{.items[0].status.readyReplicas}' | grep -qx '2' \
   || fail "Fleet API did not reach two ready replicas."
+verify_api_rbac
+verify_admission_dry_runs
+verify_fixed_workloads_are_tokenless
 
 kubectl port-forward --namespace "${namespace}" service/"${release}-mcp" "${mcp_port}:80" \
   >"${work_dir}/mcp-port-forward.log" 2>&1 &

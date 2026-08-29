@@ -1,3 +1,4 @@
+{{- include "mock-fleet.validateSecurityBoundaries" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,9 +28,12 @@ spec:
         {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
+      automountServiceAccountToken: true
       terminationGracePeriodSeconds: {{ .Values.fleet.api.terminationGracePeriodSeconds }}
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        seccompProfile:
+          type: RuntimeDefault
         {{- if .Values.storage.persistent }}
         fsGroup: 185
         fsGroupChangePolicy: OnRootMismatch
@@ -38,6 +42,14 @@ spec:
         - name: api
           image: {{ printf "%s:%s" .Values.fleet.api.image.repository (.Values.fleet.api.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.api.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: KUBERNETES_NAMESPACE
               valueFrom:
@@ -51,6 +63,12 @@ spec:
               value: {{ .Values.fleet.api.podInactivityThreshold | quote }}
             - name: MOCK_FLEET_POD_CREATION_TIMEOUT
               value: {{ .Values.fleet.api.podCreationTimeout | quote }}
+            - name: MOCK_FLEET_MAX_ACTIVE_MOCKS
+              value: {{ .Values.fleet.api.maxActiveMocks | quote }}
+            - name: MOCK_FLEET_MAX_CONCURRENT_STARTS
+              value: {{ .Values.fleet.api.maxConcurrentStarts | quote }}
+            - name: MOCK_FLEET_QUEUED_START_CAPACITY
+              value: {{ .Values.fleet.api.queuedStartCapacity | quote }}
             - name: QUARKUS_LOG_CONSOLE_JSON
               value: {{ .Values.fleet.api.logging.json | quote }}
             - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
@@ -76,12 +94,24 @@ spec:
               value: {{ include "mock-fleet.wiremockUserConfigMapName" . | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_KEY
               value: wiremock-options.yaml
+            - name: MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_CPU
+              value: {{ .Values.wiremock.resourcePolicy.requestFloor.cpu | quote }}
+            - name: MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_MEMORY
+              value: {{ .Values.wiremock.resourcePolicy.requestFloor.memory | quote }}
+            - name: MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_CPU
+              value: {{ .Values.wiremock.resourcePolicy.limitCeiling.cpu | quote }}
+            - name: MOCK_FLEET_WIREMOCK_RESOURCE_LIMIT_CEILING_MEMORY
+              value: {{ .Values.wiremock.resourcePolicy.limitCeiling.memory | quote }}
             - name: MOCK_FLEET_PROXY_DEPLOYMENT_NAME
               value: {{ include "mock-fleet.proxyFullname" . | quote }}
             - name: MOCK_FLEET_PROXY_ROUTING_MODE
               value: {{ .Values.fleet.proxy.routing.mode | quote }}
             - name: MOCK_FLEET_PROXY_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
+            - name: MOCK_FLEET_MAPPINGS_MAX_DEPTH
+              value: {{ .Values.fleet.api.mappings.maxDepth | quote }}
+            - name: MOCK_FLEET_MAPPINGS_MAX_ENTRIES
+              value: {{ .Values.fleet.api.mappings.maxEntries | quote }}
             - name: MOCK_FLEET_HAZELCAST_CLUSTER_NAME
               value: {{ .Values.hazelcast.clusterName | quote }}
             - name: MOCK_FLEET_HAZELCAST_SERVICE_DNS

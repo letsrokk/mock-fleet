@@ -24,10 +24,20 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mcp
           image: {{ printf "%s:%s" .Values.fleet.mcp.image.repository (.Values.fleet.mcp.image.tag | default .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.fleet.mcp.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: FLEET_MCP_API_BASE_URL
               value: {{ include "mock-fleet.mcpApiBaseUrl" . | quote }}

@@ -93,6 +93,30 @@ release_exists() {
     helm status "${RELEASE_NAME}" --namespace "${NAMESPACE}" >/dev/null 2>&1
 }
 
+current_kubernetes_minor_version() {
+    local major minor version_json
+    version_json=$(kubectl get --raw=/version)
+    major=$(printf '%s\n' "${version_json}" | sed -n 's/.*"major"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    minor=$(printf '%s\n' "${version_json}" | sed -n 's/.*"minor"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    minor=${minor%%[!0-9]*}
+    [[ -n "${major}" && -n "${minor}" ]] \
+        || { echo "Unable to determine the current Kubernetes minor version." >&2; return 1; }
+    printf 'v%s.%s\n' "${major}" "${minor}"
+}
+
+label_namespace_for_restricted_psa() {
+    local namespace=$1
+    local version
+    version=$(current_kubernetes_minor_version)
+    kubectl label namespace "${namespace}" --overwrite \
+        pod-security.kubernetes.io/enforce=restricted \
+        "pod-security.kubernetes.io/enforce-version=${version}" \
+        pod-security.kubernetes.io/audit=restricted \
+        "pod-security.kubernetes.io/audit-version=${version}" \
+        pod-security.kubernetes.io/warn=restricted \
+        "pod-security.kubernetes.io/warn-version=${version}"
+}
+
 mark_changed_modules() {
     local changed_modules=()
     local path
@@ -335,6 +359,7 @@ fi
 
 helm dependency build "${CHART_DIR}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+label_namespace_for_restricted_psa "${NAMESPACE}"
 HELM_ARGS=(
     upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"
     --namespace "${NAMESPACE}"

@@ -9,6 +9,9 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
+
+import java.nio.channels.Channels;
 
 import java.util.Locale;
 
@@ -40,10 +43,15 @@ public class MappingsResource {
     @GET
     @Path("/{mockId}/files")
     public Response getFile(@PathParam("mockId") String mockId, @QueryParam("path") String path) {
-        java.nio.file.Path file = mappingsService.file(mockId, path);
-        String fileName = java.nio.file.Path.of(path).getFileName().toString().replace("\"", "");
+        MappingsService.OpenedFile file = mappingsService.file(mockId, path);
+        String fileName = file.fileName().replace("\"", "");
         FileResponse fileResponse = fileResponse(fileName);
-        return Response.ok(file.toFile())
+        StreamingOutput body = output -> {
+            try (file) {
+                Channels.newInputStream(file.channel()).transferTo(output);
+            }
+        };
+        return Response.ok(body)
                 .type(fileResponse.mediaType())
                 .header("Content-Disposition", fileResponse.disposition() + "; filename=\"" + fileName + "\"")
                 .build();

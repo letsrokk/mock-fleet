@@ -4,8 +4,12 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
+import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
+import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -24,31 +28,37 @@ public class PodFactory {
     static final String WIREMOCK_ROOT_DIR = "/home/wiremock";
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
+    static final long CONTAINER_USER_ID = 1000L;
+    static final String INIT_CONTAINER_REQUEST_CPU = "10m";
+    static final String INIT_CONTAINER_REQUEST_MEMORY = "16Mi";
+    static final String INIT_CONTAINER_LIMIT_CPU = "100m";
+    static final String INIT_CONTAINER_LIMIT_MEMORY = "64Mi";
     static final String STORAGE_TYPE_S3 = "s3";
 
     private final MockFleetConfig config;
+    private final WireMockResourcePolicy resourcePolicy;
 
     @Inject
-    public PodFactory(MockFleetConfig config) {
+    public PodFactory(MockFleetConfig config, WireMockResourcePolicy resourcePolicy) {
         this.config = config;
+        this.resourcePolicy = resourcePolicy;
     }
 
-    public Pod createPodSpec(String podName, String mockId) {
-        return createPodSpec(podName, mockId, List.of(), null);
-    }
-
-    public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions) {
-        return createPodSpec(podName, mockId, wireMockOptions, null);
+    public PodFactory(MockFleetConfig config) {
+        this(config, new WireMockResourcePolicy(config));
     }
 
     public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
                              ResourceRequirements resources) {
+        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(wireMockOptions);
+        resourcePolicy.validateEffective(resources);
         MockFleetConfig.StorageConfig storage = config.storage();
 
         ContainerBuilder containerBuilder = new ContainerBuilder()
                 .withImagePullPolicy(config.wiremockImagePullPolicy())
                 .withName(config.wiremockContainerName())
                 .withImage(config.wiremockImage())
+                .withSecurityContext(restrictedContainerSecurityContext(CONTAINER_USER_ID))
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
@@ -83,8 +93,8 @@ public class PodFactory {
                     .withFailureThreshold(3)
                 .endLivenessProbe();
 
-        if (wireMockOptions != null && !wireMockOptions.isEmpty()) {
-            containerBuilder.withArgs(wireMockOptions);
+        if (!normalizedOptions.isEmpty()) {
+            containerBuilder.withArgs(normalizedOptions);
         }
         if (resources != null) {
             containerBuilder.withResources(resources);
@@ -101,6 +111,8 @@ public class PodFactory {
                     .withName(INIT_MAPPINGS_CONTAINER)
                     .withImage(INIT_CONTAINER_IMAGE)
                     .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
+                    .withSecurityContext(restrictedContainerSecurityContext(CONTAINER_USER_ID))
+                    .withResources(initContainerResources())
                     .addNewVolumeMount()
                         .withName(WIREMOCK_MAPPINGS_VOLUME)
                         .withMountPath(storageMountPath)
@@ -119,6 +131,13 @@ public class PodFactory {
 
         PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
                 .withContainers(container)
+                .withAutomountServiceAccountToken(false)
+                .withSecurityContext(new PodSecurityContextBuilder()
+                        .withRunAsNonRoot(true)
+                        .withNewSeccompProfile()
+                            .withType("RuntimeDefault")
+                        .endSeccompProfile()
+                        .build())
                 .withTerminationGracePeriodSeconds(config.wiremockTerminationGracePeriodSeconds())
                 .withRestartPolicy("Never");
 
@@ -145,6 +164,31 @@ public class PodFactory {
                     .addToLabels(LABEL_MOCK_ID, mockId)
                 .endMetadata()
                 .withSpec(podSpecBuilder.build())
+                .build();
+    }
+
+    private io.fabric8.kubernetes.api.model.SecurityContext restrictedContainerSecurityContext(Long runAsUser) {
+        SecurityContextBuilder securityContext = new SecurityContextBuilder()
+                .withRunAsNonRoot(true)
+                .withAllowPrivilegeEscalation(false)
+                .withNewCapabilities()
+                    .withDrop("ALL")
+                .endCapabilities()
+                .withNewSeccompProfile()
+                    .withType("RuntimeDefault")
+                .endSeccompProfile();
+        if (runAsUser != null) {
+            securityContext.withRunAsUser(runAsUser);
+        }
+        return securityContext.build();
+    }
+
+    private ResourceRequirements initContainerResources() {
+        return new ResourceRequirementsBuilder()
+                .addToRequests("cpu", new Quantity(INIT_CONTAINER_REQUEST_CPU))
+                .addToRequests("memory", new Quantity(INIT_CONTAINER_REQUEST_MEMORY))
+                .addToLimits("cpu", new Quantity(INIT_CONTAINER_LIMIT_CPU))
+                .addToLimits("memory", new Quantity(INIT_CONTAINER_LIMIT_MEMORY))
                 .build();
     }
 }

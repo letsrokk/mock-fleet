@@ -2,18 +2,25 @@ package com.github.letsrokk;
 
 import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.Config;
 import org.hamcrest.Matcher;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +29,15 @@ class MappingsResourceTest {
 
     @InjectMock
     MappingsService mappingsService;
+
+    @Inject
+    Config config;
+
+    @Test
+    void configuresDefaultMappingTraversalLimits() {
+        assertThat(config.getValue("mock-fleet.mappings.max-depth", Integer.class), is(32));
+        assertThat(config.getValue("mock-fleet.mappings.max-entries", Integer.class), is(10_000));
+    }
 
     @Test
     void getsMappingsView() {
@@ -65,7 +81,7 @@ class MappingsResourceTest {
     void streamsMappingFile() throws IOException {
         Path file = Files.createTempFile("mapping", ".json");
         Files.writeString(file, "{\"request\":{}}");
-        when(mappingsService.file("demo", "mapping.json")).thenReturn(file);
+        when(mappingsService.file("demo", "mapping.json")).thenReturn(opened("mapping.json", file));
 
         given()
                 .queryParam("path", "mapping.json")
@@ -90,7 +106,7 @@ class MappingsResourceTest {
     void streamsUnknownFileTypesAsAttachments() throws IOException {
         Path file = Files.createTempFile("mapping", ".bin");
         Files.writeString(file, "binary");
-        when(mappingsService.file("demo", "mapping.bin")).thenReturn(file);
+        when(mappingsService.file("demo", "mapping.bin")).thenReturn(opened("mapping.bin", file));
 
         given()
                 .queryParam("path", "mapping.bin")
@@ -127,10 +143,30 @@ class MappingsResourceTest {
         verify(mappingsService).deleteFolder("demo");
     }
 
+    @Test
+    void returnsStableTraversalLimitError() {
+        doThrow(new ApiException(Response.Status.BAD_REQUEST,
+                new ApiError("MAPPINGS_TRAVERSAL_LIMIT", "Mappings traversal limit exceeded.", false, false,
+                        Map.of("mockId", "demo", "limit", "maxEntries", "maximum", 10_000))))
+                .when(mappingsService).deleteFolder("demo");
+
+        given()
+        .when()
+                .delete("/__fleet/api/mappings/demo")
+        .then()
+                .statusCode(400)
+                .body("code", is("MAPPINGS_TRAVERSAL_LIMIT"))
+                .body("retryable", is(false))
+                .body("stateMayHaveChanged", is(false))
+                .body("details.mockId", is("demo"))
+                .body("details.limit", is("maxEntries"))
+                .body("details.maximum", is(10_000));
+    }
+
     private void assertInlineFileResponse(String fileName, Matcher<? super String> contentTypeMatcher) throws IOException {
         Path file = Files.createTempFile("mapping", ".tmp");
         Files.writeString(file, "content");
-        when(mappingsService.file("demo", fileName)).thenReturn(file);
+        when(mappingsService.file("demo", fileName)).thenReturn(opened(fileName, file));
 
         given()
                 .queryParam("path", fileName)
@@ -142,5 +178,9 @@ class MappingsResourceTest {
                 .header("Content-Disposition", startsWith("inline;"));
 
         verify(mappingsService).file("demo", fileName);
+    }
+
+    private MappingsService.OpenedFile opened(String fileName, Path file) throws IOException {
+        return new MappingsService.OpenedFile(fileName, Files.newByteChannel(file, StandardOpenOption.READ));
     }
 }

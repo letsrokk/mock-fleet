@@ -8,6 +8,7 @@ import {
   emptyDraft,
   groupOptions,
   hasOption,
+  numberInputAttributes,
   optionsFromDraft,
   resourceSummary,
   resourcesFromDraft,
@@ -1012,6 +1013,9 @@ export default function App() {
                       </button>
                       {!resourcesCollapsed ? (
                         <div className="resource-grid option-group-list">
+                          <p className="option-description">
+                            Only cpu and memory are accepted, within the cluster-owned request floor and limit ceiling.
+                          </p>
                           {RESOURCE_KEYS.map((key) => (
                             <label key={`request-${key}`}>
                               Request {key}
@@ -1345,6 +1349,7 @@ export default function App() {
           ) : (
             <input
               type={option.kind === "number" ? "number" : "text"}
+              {...numberInputAttributes(option)}
               value={draft.values[option.name] ?? ""}
               onChange={(event) => setDraftValue(option.name, event.target.value)}
             />

@@ -55,6 +55,30 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-wiremock-egress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.apiIngressNetworkPolicyName" -}}
+{{- printf "%s-api-ingress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockAdmissionPolicyName" -}}
+{{- $scope := printf "%s-%s" .Release.Name (include "mock-fleet.namespace" .) -}}
+{{- $name := printf "%s-wiremock" $scope -}}
+{{- if gt (len $name) 63 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") ($scope | sha256sum | trunc 8) -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockAdmissionPolicyBindingName" -}}
+{{- $scope := printf "%s-%s" .Release.Name (include "mock-fleet.namespace" .) -}}
+{{- $name := printf "%s-wiremock-binding" $scope -}}
+{{- if gt (len $name) 63 -}}
+{{- printf "%s-%s" ($name | trunc 54 | trimSuffix "-") ($scope | sha256sum | trunc 8) -}}
+{{- else -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mock-fleet.apiServiceUrl" -}}
 {{- $host := printf "%s.%s.svc.%s" (include "mock-fleet.apiFullname" .) (include "mock-fleet.namespace" .) (required "clusterDomain is required" .Values.clusterDomain) -}}
 {{- $port := int .Values.fleet.api.service.ports.http -}}
@@ -179,5 +203,142 @@ app.kubernetes.io/component: mcp
 {{- if or (lt (int .Values.fleet.mcp.defaultPageSize) 1) (gt (int .Values.fleet.mcp.defaultPageSize) (int .Values.fleet.mcp.maxPageSize)) (gt (int .Values.fleet.mcp.maxPageSize) 200) -}}
 {{- fail "fleet.mcp page sizes must satisfy 1 <= defaultPageSize <= maxPageSize <= 200" -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Keep resource quantities as decimal digit strings so policy comparisons never round through float64. */}}
+{{- define "mock-fleet.decimalMultiply" -}}
+{{- $digits := .digits -}}
+{{- $factor := int .factor -}}
+{{- $result := list -}}
+{{- $carry := 0 -}}
+{{- range $offset := until (len $digits) -}}
+{{- $position := sub (sub (len $digits) 1) $offset | int -}}
+{{- $digit := substr $position (add $position 1 | int) $digits | int -}}
+{{- $product := add (mul $digit $factor) $carry | int -}}
+{{- $result = prepend $result (toString (mod $product 10)) -}}
+{{- $carry = div $product 10 | int -}}
+{{- end -}}
+{{- if gt $carry 0 -}}
+{{- $result = prepend $result (toString $carry) -}}
+{{- end -}}
+{{- join "" $result -}}
+{{- end -}}
+
+{{- define "mock-fleet.quantityValue" -}}
+{{- $field := .field -}}
+{{- $raw := trim (toString .value) -}}
+{{- if hasSuffix "Ei" $raw -}}
+{{- fail (printf "%s does not support Ei because Fabric8 cannot compare it exactly" $field) -}}
+{{- end -}}
+{{- $numberPattern := "(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)" -}}
+{{- $quantityPattern := printf "^%s(?:[eE][+-]?[0-9]{1,2}|[PTGMK]i|[numkMGTPE])?$" $numberPattern -}}
+{{- if or (gt (len $raw) 128) (not (regexMatch $quantityPattern $raw)) -}}
+{{- fail (printf "%s must be a positive Kubernetes resource quantity" $field) -}}
+{{- end -}}
+{{- $number := regexFind (printf "^%s" $numberPattern) $raw -}}
+{{- $suffix := trimPrefix $number $raw -}}
+{{- $numberParts := splitList "." $number -}}
+{{- $whole := index $numberParts 0 -}}
+{{- $fraction := "" -}}
+{{- if eq (len $numberParts) 2 -}}
+{{- $fraction = index $numberParts 1 -}}
+{{- end -}}
+{{- $coefficient := regexReplaceAll "^0+" (printf "%s%s" $whole $fraction) "" -}}
+{{- if not $coefficient -}}
+{{- fail (printf "%s must be a positive Kubernetes resource quantity" $field) -}}
+{{- end -}}
+{{- $exponent := mul -1 (len $fraction) | int -}}
+{{- if regexMatch "^[eE][+-]?[0-9]{1,2}$" $suffix -}}
+{{- $exponent = add $exponent (substr 1 (len $suffix) $suffix | int) | int -}}
+{{- else -}}
+{{- $decimalExponents := dict "" 0 "n" -9 "u" -6 "m" -3 "k" 3 "M" 6 "G" 9 "T" 12 "P" 15 "E" 18 -}}
+{{- if hasKey $decimalExponents $suffix -}}
+{{- $exponent = add $exponent (get $decimalExponents $suffix | int) | int -}}
+{{- else -}}
+{{- $binaryPowers := dict "Ki" 1 "Mi" 2 "Gi" 3 "Ti" 4 "Pi" 5 -}}
+{{- $power := get $binaryPowers $suffix | int -}}
+{{- range $_ := until $power -}}
+{{- $coefficient = include "mock-fleet.decimalMultiply" (dict "digits" $coefficient "factor" 1024) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%s|%d" $coefficient $exponent -}}
+{{- end -}}
+
+{{- define "mock-fleet.quantityCompare" -}}
+{{- $leftParts := splitList "|" .left -}}
+{{- $rightParts := splitList "|" .right -}}
+{{- $leftCoefficient := index $leftParts 0 -}}
+{{- $rightCoefficient := index $rightParts 0 -}}
+{{- $leftExponent := index $leftParts 1 | int -}}
+{{- $rightExponent := index $rightParts 1 | int -}}
+{{- $commonExponent := $leftExponent -}}
+{{- if lt $rightExponent $commonExponent -}}
+{{- $commonExponent = $rightExponent -}}
+{{- end -}}
+{{- $left := printf "%s%s" $leftCoefficient (repeat (sub $leftExponent $commonExponent | int) "0") -}}
+{{- $right := printf "%s%s" $rightCoefficient (repeat (sub $rightExponent $commonExponent | int) "0") -}}
+{{- if gt (len $left) (len $right) -}}
+1
+{{- else if lt (len $left) (len $right) -}}
+-1
+{{- else if eq $left $right -}}
+0
+{{- else if gt $left $right -}}
+1
+{{- else -}}
+-1
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.validateSecurityBoundaries" -}}
+{{- if and .Values.wiremock.admissionPolicy.enabled (not (include "mock-fleet.wiremockServiceAccountName" .)) -}}
+{{- fail "wiremock.serviceAccount must select a dedicated service account when wiremock.admissionPolicy.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.wiremock.admissionPolicy.enabled (eq (include "mock-fleet.serviceAccountName" .) (include "mock-fleet.wiremockServiceAccountName" .)) -}}
+{{- fail "API and WireMock service accounts must resolve to different names when wiremock.admissionPolicy.enabled=true" -}}
+{{- end -}}
+{{- if gt (int .Values.fleet.api.maxConcurrentStarts) (int .Values.fleet.api.maxActiveMocks) -}}
+{{- fail "fleet.api.maxConcurrentStarts must not exceed fleet.api.maxActiveMocks" -}}
+{{- end -}}
+{{- if eq (int .Values.hazelcast.port) (int .Values.fleet.api.service.ports.targetHttp) -}}
+{{- fail "hazelcast.port must not equal fleet.api.service.ports.targetHttp" -}}
+{{- end -}}
+{{- $cpuFloor := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.requestFloor.cpu" "value" .Values.wiremock.resourcePolicy.requestFloor.cpu) -}}
+{{- $memoryFloor := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.requestFloor.memory" "value" .Values.wiremock.resourcePolicy.requestFloor.memory) -}}
+{{- $cpuCeiling := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.limitCeiling.cpu" "value" .Values.wiremock.resourcePolicy.limitCeiling.cpu) -}}
+{{- $memoryCeiling := include "mock-fleet.quantityValue" (dict "field" "wiremock.resourcePolicy.limitCeiling.memory" "value" .Values.wiremock.resourcePolicy.limitCeiling.memory) -}}
+{{- $cpuRequest := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.requests.cpu" "value" .Values.wiremock.config.default.resources.requests.cpu) -}}
+{{- $memoryRequest := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.requests.memory" "value" .Values.wiremock.config.default.resources.requests.memory) -}}
+{{- $cpuLimit := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.limits.cpu" "value" .Values.wiremock.config.default.resources.limits.cpu) -}}
+{{- $memoryLimit := include "mock-fleet.quantityValue" (dict "field" "wiremock.config.default.resources.limits.memory" "value" .Values.wiremock.config.default.resources.limits.memory) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.requests.cpu" "value" (index .Values.resourceQuota.hard "requests.cpu")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.requests.memory" "value" (index .Values.resourceQuota.hard "requests.memory")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.limits.cpu" "value" (index .Values.resourceQuota.hard "limits.cpu")) -}}
+{{- $_ := include "mock-fleet.quantityValue" (dict "field" "resourceQuota.hard.limits.memory" "value" (index .Values.resourceQuota.hard "limits.memory")) -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $cpuFloor "right" $cpuCeiling)) "1" -}}
+{{- fail "wiremock.resourcePolicy.requestFloor.cpu must not exceed wiremock.resourcePolicy.limitCeiling.cpu" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $memoryFloor "right" $memoryCeiling)) "1" -}}
+{{- fail "wiremock.resourcePolicy.requestFloor.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $cpuRequest "right" $cpuFloor)) "-1" -}}
+{{- fail "wiremock.config.default.resources.requests.cpu must not be below wiremock.resourcePolicy.requestFloor.cpu" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $memoryRequest "right" $memoryFloor)) "-1" -}}
+{{- fail "wiremock.config.default.resources.requests.memory must not be below wiremock.resourcePolicy.requestFloor.memory" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $cpuLimit "right" $cpuCeiling)) "1" -}}
+{{- fail "wiremock.config.default.resources.limits.cpu must not exceed wiremock.resourcePolicy.limitCeiling.cpu" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $memoryLimit "right" $memoryCeiling)) "1" -}}
+{{- fail "wiremock.config.default.resources.limits.memory must not exceed wiremock.resourcePolicy.limitCeiling.memory" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $cpuRequest "right" $cpuLimit)) "1" -}}
+{{- fail "wiremock.config.default.resources.requests.cpu must not exceed wiremock.config.default.resources.limits.cpu" -}}
+{{- end -}}
+{{- if eq (include "mock-fleet.quantityCompare" (dict "left" $memoryRequest "right" $memoryLimit)) "1" -}}
+{{- fail "wiremock.config.default.resources.requests.memory must not exceed wiremock.config.default.resources.limits.memory" -}}
 {{- end -}}
 {{- end -}}

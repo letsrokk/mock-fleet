@@ -33,10 +33,12 @@ class PathRoutingProxyResourceTest {
 
     private static Vertx upstreamVertx;
     private static HttpServer upstreamServer;
+    private static HttpServer alternateUpstreamServer;
     private static String upstreamBaseUrl;
     private static final AtomicReference<UpstreamResponse> nextResponse =
             new AtomicReference<>(new UpstreamResponse(200, "ok", Map.of()));
     private static final AtomicReference<CapturedRequest> capturedRequest = new AtomicReference<>();
+    private static final AtomicReference<CapturedRequest> alternateCapturedRequest = new AtomicReference<>();
 
     @InjectMock
     FleetApiClient fleetApiClient;
@@ -60,10 +62,24 @@ class PathRoutingProxyResourceTest {
                 }));
         upstreamServer.listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
         upstreamBaseUrl = "http://127.0.0.1:" + upstreamServer.actualPort();
+
+        alternateUpstreamServer = upstreamVertx.createHttpServer()
+                .requestHandler(request -> request.bodyHandler(body -> {
+                    alternateCapturedRequest.set(new CapturedRequest(
+                            request.method().name(),
+                            request.uri(),
+                            request.headers(),
+                            body.getBytes()));
+                    request.response().end("alternate");
+                }));
+        alternateUpstreamServer.listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
     }
 
     @AfterAll
     static void stopUpstream() {
+        if (alternateUpstreamServer != null) {
+            alternateUpstreamServer.close().toCompletionStage().toCompletableFuture().join();
+        }
         if (upstreamServer != null) {
             upstreamServer.close().toCompletionStage().toCompletableFuture().join();
         }
@@ -76,6 +92,7 @@ class PathRoutingProxyResourceTest {
     void setUp() {
         nextResponse.set(new UpstreamResponse(200, "ok", Map.of()));
         capturedRequest.set(null);
+        alternateCapturedRequest.set(null);
     }
 
     @Test
@@ -96,7 +113,25 @@ class PathRoutingProxyResourceTest {
         assertNotNull(request);
         assertEquals("GET", request.method());
         assertEquals("/nested/path?alpha=1&beta=two", request.uri());
-        assertEquals("mock-fleet.localhost", request.headers().get("Host"));
+        assertEquals("127.0.0.1:" + upstreamServer.actualPort(), request.headers().get("Host"));
+    }
+
+    @Test
+    void rejectsEncodedBackslashTargetsBeforeResolvingOrContactingAnyUpstream() {
+        mockUpstream("demo");
+
+        given()
+                .urlEncodingEnabled(false)
+                .header("Host", "mock-fleet.localhost")
+        .when()
+                .get("/demo/%5c%5c127.0.0.1:" + alternateUpstreamServer.actualPort() + "/escape")
+        .then()
+                .statusCode(400)
+                .body(containsString("origin-form"));
+
+        verifyNoInteractions(fleetApiClient);
+        assertEquals(null, capturedRequest.get());
+        assertEquals(null, alternateCapturedRequest.get());
     }
 
     @Test

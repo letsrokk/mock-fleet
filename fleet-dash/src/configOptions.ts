@@ -5,6 +5,8 @@ export type OptionDefinition = {
   group: string;
   description: string;
   values: string[];
+  minimum: number | null;
+  maximum: number | null;
 };
 
 export type ResourceData = {
@@ -146,6 +148,13 @@ export function resourceSummary(resources: ResourceData) {
   const requestText = Object.entries(resources.requests).map(([key, value]) => `${key}=${value}`).join(", ");
   const limitText = Object.entries(resources.limits).map(([key, value]) => `${key}=${value}`).join(", ");
   return `requests: ${requestText || "none"}; limits: ${limitText || "none"}`;
+}
+
+export function numberInputAttributes(option: OptionDefinition) {
+  if (option.kind !== "number" || option.minimum === null || option.maximum === null) {
+    return {};
+  }
+  return { min: option.minimum, max: option.maximum, step: 1 };
 }
 
 function cleanRecord(values: Record<string, string>) {

@@ -4,7 +4,6 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
-import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
@@ -53,6 +52,9 @@ public class WireMockConfigService {
     @Inject
     PodManager podManager;
 
+    @Inject
+    WireMockResourcePolicy resourcePolicy;
+
     private volatile Watch userConfigWatch;
     private final ScheduledExecutorService userConfigWatchExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "wiremock-user-config-watch");
@@ -64,7 +66,7 @@ public class WireMockConfigService {
 
     @PostConstruct
     void loadUserConfig() {
-        ConfigMap configMap = ensureUserConfigMap();
+        ConfigMap configMap = userConfigMap();
         wireMockOptions.setUserConfig(loadUserConfig(configMap));
         startUserConfigWatch();
     }
@@ -127,7 +129,8 @@ public class WireMockConfigService {
             throw ApiException.badRequest("INVALID_REQUEST", "Config update request body is required.", Map.of());
         }
         ApplyMode applyMode = ApplyMode.from(request.applyMode());
-        WireMockPodConfig mockConfig = new WireMockPodConfig(validateOptions(request.options()), toResources(request.resources()));
+        WireMockPodConfig mockConfig = new WireMockPodConfig(
+                validateOptions(request.options()), toResources(mockId, request.resources()));
         updateUserConfigMap(mockId, "saved", request.resourceVersion(), current ->
                 current.withMockConfig(mockId, mockConfig));
         refreshUserConfig();
@@ -223,12 +226,12 @@ public class WireMockConfigService {
     }
 
     private ConfigData userConfigData(WireMockPodConfig config) {
-        return new ConfigData(List.copyOf(config.options()),
+        return new ConfigData(WireMockOptionCatalog.redactSensitive(config.options()),
                 config.resources() == null ? null : ResourceData.from(config.resources()));
     }
 
     private ConfigData configData(List<String> options, ResourceRequirements resources) {
-        return new ConfigData(options == null ? List.of() : List.copyOf(options), ResourceData.from(resources));
+        return new ConfigData(WireMockOptionCatalog.redactSensitive(options), ResourceData.from(resources));
     }
 
     private ConfigMap userConfigMap() {
@@ -236,10 +239,15 @@ public class WireMockConfigService {
         if (name.isEmpty()) {
             return null;
         }
-        return kubernetesClient.configMaps()
-                .inNamespace(currentNamespace())
+        String namespace = currentNamespace();
+        ConfigMap configMap = kubernetesClient.configMaps()
+                .inNamespace(namespace)
                 .withName(name.get())
                 .get();
+        if (configMap == null) {
+            throw configUnavailable(namespace, name.get());
+        }
+        return configMap;
     }
 
     private WireMockConfigDocument loadUserConfig(ConfigMap configMap) {
@@ -247,40 +255,6 @@ public class WireMockConfigService {
             return WireMockConfigDocument.empty();
         }
         return WireMockConfigDocument.load(configMap.getData().get(config.wiremockConfigKey()));
-    }
-
-    private ConfigMap ensureUserConfigMap() {
-        Optional<String> name = userConfigMapName();
-        if (name.isEmpty()) {
-            wireMockOptions.setUserConfig(WireMockConfigDocument.empty());
-            return null;
-        }
-
-        String namespace = currentNamespace();
-        ConfigMap current = kubernetesClient.configMaps()
-                .inNamespace(namespace)
-                .withName(name.get())
-                .get();
-        if (current != null) {
-            LOG.infof("Loaded WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(current));
-            return current;
-        }
-
-        try {
-            ConfigMap created = createOrUpdateUserConfigMap(namespace, name.get(), null, WireMockConfigDocument.empty(), true);
-            LOG.infof("Created missing WireMock user ConfigMap namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(created));
-            return created;
-        } catch (KubernetesClientException error) {
-            if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
-                throw error;
-            }
-            ConfigMap createdByAnotherPod = userConfigMap();
-            LOG.infof("Loaded WireMock user ConfigMap created by another API pod namespace=%s name=%s resourceVersion=%s.",
-                    namespace, name.get(), resourceVersion(createdByAnotherPod));
-            return createdByAnotherPod;
-        }
     }
 
     private void updateUserConfigMap(String mockId,
@@ -296,8 +270,11 @@ public class WireMockConfigService {
                 .inNamespace(namespace)
                 .withName(name)
                 .get();
+        if (current == null) {
+            throw configUnavailable(namespace, name);
+        }
 
-        if (current != null && expectedResourceVersion != null
+        if (expectedResourceVersion != null
                 && !Objects.equals(expectedResourceVersion, resourceVersion(current))) {
             throw configConflict(namespace, name, mockId, expectedResourceVersion, current);
         }
@@ -308,7 +285,7 @@ public class WireMockConfigService {
         WireMockConfigDocument nextConfig = update.apply(currentConfig);
         ConfigMap persisted;
         try {
-            persisted = createOrUpdateUserConfigMap(namespace, name, current, nextConfig, current == null);
+            persisted = persistUserConfigMap(namespace, name, current, nextConfig);
         } catch (KubernetesClientException error) {
             if (error.getCode() != Response.Status.CONFLICT.getStatusCode()) {
                 throw error;
@@ -335,11 +312,11 @@ public class WireMockConfigService {
                         "currentVersion", currentResourceVersion == null ? "" : currentResourceVersion)));
     }
 
-    private ConfigMap createOrUpdateUserConfigMap(String namespace, String name, ConfigMap current,
-                                                  WireMockConfigDocument document, boolean create) {
+    private ConfigMap persistUserConfigMap(String namespace, String name, ConfigMap current,
+                                           WireMockConfigDocument document) {
         Map<String, String> data = new LinkedHashMap<>();
         data.put(config.wiremockConfigKey(), document.toYaml());
-        ConfigMapBuilder builder = new ConfigMapBuilder(current == null ? new ConfigMap() : current)
+        ConfigMapBuilder builder = new ConfigMapBuilder(current)
                 .editOrNewMetadata()
                 .withName(name)
                 .withNamespace(namespace)
@@ -349,11 +326,13 @@ public class WireMockConfigService {
                 .endMetadata()
                 .withData(data);
         ConfigMap next = builder.build();
-
-        if (create) {
-            return kubernetesClient.configMaps().inNamespace(namespace).resource(next).create();
-        }
         return kubernetesClient.configMaps().inNamespace(namespace).resource(next).update();
+    }
+
+    private ApiException configUnavailable(String namespace, String name) {
+        return new ApiException(Response.Status.SERVICE_UNAVAILABLE,
+                new ApiError("CONFIG_UNAVAILABLE", "User editable WireMock ConfigMap is missing.",
+                        true, false, Map.of("namespace", namespace, "name", name)));
     }
 
     private String currentNamespace() {
@@ -393,27 +372,13 @@ public class WireMockConfigService {
         }
     }
 
-    private ResourceRequirements toResources(ResourceData resources) {
+    private ResourceRequirements toResources(String mockId, ResourceData resources) {
+        ResourceRequirements baseline = wireMockOptions.baselineConfig().resourcesFor(mockId);
         if (resources == null) {
+            resourcePolicy.validateEffective(baseline);
             return null;
         }
-        return new ResourceRequirementsBuilder()
-                .withRequests(toQuantities(resources.requests()))
-                .withLimits(toQuantities(resources.limits()))
-                .build();
-    }
-
-    private Map<String, Quantity> toQuantities(Map<String, String> values) {
-        if (values == null || values.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, Quantity> quantities = new LinkedHashMap<>();
-        values.forEach((key, value) -> {
-            if (key != null && !key.isBlank() && value != null && !value.isBlank()) {
-                quantities.put(key, new Quantity(value.trim()));
-            }
-        });
-        return quantities;
+        return resourcePolicy.normalizeAndValidate(baseline, resources);
     }
 
     private List<WireMockOptionCatalog.OptionDefinition> optionDefinitions() {

@@ -117,6 +117,18 @@ class FleetMcpToolsConfigTest {
     }
 
     @Test
+    void updateSchemaExplainsTheClusterOwnedResourceEnvelope() {
+        String description = new UpdateMockConfigInputSchemaGenerator().generate(null)
+                .getJsonObject("properties")
+                .getJsonObject("resources")
+                .getString("description");
+
+        assertTrue(description.contains("cpu and memory"));
+        assertTrue(description.contains("request floor"));
+        assertTrue(description.contains("limit ceiling"));
+    }
+
+    @Test
     void getsOneCompactConfig() {
         var response = tools.getMockConfig("alpha");
 
