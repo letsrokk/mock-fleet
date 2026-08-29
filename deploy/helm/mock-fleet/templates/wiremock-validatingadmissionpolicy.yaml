@@ -42,12 +42,13 @@ spec:
           volume.projected.sources.size() == 1 &&
           has(volume.projected.sources[0].serviceAccountToken) &&
           volume.projected.sources[0].serviceAccountToken.audience == 'pods.eks.amazonaws.com')
-    - name: stsIdentityVolumes
+    - name: nonEksIdentityVolumes
       expression: >-
         variables.identityVolumes.filter(volume,
           volume.projected.sources.size() == 1 &&
           has(volume.projected.sources[0].serviceAccountToken) &&
-          volume.projected.sources[0].serviceAccountToken.audience == 'sts.amazonaws.com')
+          volume.projected.sources[0].serviceAccountToken.audience in {{ toJson .Values.wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences }} &&
+          volume.projected.sources[0].serviceAccountToken.audience != 'pods.eks.amazonaws.com')
     - name: irsaIdentityEnvNames
       expression: >-
         ['AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE']
@@ -210,14 +211,62 @@ spec:
             !has(container.env) || container.env.all(env,
               !(env.name in variables.irsaIdentityEnvNames))))) ||
         (!variables.eksPodIdentityLabelPresent &&
-          variables.identityVolumes.size() <= 1 &&
-          (variables.identityVolumes.size() == 0 || variables.stsIdentityVolumes.size() == 1) &&
-          (!has(variables.wiremock.env) || variables.wiremock.env.all(env,
-            !(env.name in variables.eksIdentityEnvNames))) &&
+          ((variables.identityVolumes.size() == 0 &&
+            (!has(variables.wiremock.env) || variables.wiremock.env.all(env,
+              !(env.name in variables.irsaIdentityEnvNames) &&
+              !(env.name in variables.eksIdentityEnvNames))) &&
+            (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
+              !has(container.env) || container.env.all(env,
+                !(env.name in variables.irsaIdentityEnvNames) &&
+                !(env.name in variables.eksIdentityEnvNames))))) ||
+           (variables.identityVolumes.size() == 1 &&
+            variables.nonEksIdentityVolumes.size() == 1 &&
+            (!has(variables.wiremock.env) || variables.wiremock.env.all(env,
+              !(env.name in variables.eksIdentityEnvNames))) &&
+            (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
+              !has(container.env) || container.env.all(env,
+                !(env.name in variables.eksIdentityEnvNames)))))))
+      message: Workload identity volumes and environment variables must use base, IRSA, or EKS mode.
+    - expression: >-
+        variables.nonEksIdentityVolumes.size() == 0 ||
+        (variables.nonEksIdentityVolumes.size() == 1 &&
+          has(variables.wiremock.volumeMounts) &&
+          has(variables.wiremock.env) &&
+          variables.nonEksIdentityVolumes.all(volume,
+            variables.wiremock.volumeMounts.filter(mount, mount.name == volume.name).size() == 1 &&
+            variables.wiremock.volumeMounts.exists(mount,
+              mount.name == volume.name && mount.readOnly == true &&
+              mount.mountPath == '/var/run/secrets/eks.amazonaws.com/serviceaccount' &&
+              (!has(mount.subPath) || mount.subPath == '') &&
+              (!has(mount.subPathExpr) || mount.subPathExpr == '')) &&
+            variables.wiremock.env.filter(env, env.name == 'AWS_ROLE_ARN').size() == 1 &&
+            variables.wiremock.env.exists(env,
+              env.name == 'AWS_ROLE_ARN' && env.value != '') &&
+            variables.wiremock.env.filter(env,
+              env.name == 'AWS_WEB_IDENTITY_TOKEN_FILE').size() == 1 &&
+            variables.wiremock.env.exists(env,
+              env.name == 'AWS_WEB_IDENTITY_TOKEN_FILE' &&
+              env.value == '/var/run/secrets/eks.amazonaws.com/serviceaccount/' +
+                volume.projected.sources[0].serviceAccountToken.path)) &&
           (!has(object.spec.initContainers) || object.spec.initContainers.all(container,
-            !has(container.env) || container.env.all(env,
-              !(env.name in variables.eksIdentityEnvNames)))))
-      message: Workload identity volumes and environment variables must use one credential mode.
+            has(container.volumeMounts) && has(container.env) &&
+            variables.nonEksIdentityVolumes.all(volume,
+              container.volumeMounts.filter(mount, mount.name == volume.name).size() == 1 &&
+              container.volumeMounts.exists(mount,
+                mount.name == volume.name && mount.readOnly == true &&
+                mount.mountPath == '/var/run/secrets/eks.amazonaws.com/serviceaccount' &&
+                (!has(mount.subPath) || mount.subPath == '') &&
+                (!has(mount.subPathExpr) || mount.subPathExpr == '')) &&
+              container.env.filter(env, env.name == 'AWS_ROLE_ARN').size() == 1 &&
+              container.env.exists(env,
+                env.name == 'AWS_ROLE_ARN' && env.value != '') &&
+              container.env.filter(env,
+                env.name == 'AWS_WEB_IDENTITY_TOKEN_FILE').size() == 1 &&
+              container.env.exists(env,
+                env.name == 'AWS_WEB_IDENTITY_TOKEN_FILE' &&
+                env.value == '/var/run/secrets/eks.amazonaws.com/serviceaccount/' +
+                  volume.projected.sources[0].serviceAccountToken.path)))))
+      message: IRSA identity must use one standard mount and credential environment pair.
     - expression: >-
         variables.eksPodIdentityLabelPresent == (variables.eksIdentityVolumes.size() > 0) &&
         (!variables.eksPodIdentityLabelPresent ||

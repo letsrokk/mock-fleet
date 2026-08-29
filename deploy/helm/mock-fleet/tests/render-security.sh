@@ -77,7 +77,7 @@ admission_fixture() {
 
   case "${variant}" in
     accepted) ;;
-    accepted-workload-identity|identity-alternate-mount|identity-init-subpath|irsa-duplicate-role-env|second-irsa-identity)
+    accepted-workload-identity|accepted-custom-audience-irsa|unconfigured-custom-audience-irsa|identity-alternate-mount|identity-init-subpath|irsa-duplicate-role-env|second-irsa-identity)
       fixture=$(jq -c '
         .spec.volumes += [{
           name:"aws-iam-token",
@@ -161,6 +161,20 @@ admission_fixture() {
           else . end
       ' <<<"${fixture}")
       ;;
+    irsa-env-without-volume)
+      fixture=$(jq -c '
+        .spec.containers[0].env = [
+          {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+          {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+        ]
+        | if (.spec | has("initContainers")) then
+            .spec.initContainers[0].env = [
+              {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+              {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+            ]
+          else . end
+      ' <<<"${fixture}")
+      ;;
     extra-unrelated-label) fixture=$(jq -c '.metadata.labels["attacker.example/unrelated"] = "enabled"' <<<"${fixture}") ;;
     *) printf 'Unknown admission fixture: %s\n' "${variant}" >&2; return 1 ;;
   esac
@@ -211,6 +225,12 @@ admission_fixture() {
       ;;
     irsa-duplicate-role-env)
       fixture=$(jq -c '.spec.containers[0].env += [{name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/shadow"}]' <<<"${fixture}")
+      ;;
+    accepted-custom-audience-irsa)
+      fixture=$(jq -c '.spec.volumes[-1].projected.sources[0].serviceAccountToken.audience = "custom.example/irsa"' <<<"${fixture}")
+      ;;
+    unconfigured-custom-audience-irsa)
+      fixture=$(jq -c '.spec.volumes[-1].projected.sources[0].serviceAccountToken.audience = "not-configured.example/irsa"' <<<"${fixture}")
       ;;
     second-irsa-identity)
       fixture=$(jq -c '
@@ -313,6 +333,11 @@ persistent_admission_render="$(helm template unusual-release "${chart_dir}" \
   --set storage.persistent=true \
   --set storage.s3.bucket=task9-test \
   --show-only templates/wiremock-validatingadmissionpolicy.yaml)"
+custom_irsa_admission_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --set-json 'wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences=["sts.amazonaws.com","pods.eks.amazonaws.com","custom.example/irsa"]' \
+  --show-only templates/wiremock-validatingadmissionpolicy.yaml)"
 
 for fragment in \
   'apiVersion: admissionregistration.k8s.io/v1' \
@@ -332,7 +357,8 @@ for fragment in \
   "volume.name == 'eks-pod-identity-token'" \
   "serviceAccountToken.path == 'eks-pod-identity-token'" \
   'variables.wiremock.env.filter(other, other.name == env.name).size() == 1' \
-  'variables.identityVolumes.size() <= 1' \
+  'variables.identityVolumes.size() == 0' \
+  'variables.nonEksIdentityVolumes' \
   'variables.eksIdentityEnvNames' \
   'variables.irsaIdentityEnvNames' \
   'custom-fleet-wiremock' \
@@ -350,6 +376,9 @@ for fragment in \
   grep -Fq -- "${fragment}" <<<"${admission_render}" \
     || fail "WireMock admission policy is missing: ${fragment}"
 done
+
+grep -Fq 'custom.example/irsa' <<<"${custom_irsa_admission_render}" \
+  || fail 'Configured custom IRSA audience is absent from the rendered admission policy'
 
 grep -Fq '!has(object.spec.initContainers[0].restartPolicy)' <<<"${persistent_admission_render}" \
   || fail 'Persistent WireMock admission policy permits a native init sidecar restartPolicy'
@@ -375,11 +404,19 @@ if grep -Fq 'kind: ValidatingAdmissionPolicy' <<<"${disabled_admission}"; then
   fail "WireMock admission resources must render only when wiremock.admissionPolicy.enabled=true"
 fi
 
-for accepted_fixture in accepted accepted-workload-identity accepted-eks-pod-identity; do
+for accepted_fixture in accepted accepted-workload-identity accepted-custom-audience-irsa accepted-eks-pod-identity; do
   fixture=$(admission_fixture "${accepted_fixture}")
   jq -e '.kind == "Pod" and .spec.automountServiceAccountToken == false' >/dev/null <<<"${fixture}" \
     || fail "Accepted admission fixture is malformed: ${accepted_fixture}"
 done
+custom_irsa_fixture=$(admission_fixture accepted-custom-audience-irsa)
+jq -e '
+  .spec.volumes[0].projected.sources[0].serviceAccountToken.audience == "custom.example/irsa" and
+  .spec.containers[0].env == [
+    {name:"AWS_ROLE_ARN",value:"arn:aws:iam::123456789012:role/mock-fleet"},
+    {name:"AWS_WEB_IDENTITY_TOKEN_FILE",value:"/var/run/secrets/eks.amazonaws.com/serviceaccount/token"}
+  ]
+' >/dev/null <<<"${custom_irsa_fixture}" || fail 'Custom-audience IRSA fixture does not preserve the standard IRSA environment shape'
 irsa_fixture=$(admission_fixture accepted-workload-identity)
 jq -e '
   (.metadata.labels | length) == 3 and
@@ -395,7 +432,7 @@ jq -e '
   .spec.volumes[0].projected.sources[0].serviceAccountToken.path == "eks-pod-identity-token" and
   ([.spec.containers[0].volumeMounts[] | select(.name == "eks-pod-identity-token")] | length) == 1
 ' >/dev/null <<<"${eks_fixture}" || fail 'EKS Pod Identity fixture does not match the current upstream mutation'
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env mixed-eks-irsa-identity eks-env-without-label second-irsa-identity; do
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env mixed-eks-irsa-identity eks-env-without-label irsa-env-without-volume second-irsa-identity unconfigured-custom-audience-irsa; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"

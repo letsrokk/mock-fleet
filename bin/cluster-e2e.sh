@@ -152,7 +152,8 @@ verify_admission_dry_runs() {
       eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label \
       eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount \
       eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env \
-      mixed-eks-irsa-identity eks-env-without-label second-irsa-identity; do
+      mixed-eks-irsa-identity eks-env-without-label irsa-env-without-volume \
+      second-irsa-identity unconfigured-custom-audience-irsa; do
     server_dry_run_admission_fixture "${variant}" rejected
   done
 }
@@ -1113,7 +1114,9 @@ self_test() {
     'irsa-duplicate-role-env rejected' \
     'mixed-eks-irsa-identity rejected' \
     'eks-env-without-label rejected' \
-    'second-irsa-identity rejected'; do
+    'irsa-env-without-volume rejected' \
+    'second-irsa-identity rejected' \
+    'unconfigured-custom-audience-irsa rejected'; do
     grep -Fxq "${expected_fixture}" <<<"${admission_matrix}" \
       || fail "Admission dry-run matrix omitted ${expected_fixture}."
   done
