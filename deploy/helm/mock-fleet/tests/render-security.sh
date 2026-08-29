@@ -41,6 +41,7 @@ admission_fixture() {
           imagePullPolicy:"IfNotPresent",
           securityContext:{
             runAsNonRoot:true,
+            runAsUser:1000,
             allowPrivilegeEscalation:false,
             capabilities:{drop:["ALL"]},
             seccompProfile:{type:"RuntimeDefault"}
@@ -148,6 +149,7 @@ admission_fixture() {
     container-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.containers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     init-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.initContainers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     missing-init-resources) fixture=$(jq -c 'del(.spec.initContainers[0].resources)' <<<"${fixture}") ;;
+    wrong-run-as-user) fixture=$(jq -c '.spec.containers[0].securityContext.runAsUser = 1001' <<<"${fixture}") ;;
     eks-label-without-token) fixture=$(jq -c '.metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"' <<<"${fixture}") ;;
     eks-env-without-label)
       fixture=$(jq -c '
@@ -434,7 +436,7 @@ jq -e '
   .spec.volumes[0].projected.sources[0].serviceAccountToken.path == "eks-pod-identity-token" and
   ([.spec.containers[0].volumeMounts[] | select(.name == "eks-pod-identity-token")] | length) == 1
 ' >/dev/null <<<"${eks_fixture}" || fail 'EKS Pod Identity fixture does not match the current upstream mutation'
-for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env mixed-eks-irsa-identity eks-env-without-label irsa-env-without-volume second-irsa-identity unconfigured-custom-audience-irsa; do
+for rejected_fixture in privileged hostpath wrong-image wrong-service-account label-spoofing missing-limits excessive-limits alternate-sidecar identity-alternate-mount identity-init-subpath pod-apparmor-unconfined container-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user container-selinux-type container-procmount-unmasked wrong-run-as-user eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env mixed-eks-irsa-identity eks-env-without-label irsa-env-without-volume second-irsa-identity unconfigured-custom-audience-irsa; do
   fixture=$(admission_fixture "${rejected_fixture}")
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"

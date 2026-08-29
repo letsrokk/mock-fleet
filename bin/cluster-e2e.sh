@@ -149,7 +149,7 @@ verify_admission_dry_runs() {
       native-init-sidecar pod-apparmor-unconfined container-apparmor-unconfined \
       init-apparmor-unconfined deprecated-apparmor-annotation pod-selinux-user \
       container-selinux-type init-selinux-role container-procmount-unmasked init-procmount-unmasked \
-      missing-init-resources \
+      missing-init-resources wrong-run-as-user \
       eks-label-without-token eks-token-without-label eks-label-wrong-value extra-unrelated-label \
       eks-nonstandard-token-path eks-alternate-volume-name eks-dual-irsa-mount eks-second-mount \
       eks-duplicate-full-uri eks-duplicate-token-file irsa-duplicate-role-env \
@@ -1103,6 +1103,7 @@ self_test() {
     'container-procmount-unmasked rejected' \
     'init-procmount-unmasked rejected' \
     'missing-init-resources rejected' \
+    'wrong-run-as-user rejected' \
     'eks-label-without-token rejected' \
     'eks-token-without-label rejected' \
     'eks-label-wrong-value rejected' \

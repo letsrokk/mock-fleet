@@ -66,6 +66,7 @@ class PodFactorySecurityTest {
 
     private void assertRestricted(Container container) {
         assertTrue(container.getSecurityContext().getRunAsNonRoot());
+        assertEquals(1000L, container.getSecurityContext().getRunAsUser());
         assertFalse(container.getSecurityContext().getAllowPrivilegeEscalation());
         assertEquals(List.of("ALL"), container.getSecurityContext().getCapabilities().getDrop());
         assertEquals("RuntimeDefault", container.getSecurityContext().getSeccompProfile().getType());

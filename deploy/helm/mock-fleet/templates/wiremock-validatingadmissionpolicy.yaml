@@ -126,7 +126,7 @@ spec:
     - expression: >-
         has(variables.wiremock.securityContext) &&
         variables.wiremock.securityContext.runAsNonRoot == true &&
-        (!has(variables.wiremock.securityContext.runAsUser) || variables.wiremock.securityContext.runAsUser != 0) &&
+        variables.wiremock.securityContext.runAsUser == 1000 &&
         variables.wiremock.securityContext.allowPrivilegeEscalation == false &&
         (!has(variables.wiremock.securityContext.privileged) || variables.wiremock.securityContext.privileged == false) &&
         has(variables.wiremock.securityContext.capabilities) &&

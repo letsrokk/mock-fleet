@@ -28,7 +28,7 @@ public class PodFactory {
     static final String WIREMOCK_ROOT_DIR = "/home/wiremock";
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
-    static final long INIT_CONTAINER_USER_ID = 1000L;
+    static final long CONTAINER_USER_ID = 1000L;
     static final String INIT_CONTAINER_REQUEST_CPU = "10m";
     static final String INIT_CONTAINER_REQUEST_MEMORY = "16Mi";
     static final String INIT_CONTAINER_LIMIT_CPU = "100m";
@@ -58,7 +58,7 @@ public class PodFactory {
                 .withImagePullPolicy(config.wiremockImagePullPolicy())
                 .withName(config.wiremockContainerName())
                 .withImage(config.wiremockImage())
-                .withSecurityContext(restrictedContainerSecurityContext(null))
+                .withSecurityContext(restrictedContainerSecurityContext(CONTAINER_USER_ID))
                 .addNewPort()
                     .withContainerPort(8080)
                 .endPort()
@@ -111,7 +111,7 @@ public class PodFactory {
                     .withName(INIT_MAPPINGS_CONTAINER)
                     .withImage(INIT_CONTAINER_IMAGE)
                     .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
-                    .withSecurityContext(restrictedContainerSecurityContext(INIT_CONTAINER_USER_ID))
+                    .withSecurityContext(restrictedContainerSecurityContext(CONTAINER_USER_ID))
                     .withResources(initContainerResources())
                     .addNewVolumeMount()
                         .withName(WIREMOCK_MAPPINGS_VOLUME)
