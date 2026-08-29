@@ -63,6 +63,7 @@ admission_fixture() {
           name:"prepare-wiremock-mappings",
           image:"busybox:1.36",
           command:["mkdir","-p",($storage_path + "/" + $mock_id)],
+          resources:{requests:{cpu:"10m",memory:"16Mi"},limits:{cpu:"100m",memory:"64Mi"}},
           securityContext:{
             runAsNonRoot:true,
             runAsUser:1000,
@@ -146,6 +147,7 @@ admission_fixture() {
     init-selinux-role) fixture=$(jq -c '.spec.initContainers[0].securityContext.seLinuxOptions = {role:"system_r",type:"container_init_t"}' <<<"${fixture}") ;;
     container-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.containers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
     init-procmount-unmasked) fixture=$(jq -c '.spec.hostUsers = false | .spec.initContainers[0].securityContext.procMount = "Unmasked"' <<<"${fixture}") ;;
+    missing-init-resources) fixture=$(jq -c 'del(.spec.initContainers[0].resources)' <<<"${fixture}") ;;
     eks-label-without-token) fixture=$(jq -c '.metadata.labels["eks.amazonaws.com/pod-identity"] = "enabled"' <<<"${fixture}") ;;
     eks-env-without-label)
       fixture=$(jq -c '
@@ -437,7 +439,7 @@ for rejected_fixture in privileged hostpath wrong-image wrong-service-account la
   jq -e '.kind == "Pod"' >/dev/null <<<"${fixture}" \
     || fail "Rejected admission fixture is malformed: ${rejected_fixture}"
 done
-for persistent_rejected_fixture in native-init-sidecar init-apparmor-unconfined init-selinux-role init-procmount-unmasked; do
+for persistent_rejected_fixture in native-init-sidecar init-apparmor-unconfined init-selinux-role init-procmount-unmasked missing-init-resources; do
   fixture=$(admission_fixture "${persistent_rejected_fixture}" testing custom-fleet custom-fleet-wiremock wiremock/wiremock:3.13.2-2 true custom-fleet-pvc /mock-fleet)
   jq -e '.kind == "Pod" and (.spec.initContainers | length) == 1' >/dev/null <<<"${fixture}" \
     || fail "Persistent rejected admission fixture is malformed: ${persistent_rejected_fixture}"

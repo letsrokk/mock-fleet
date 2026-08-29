@@ -58,6 +58,10 @@ class PodFactorySecurityTest {
         assertEquals(PodFactory.WIREMOCK_MAPPINGS_VOLUME,
                 mappingsInit.getVolumeMounts().getFirst().getName());
         assertEquals("/mock-fleet", mappingsInit.getVolumeMounts().getFirst().getMountPath());
+        assertEquals(new Quantity("10m"), mappingsInit.getResources().getRequests().get("cpu"));
+        assertEquals(new Quantity("16Mi"), mappingsInit.getResources().getRequests().get("memory"));
+        assertEquals(new Quantity("100m"), mappingsInit.getResources().getLimits().get("cpu"));
+        assertEquals(new Quantity("64Mi"), mappingsInit.getResources().getLimits().get("memory"));
     }
 
     private void assertRestricted(Container container) {

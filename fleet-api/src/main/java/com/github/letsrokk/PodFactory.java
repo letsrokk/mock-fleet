@@ -6,7 +6,9 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
+import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.SecurityContextBuilder;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -27,6 +29,10 @@ public class PodFactory {
     static final String INIT_MAPPINGS_CONTAINER = "prepare-wiremock-mappings";
     static final String INIT_CONTAINER_IMAGE = "busybox:1.36";
     static final long INIT_CONTAINER_USER_ID = 1000L;
+    static final String INIT_CONTAINER_REQUEST_CPU = "10m";
+    static final String INIT_CONTAINER_REQUEST_MEMORY = "16Mi";
+    static final String INIT_CONTAINER_LIMIT_CPU = "100m";
+    static final String INIT_CONTAINER_LIMIT_MEMORY = "64Mi";
     static final String STORAGE_TYPE_S3 = "s3";
 
     private final MockFleetConfig config;
@@ -106,6 +112,7 @@ public class PodFactory {
                     .withImage(INIT_CONTAINER_IMAGE)
                     .withCommand("mkdir", "-p", storageMountPath + "/" + mockId)
                     .withSecurityContext(restrictedContainerSecurityContext(INIT_CONTAINER_USER_ID))
+                    .withResources(initContainerResources())
                     .addNewVolumeMount()
                         .withName(WIREMOCK_MAPPINGS_VOLUME)
                         .withMountPath(storageMountPath)
@@ -174,5 +181,14 @@ public class PodFactory {
             securityContext.withRunAsUser(runAsUser);
         }
         return securityContext.build();
+    }
+
+    private ResourceRequirements initContainerResources() {
+        return new ResourceRequirementsBuilder()
+                .addToRequests("cpu", new Quantity(INIT_CONTAINER_REQUEST_CPU))
+                .addToRequests("memory", new Quantity(INIT_CONTAINER_REQUEST_MEMORY))
+                .addToLimits("cpu", new Quantity(INIT_CONTAINER_LIMIT_CPU))
+                .addToLimits("memory", new Quantity(INIT_CONTAINER_LIMIT_MEMORY))
+                .build();
     }
 }

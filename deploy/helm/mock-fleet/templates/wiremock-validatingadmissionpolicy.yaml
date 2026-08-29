@@ -348,9 +348,19 @@ spec:
         (!has(object.spec.initContainers[0].volumeDevices) || object.spec.initContainers[0].volumeDevices.size() == 0) &&
         (!has(object.spec.initContainers[0].stdin) || object.spec.initContainers[0].stdin == false) &&
         (!has(object.spec.initContainers[0].tty) || object.spec.initContainers[0].tty == false) &&
-        (!has(object.spec.initContainers[0].resources) ||
-          ((!has(object.spec.initContainers[0].resources.requests) || object.spec.initContainers[0].resources.requests.size() == 0) &&
-           (!has(object.spec.initContainers[0].resources.limits) || object.spec.initContainers[0].resources.limits.size() == 0))) &&
+        has(object.spec.initContainers[0].resources) &&
+        has(object.spec.initContainers[0].resources.requests) && object.spec.initContainers[0].resources.requests.size() == 2 &&
+        'cpu' in object.spec.initContainers[0].resources.requests && 'memory' in object.spec.initContainers[0].resources.requests &&
+        !quantity(object.spec.initContainers[0].resources.requests['cpu']).isLessThan(quantity('10m')) &&
+        !quantity(object.spec.initContainers[0].resources.requests['cpu']).isGreaterThan(quantity('10m')) &&
+        !quantity(object.spec.initContainers[0].resources.requests['memory']).isLessThan(quantity('16Mi')) &&
+        !quantity(object.spec.initContainers[0].resources.requests['memory']).isGreaterThan(quantity('16Mi')) &&
+        has(object.spec.initContainers[0].resources.limits) && object.spec.initContainers[0].resources.limits.size() == 2 &&
+        'cpu' in object.spec.initContainers[0].resources.limits && 'memory' in object.spec.initContainers[0].resources.limits &&
+        !quantity(object.spec.initContainers[0].resources.limits['cpu']).isLessThan(quantity('100m')) &&
+        !quantity(object.spec.initContainers[0].resources.limits['cpu']).isGreaterThan(quantity('100m')) &&
+        !quantity(object.spec.initContainers[0].resources.limits['memory']).isLessThan(quantity('64Mi')) &&
+        !quantity(object.spec.initContainers[0].resources.limits['memory']).isGreaterThan(quantity('64Mi')) &&
         (!has(object.spec.initContainers[0].env) ||
           (object.spec.initContainers[0].env.all(env,
              env.name in variables.allowedIdentityEnvNames && !has(env.valueFrom)) &&
