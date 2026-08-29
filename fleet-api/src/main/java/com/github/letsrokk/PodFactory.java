@@ -50,7 +50,11 @@ public class PodFactory {
 
     public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
                              ResourceRequirements resources) {
-        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(wireMockOptions);
+        String configuredImage = config.wiremockImage();
+        WireMockVersion configuredVersion = configuredImage == null || configuredImage.isBlank()
+                ? new WireMockVersion(3, 13, 2)
+                : WireMockVersion.parseImage(configuredImage);
+        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(wireMockOptions, configuredVersion);
         resourcePolicy.validateEffective(resources);
         MockFleetConfig.StorageConfig storage = config.storage();
 

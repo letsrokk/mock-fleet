@@ -42,7 +42,7 @@ class WireMockVersionTest {
     @ValueSource(strings = {
             "3.13.2", "WireMock 3.13.2", "wiremock/wiremock:latest", "wiremock/wiremock:2.35.1",
             "wiremock/wiremock@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "wiremock/wiremock:2.0-3.13.2"
+            "wiremock/wiremock:2.0-3.13.2", "wiremock/wiremock:3.13.2-custom"
     })
     void rejectsImagesWithoutLeadingPinnedThreeVersionTag(String input) {
         assertThrows(IllegalArgumentException.class, () -> WireMockVersion.parseImage(input));

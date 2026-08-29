@@ -99,11 +99,12 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_option_definitions", description = "List supported WireMock CLI option definitions.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_option_definitions", description = "List known WireMock 3.x options with compatibility and availability metadata.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listOptionDefinitions() {
         return fleet("list_option_definitions", () -> {
             JsonNode view = fleetApi.getConfig();
             ObjectNode result = mapper.createObjectNode();
+            result.set("wireMock", view.path("wireMock"));
             result.set("optionDefinitions", view.path("options"));
             return McpToolExecutor.ToolResult.of("Listed WireMock option definitions.", result);
         });

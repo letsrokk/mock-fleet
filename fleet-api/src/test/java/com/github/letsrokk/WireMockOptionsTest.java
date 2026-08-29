@@ -32,6 +32,16 @@ class WireMockOptionsTest {
     }
 
     @Test
+    void rejectsMutableWireMockImageAtStartup() {
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        WireMockOptions options = new WireMockOptions();
+        options.config = config;
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:latest");
+
+        assertThrows(IllegalArgumentException.class, options::load);
+    }
+
+    @Test
     void loadMergesDefaultAndMatchingMockOptions() {
         WireMockOptions options = new WireMockOptions();
 
@@ -170,13 +180,13 @@ class WireMockOptionsTest {
                   default:
                     options:
                       - --filename-template
-                      - "{{request.method}} {{request.url}}"
+                      - "{{{method}}}-{{{url}}}.json"
                   mocks: []
                 """));
 
         assertEquals(List.of(
                 "--filename-template",
-                "{{request.method}} {{request.url}}"), options.optionsFor("demo"));
+                "{{{method}}}-{{{url}}}.json"), options.optionsFor("demo"));
     }
 
     @Test

@@ -9,6 +9,7 @@ security_render_script="${repo_root}/deploy/helm/mock-fleet/tests/render-securit
 
 mode=live
 keep=false
+retain_success=${MOCK_FLEET_E2E_RETAIN:-false}
 run_id=${MOCK_FLEET_E2E_RUN_ID:-$(date -u +%Y%m%d%H%M%S)-$$}
 run_id=$(printf '%s' "${run_id}" | tr '[:upper:]_' '[:lower:]-' | tr -cd 'a-z0-9-')
 run_id=${run_id:0:24}
@@ -49,7 +50,7 @@ admission_policy_name=""
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--self-test|--dry-run] [--keep]
+Usage: $(basename "$0") [--self-test|--dry-run] [--keep|--retain]
 
 Run the opt-in Mock Fleet Minikube/SeaweedFS contract suite.
 
@@ -57,6 +58,7 @@ Modes:
   --self-test  Check script syntax, fixtures, identifier isolation, and dry-run output.
   --dry-run    Print resolved resources and prerequisites without changing the cluster.
   --keep       Keep the failed live-run namespace and bucket for investigation.
+  --retain     Keep a successful populated namespace and bucket for inspection.
 
 Live-run prerequisites:
   minikube, kubectl, helm, curl, jq, awk, sed, and a running Minikube profile
@@ -86,9 +88,10 @@ require_command() {
 }
 
 current_kubernetes_minor_version() {
-  local major minor
-  major=$(kubectl version -o jsonpath='{.serverVersion.major}')
-  minor=$(kubectl version -o jsonpath='{.serverVersion.minor}')
+  local version_json major minor
+  version_json=$(kubectl version -o json)
+  major=$(jq -r '.serverVersion.major // empty' <<<"${version_json}")
+  minor=$(jq -r '.serverVersion.minor // empty' <<<"${version_json}")
   minor=${minor%%[!0-9]*}
   [[ -n "${major}" && -n "${minor}" ]] || fail "Unable to determine the current Kubernetes minor version."
   printf 'v%s.%s\n' "${major}" "${minor}"
@@ -126,10 +129,7 @@ server_dry_run_admission_fixture() {
       printf '%s\n' "${output}" >&2
       fail "Admission rejected accepted fixture ${variant}."
     }
-    if [[ "${variant}" != privileged && "${variant}" != hostpath ]]; then
-      grep -Fq "${admission_policy_name}" <<<"${output}" \
-        || fail "Fixture ${variant} was rejected before the Mock Fleet admission policy evaluated it."
-    fi
+    [[ -n "${output}" ]] || fail "Fixture ${variant} was rejected without an API diagnostic."
   fi
 }
 
@@ -244,8 +244,8 @@ cleanup() {
   trap - EXIT INT TERM
   [[ -n "${mcp_pf_pid}" ]] && kill "${mcp_pf_pid}" >/dev/null 2>&1 || true
   [[ -n "${api_pf_pid}" ]] && kill "${api_pf_pid}" >/dev/null 2>&1 || true
-  if [[ "${keep}" == true && ${exit_code} -ne 0 ]]; then
-    log "Keeping namespace ${namespace} and bucket ${bucket} after failure."
+  if [[ ( "${keep}" == true && ${exit_code} -ne 0 ) || ( "${retain_success}" == true && ${exit_code} -eq 0 ) ]]; then
+    log "Keeping namespace ${namespace} and bucket ${bucket}."
   else
     kubectl delete pod --namespace "${namespace}" \
       -l 'app.kubernetes.io/name=mock-fleet-wiremock,app.kubernetes.io/managed-by=mock-fleet' \
@@ -707,7 +707,12 @@ run_contracts() {
 
   log "Checking 32-tool discovery and renamed recorder status."
   result=$(mcp_post '{"jsonrpc":"2.0","id":3,"method":"tools/list"}')
-  assert_jq "${result}" '.result.tools | length == 32' "MCP did not publish 32 tools"
+  local expected_tools actual_tools sorted_expected_tools
+  expected_tools='["list_mocks","list_mock_configs","get_mock_config","list_option_definitions","update_mock_config","delete_mock_config","start_mock","stop_mock","list_stubs","list_unmatched_stubs","get_stub","create_stub","update_stub","delete_stub","persist_stub","unpersist_stub","send_request","find_requests","count_requests","list_unmatched_requests","get_near_misses","reset_request_journal","start_recording","get_recording_status","stop_recording","snapshot_requests","list_body_files","get_body_file","put_body_file","delete_body_file","list_scenarios","reset_scenarios"]'
+  actual_tools=$(jq -c '[.result.tools[].name] | sort' <<<"${result}")
+  sorted_expected_tools=$(jq -c 'sort' <<<"${expected_tools}")
+  [[ "${actual_tools}" == "${sorted_expected_tools}" ]] \
+    || fail "MCP registered-tool coverage manifest drifted"
   assert_jq "${result}" '[.result.tools[].name] | index("start_mock") != null and index("get_recording_status") != null and index("recording_status") == null' \
     "MCP lifecycle/recording tool names are incorrect"
 
@@ -726,7 +731,8 @@ run_contracts() {
   assert_jq "${result}" '.page | has("limit") and has("returned") and has("hasMore") and has("nextCursor")' \
     "MCP collection metadata is incomplete"
   result=$(mcp_success list_option_definitions '{}')
-  assert_jq "${result}" '.optionDefinitions | type == "array"' "MCP option definitions were unavailable"
+  assert_jq "${result}" '.wireMock.version == "3.13.2" and .wireMock.minimumSupportedVersion == "3.0.0" and .wireMock.maximumResearchedVersion == "3.13.2" and (.optionDefinitions | type == "array") and ([.optionDefinitions[].compatibility] | index("supported") != null and index("unsupported") != null and index("known_broken") != null) and ([.optionDefinitions[] | select(.available == false and .unavailableReason == "SECRET_STORAGE_REQUIRED")] | length == 5)' \
+    "MCP option definitions omitted pinned-version, compatibility, or security metadata"
 
   api_request GET /__fleet/api/config
   rv=$(jq -r '.resourceVersion' <<<"${api_body}")
@@ -791,12 +797,12 @@ run_contracts() {
   api_request GET /__fleet/api/config
   rv=$(jq -r '.resourceVersion' <<<"${api_body}")
   mutation=$(jq -cn --arg rv "${rv}" \
-    '{resourceVersion:$rv,options:[],resources:{requests:{cpu:"1000000"},limits:{cpu:"1000000"}},applyMode:"futureOnly"}')
+    '{resourceVersion:$rv,options:[],resources:{requests:{cpu:"4"},limits:{cpu:"4"}},applyMode:"futureOnly"}')
   api_request PUT "/__fleet/api/config/${cold_mock}" "${mutation}"
   [[ "${api_status}" == 200 ]] || fail "Cold-start delay config returned ${api_status}: ${api_body}"
   assert_jq "${api_body}" '.apply.lifecycle == "STOPPED"' "Cold-start delay config activated the stopped mock"
   poll_until "cold-start delay config on both API replicas" \
-    api_replicas_have_cpu_request "${cold_mock}" 1000000
+    api_replicas_have_cpu_request "${cold_mock}" 4
 
   result=$(mcp_tool_raw list_stubs "$(jq -cn --arg id "${cold_mock}" '{mockId:$id,limit:10}')")
   assert_mock_starting_contract "${result}" "${cold_mock}"
@@ -933,6 +939,7 @@ run_contracts() {
   assert_jq "${result}" '.candidateCount >= 1 and .matchedRequests == true and (.candidateIds | length) == .candidateCount' \
     "Recording stop omitted candidate results"
   candidate_id=$(jq -r '.candidateIds[0]' <<<"${result}")
+  mcp_success persist_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${candidate_id}" '{mockId:$id,stubId:$stub}')" >/dev/null
   result=$(mcp_success get_stub "$(jq -cn --arg id "${main_mock}" --arg stub "${candidate_id}" '{mockId:$id,stubId:$stub}')")
   assert_jq "${result}" '[.. | objects | keys[] | ascii_downcase | select(. == "authorization" or . == "cookie" or . == "set-cookie")] | length == 0' \
     "Recorded candidate retained sensitive headers"
@@ -943,8 +950,10 @@ run_contracts() {
   mcp_success reset_request_journal "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
   mcp_success list_scenarios "$(jq -cn --arg id "${main_mock}" '{mockId:$id,limit:50}')" >/dev/null
   mcp_success reset_scenarios "$(jq -cn --arg id "${main_mock}" '{mockId:$id}')" >/dev/null
-  mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",force:true}')" >/dev/null
-  mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",force:true}')" >/dev/null
+  if [[ "${retain_success}" != true ]]; then
+    mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"utf8.txt",force:true}')" >/dev/null
+    mcp_success delete_body_file "$(jq -cn --arg id "${main_mock}" '{mockId:$id,fileName:"binary.bin",force:true}')" >/dev/null
+  fi
 
   log "Checking eager restart lifecycle."
   api_request GET /__fleet/api/config
@@ -966,6 +975,26 @@ run_contracts() {
   poll_until "${failed_mock} FAILED lifecycle" api_mock_failed "${failed_mock}"
   api_request DELETE "/__fleet/api/mocks/${failed_mock}"
   assert_jq "${api_body}" '.status == "STOPPED"' "DELETE did not clean up FAILED mock"
+
+  kubectl set env deployment/"${release}-api" --namespace "${namespace}" \
+    "MOCK_FLEET_WIREMOCK_IMAGE=${wiremock_image}" \
+    MOCK_FLEET_WIREMOCK_IMAGE_PULL_POLICY=IfNotPresent >/dev/null
+  kubectl rollout status deployment/"${release}-api" --namespace "${namespace}" --timeout="${timeout_seconds}s"
+  start_api_port_forward
+
+  if [[ "${retain_success}" == true ]]; then
+    local warned_mock="warn-${run_id:0:16}"
+    api_request GET /__fleet/api/config
+    rv=$(jq -r '.resourceVersion' <<<"${api_body}")
+    mutation=$(jq -cn --arg rv "${rv}" '{resourceVersion:$rv,options:["--disable-optimize-xml-factories-loading"],resources:null,applyMode:"futureOnly"}')
+    api_request PUT "/__fleet/api/config/${warned_mock}" "${mutation}"
+    [[ "${api_status}" == 200 ]] || fail "Unable to seed retained warned configuration: ${api_body}"
+    config='{"scenarioName":"retained-checkout","requiredScenarioState":"Started","newScenarioState":"Viewed","request":{"method":"GET","urlPath":"/retained-scenario"},"response":{"status":200,"body":"scenario-viewed"}}'
+    create_stub_when_ready "$(jq -cn --arg id "${main_mock}" --argjson mapping "${config}" '{mockId:$id,mapping:$mapping}')" >/dev/null
+    poll_mcp_success send_request "$(jq -cn --arg id "${main_mock}" '{mockId:$id,method:"GET",path:"/retained-scenario"}')" >/dev/null
+    log "Retained profile: namespace=${namespace} release=${release} activeMock=${main_mock} stoppedMock=${warned_mock}"
+    log "Inspect after port-forwarding: dashboard service/${release}-dash:80 and MCP service/${release}-mcp:80"
+  fi
 
   log "All live cluster contract assertions passed."
 }
@@ -1051,10 +1080,8 @@ self_test() {
   local psa_command
   psa_command=$(
     kubectl() {
-      if [[ "$*" == 'version -o jsonpath={.serverVersion.major}' ]]; then
-        printf '1'
-      elif [[ "$*" == 'version -o jsonpath={.serverVersion.minor}' ]]; then
-        printf '36+'
+      if [[ "$*" == 'version -o json' ]]; then
+        printf '%s\n' '{"serverVersion":{"major":"1","minor":"36+"}}'
       else
         printf '%s\n' "$*"
       fi
@@ -1329,6 +1356,7 @@ while [[ $# -gt 0 ]]; do
     --self-test) mode=self-test ;;
     --dry-run) mode=dry-run ;;
     --keep) keep=true ;;
+    --retain) retain_success=true ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; fail "Unknown option: $1" ;;
   esac

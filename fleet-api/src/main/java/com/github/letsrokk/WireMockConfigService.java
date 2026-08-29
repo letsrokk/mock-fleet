@@ -114,6 +114,7 @@ public class WireMockConfigService {
                 List.copyOf(mockIds.stream().sorted().toList()),
                 savedMockIds,
                 mocks,
+                wireMockView(),
                 optionDefinitions(),
                 routingView());
     }
@@ -362,7 +363,7 @@ public class WireMockConfigService {
     }
 
     private List<String> validateOptions(List<String> options) {
-        return WireMockOptionCatalog.validateAndNormalize(options);
+        return WireMockOptionCatalog.validateAndNormalize(options, WireMockVersion.parseImage(config.wiremockImage()));
     }
 
     static void validateMockId(String mockId) {
@@ -382,12 +383,31 @@ public class WireMockConfigService {
     }
 
     private List<WireMockOptionCatalog.OptionDefinition> optionDefinitions() {
-        return WireMockOptionCatalog.definitions();
+        return resolvedCatalog().options();
+    }
+
+    private WireMockOptionMatrix.ResolvedCatalog resolvedCatalog() {
+        return WireMockOptionMatrix.loadDefault().resolve(WireMockVersion.parseImage(config.wiremockImage()));
+    }
+
+    private WireMockVersionView wireMockView() {
+        WireMockOptionMatrix.ResolvedCatalog catalog = resolvedCatalog();
+        return new WireMockVersionView(
+                config.wiremockImage(),
+                catalog.version().toString(),
+                catalog.minimumSupportedVersion().toString(),
+                catalog.maximumResearchedVersion().toString(),
+                catalog.rangeStatus());
     }
 
     public record ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
                              List<MockConfigView> mocks,
+                             WireMockVersionView wireMock,
                              List<WireMockOptionCatalog.OptionDefinition> options, RoutingView routing) {
+    }
+
+    public record WireMockVersionView(String configuredImage, String version, String minimumSupportedVersion,
+                                      String maximumResearchedVersion, String rangeStatus) {
     }
 
     public record MockConfigView(String mockId, MockLifecycleStatus lifecycle, ConfigData baseline, ConfigData user,

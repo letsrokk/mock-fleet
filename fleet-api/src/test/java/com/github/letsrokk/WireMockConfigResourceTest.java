@@ -38,7 +38,12 @@ class WireMockConfigResourceTest {
                 .body("mocks[0].active", nullValue())
                 .body("mocks[0].user.resources", nullValue())
                 .body("mocks[0].effective.options[0]", is("--verbose"))
-                .body("options[0].name", is("--verbose"));
+                .body("options[0].name", is("--verbose"))
+                .body("wireMock.configuredImage", is("wiremock/wiremock:3.13.2-2"))
+                .body("wireMock.version", is("3.13.2"))
+                .body("wireMock.minimumSupportedVersion", is("3.0.0"))
+                .body("wireMock.maximumResearchedVersion", is("3.13.2"))
+                .body("wireMock.rangeStatus", is("supported"));
 
         verify(configService).view();
     }
@@ -185,6 +190,8 @@ class WireMockConfigResourceTest {
                 List.of("demo"),
                 List.of("demo"),
                 List.of(mock),
+                new WireMockConfigService.WireMockVersionView(
+                        "wiremock/wiremock:3.13.2-2", "3.13.2", "3.0.0", "3.13.2", "supported"),
                 List.of(option),
                 new WireMockConfigService.RoutingView("HOST", "mock-fleet.localhost"));
     }

@@ -326,10 +326,16 @@ invalid_images=(
   wiremock/wiremock:2.35.1
   wiremock/wiremock@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   wiremock/wiremock:not-a-version
+  wiremock/wiremock:3.13.2-custom
+  wiremock/wiremock:4.0.0
 )
 for image in "${invalid_images[@]}"; do
-  if helm template invalid "${chart_dir}" --set fleet.mcp.enabled=true --set "wiremock.containerImage=${image}" >/dev/null 2>&1; then
-    echo "MCP-enabled releases must reject unsupported WireMock image ${image}" >&2
+  if helm template invalid "${chart_dir}" --set fleet.mcp.enabled=false --set "wiremock.containerImage=${image}" >/dev/null 2>&1; then
+    echo "Releases must reject unsupported WireMock image ${image}" >&2
     exit 1
   fi
+done
+
+for image in wiremock/wiremock:3.0.0 wiremock/wiremock:3.13.2-2 wiremock/wiremock:3.14.0; do
+  helm template valid "${chart_dir}" --set fleet.mcp.enabled=false --set "wiremock.containerImage=${image}" >/dev/null
 done

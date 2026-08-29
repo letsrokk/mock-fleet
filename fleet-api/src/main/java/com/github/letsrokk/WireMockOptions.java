@@ -27,6 +27,7 @@ public class WireMockOptions {
 
     @PostConstruct
     void load() {
+        configuredVersion();
         Optional<String> configPath = config.wiremockConfigPath()
                 .map(String::trim)
                 .filter(path -> !path.isBlank());
@@ -71,7 +72,7 @@ public class WireMockOptions {
         validateSourceOptions(baselineConfig, mockId);
         validateSourceOptions(userConfig, mockId);
         List<String> options = effectiveConfig.optionsFor(mockId);
-        return WireMockOptionCatalog.validateAndNormalize(options);
+        return WireMockOptionCatalog.validateAndNormalize(options, configuredVersion());
     }
 
     public synchronized ResourceRequirements resourcesFor(String mockId) {
@@ -83,10 +84,17 @@ public class WireMockOptions {
     }
 
     private void validateSourceOptions(WireMockConfigDocument document, String mockId) {
-        WireMockOptionCatalog.validateAndNormalize(document.defaultOptions());
+        WireMockOptionCatalog.validateAndNormalize(document.defaultOptions(), configuredVersion());
         WireMockPodConfig mockConfig = document.mockConfigs().get(mockId);
         if (mockConfig != null) {
-            WireMockOptionCatalog.validateAndNormalize(mockConfig.options());
+            WireMockOptionCatalog.validateAndNormalize(mockConfig.options(), configuredVersion());
         }
+    }
+
+    private WireMockVersion configuredVersion() {
+        String image = config == null ? null : config.wiremockImage();
+        return image == null || image.isBlank()
+                ? new WireMockVersion(3, 13, 2)
+                : WireMockVersion.parseImage(image);
     }
 }

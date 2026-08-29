@@ -701,6 +701,7 @@ class WireMockConfigServiceTest {
         when(config.namespace()).thenReturn("mock-fleet");
         when(config.wiremockUserConfigMapName()).thenReturn(Optional.of("user-config"));
         when(config.wiremockConfigKey()).thenReturn("wiremock-options.yaml");
+        when(config.wiremockImage()).thenReturn("wiremock/wiremock:3.13.2-2");
         MockFleetConfig.ProxyConfig proxy = mock(MockFleetConfig.ProxyConfig.class);
         MockFleetConfig.RoutingConfig routing = mock(MockFleetConfig.RoutingConfig.class);
         when(config.proxy()).thenReturn(proxy);

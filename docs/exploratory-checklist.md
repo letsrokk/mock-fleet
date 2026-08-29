@@ -5,6 +5,8 @@ Use a disposable namespace and unique mock IDs. Record the build SHA, WireMock i
 - [ ] The chart runs two ready API replicas, one MCP replica, and persistent S3 storage on SeaweedFS.
 - [ ] A configuration saved through the API service is visible from each API pod's direct endpoint, including a newly restarted API replica.
 - [ ] Invalid options return `ApiError` with `INVALID_OPTIONS`; `resourceVersion` and saved config remain unchanged.
+- [ ] `list_option_definitions` and the dashboard show the pinned WireMock version, researched range, supported/unsupported/known-broken states, and exactly five `SECRET_STORAGE_REQUIRED` options.
+- [ ] Every name from MCP `tools/list` appears in the live coverage manifest. The 3.7.0 `get_body_file` and 3.13.0 `list_unmatched_stubs` boundaries agree between discovery and direct calls.
 - [ ] A stale config write returns `CONFIG_CONFLICT` with exact `expectedVersion` and `currentVersion` details.
 - [ ] First `start_mock` on a cold mock returns RUNNING or STARTING. When STARTING, a WireMock tool returns retryable `MOCK_STARTING`, sends no Admin traffic, and succeeds after polling.
 - [ ] DELETE stops STARTING, RUNNING, and FAILED mocks. Repeated DELETE returns STOPPED.
@@ -20,5 +22,7 @@ Use a disposable namespace and unique mock IDs. Record the build SHA, WireMock i
 - [ ] `send_request` rejects literal, encoded, and slash-normalized `/__admin` paths.
 - [ ] Every error has `{error:{code,message,retryable,stateMayHaveChanged,details}}` and `isError: true`.
 - [ ] Cleanup removes the namespace, namespaced test data, cluster-scoped PV, port-forward process, and temporary files. A second cleanup and a full rerun both succeed.
+
+For a retained acceptance instance, run `bin/cluster-e2e.sh --retain` (or set `MOCK_FLEET_E2E_RETAIN=true`). After success, confirm the printed namespace contains saved configurations, active and stopped mocks, persistent and temporary stubs, retained body files, scenario state, journal traffic, and a persisted recording candidate. Delete the namespace, release, PV, and owned S3 bucket manually after inspection.
 
 The automated opt-in suite covers these paths where the cluster can make them deterministic. Treat timing-sensitive FAILED/STARTING observations as polling assertions with bounded timeouts, not sleeps. Do not mark unavailable checks as passed; record the prerequisite or environment gap.

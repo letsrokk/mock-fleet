@@ -8,7 +8,7 @@ public record WireMockVersion(int major, int minor, int patch) implements Compar
 
     private static final Pattern VERSION = Pattern.compile("(?<![0-9])3\\.(\\d+)\\.(\\d+)(?![0-9])");
     private static final Pattern IMAGE = Pattern.compile(
-            "^[^\\s]+:3\\.(\\d+)\\.(\\d+)(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?(?:@sha256:[a-fA-F0-9]{64})?$");
+            "^[^\\s]+:3\\.(\\d+)\\.(\\d+)(?:-\\d+)?(?:@sha256:[a-fA-F0-9]{64})?$");
 
     public WireMockVersion {
         if (major != 3 || minor < 0 || patch < 0) {

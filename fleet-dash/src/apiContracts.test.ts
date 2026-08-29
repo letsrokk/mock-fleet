@@ -39,6 +39,13 @@ describe("Fleet API dashboard contracts", () => {
           user: { options: ["--verbose"], resources: null },
           effective: { options: ["--verbose"], resources: { requests: {}, limits: {} } }
         }],
+        wireMock: {
+          configuredImage: "wiremock/wiremock:3.13.2-2",
+          version: "3.13.2",
+          minimumSupportedVersion: "3.0.0",
+          maximumResearchedVersion: "3.13.2",
+          rangeStatus: "supported"
+        },
         options: [],
         routing: { mode: "PATH", host: "mock-fleet.test" }
       },
