@@ -26,8 +26,10 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "resourceVersion", nullableString(), "mock", openObject(), "routing", openObject()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
-                    "wireMock", openObject(), "optionDefinitions", array(openObject())),
-                    "wireMock", "optionDefinitions");
+                    "wireMockVersion", string(),
+                    "catalogStatus", string().put("enum", new JsonArray().add("supported").add("newer_unresearched")),
+                    "options", array(optionDefinition())),
+                    "wireMockVersion", "catalogStatus", "options");
             case "UpdateMockConfig" -> strict(properties(
                     "resourceVersion", nullableString(), "mock", openObject(), "apply", openObject()),
                     "resourceVersion", "mock", "apply");
@@ -129,6 +131,19 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "nextCursor", nullableString()), "limit", "returned", "hasMore", "nextCursor");
     }
 
+    private JsonObject optionDefinition() {
+        return strict(properties(
+                "name", string(),
+                "label", string(),
+                "kind", string(),
+                "group", string(),
+                "description", string(),
+                "values", array(string()),
+                "minimum", nullableInteger(),
+                "maximum", nullableInteger()),
+                "name", "label", "kind", "group", "description", "values", "minimum", "maximum");
+    }
+
     private JsonObject strict(JsonObject properties, String... required) {
         JsonArray requiredArray = new JsonArray();
         for (String name : required) {
@@ -160,6 +175,10 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
 
     private JsonObject integer() {
         return new JsonObject().put("type", "integer");
+    }
+
+    private JsonObject nullableInteger() {
+        return new JsonObject().put("type", new JsonArray().add("integer").add("null"));
     }
 
     private JsonObject array(JsonObject items) {

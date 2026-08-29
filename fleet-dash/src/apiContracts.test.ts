@@ -46,7 +46,6 @@ describe("Fleet API dashboard contracts", () => {
           maximumResearchedVersion: "3.13.2",
           rangeStatus: "supported"
         },
-        options: [],
         routing: { mode: "PATH", host: "mock-fleet.test" }
       },
       apply: { mockId: "orders", mode: "restartActive", lifecycle: "STARTING" }

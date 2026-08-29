@@ -73,7 +73,7 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 
 ## Configuration
 
-`list_option_definitions` returns the Fleet API's pinned `wireMock` version metadata and resolved option catalog unchanged. The catalog contains only options present in the configured WireMock version; hidden options are rejected if submitted directly. Advertised options remain available without startup-compatibility warnings. An option with `available=false` is a hard security restriction and cannot be saved. The five direct credential options remain unavailable until Mock Fleet provides Secret-backed storage.
+`list_option_definitions` accepts an optional exact WireMock 3.x `version`. When omitted, it resolves the configured image version. It forwards the Fleet API catalog unchanged as `{wireMockVersion,catalogStatus,options}`. The catalog contains only public options present in the selected version; hidden or sensitive options are rejected if submitted directly. `catalogStatus` is `supported` or `newer_unresearched`; it describes the catalog as a whole, not individual options.
 
 MCP tool discovery uses the configured WireMock version. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls apply the same gates against the active mock's reported runtime version, so a configured/runtime mismatch fails with the tool name and required version.
 

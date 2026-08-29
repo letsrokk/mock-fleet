@@ -9,8 +9,6 @@ import {
   groupOptions,
   hasOption,
   numberInputAttributes,
-  optionCompatibilityWarning,
-  optionIsDisabled,
   optionsFromDraft,
   resourceSummary,
   resourcesFromDraft,
@@ -19,6 +17,7 @@ import {
   type DraftConfig,
   type OptionDefinition
 } from "./configOptions";
+import { loadConfigAndOptionCatalog } from "./configCatalog";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 import {
   configMutation,
@@ -29,6 +28,7 @@ import {
   type ConfigMutationResult,
   type ConfigView,
   type MockConfigView,
+  type OptionCatalogView,
   type RoutingView
 } from "./apiContracts";
 
@@ -82,6 +82,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => tabFromHash());
   const [rows, setRows] = useState<MockRow[]>([]);
   const [configView, setConfigView] = useState<ConfigView | null>(null);
+  const [optionCatalog, setOptionCatalog] = useState<OptionCatalogView | null>(null);
   const [mappingsView, setMappingsView] = useState<MappingsView>({
     enabled: false,
     mockIds: [],
@@ -131,11 +132,10 @@ export default function App() {
     }
 
     try {
-      const response = await fetch(CONFIG_API_PATH);
-      if (!response.ok) {
-        throw new Error(await errorMessage(response, `Unable to load config (${response.status})`));
-      }
-      const data = normalizeConfigView((await response.json()) as ConfigView & { routing?: RoutingView });
+      setOptionCatalog(null);
+      const response = await loadConfigAndOptionCatalog();
+      const data = normalizeConfigView(response.config as ConfigView & { routing?: RoutingView });
+      const catalog = response.optionCatalog;
       const preserveDraft = configDirty && selectedMockId !== null;
       const nextData = preserveDraft && selectedMockId && !data.mockIds.includes(selectedMockId)
         ? withLocalMock(data, selectedMockId)
@@ -144,10 +144,11 @@ export default function App() {
         ? selectedMockId
         : nextData.mockIds[0] ?? null;
       setConfigView(nextData);
+      setOptionCatalog(catalog);
       setSelectedMockId(nextSelected);
       if (nextSelected && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
-        setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), nextData.options));
+        setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
         setConfigDirty(false);
       }
       setError(null);
@@ -251,7 +252,7 @@ export default function App() {
       return;
     }
 
-    const nextOptions = optionsFromDraft(draft, configView.options, selectedMock?.baseline ?? emptyConfig());
+    const nextOptions = optionsFromDraft(draft, optionCatalog?.options ?? [], selectedMock?.baseline ?? emptyConfig());
 
     setSaving(true);
     setError(null);
@@ -274,7 +275,7 @@ export default function App() {
       setConfigView(data);
       setSelectedMockId(selectedMockId);
       const mock = data.mocks.find((item) => item.mockId === selectedMockId);
-      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
+      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
       setConfigDirty(false);
       showToast(configMutationToast("Saved config", selectedMockId, mutation.apply.lifecycle));
     } catch (saveError) {
@@ -305,7 +306,7 @@ export default function App() {
       const nextSelected = data.mockIds.includes(selectedMockId) ? selectedMockId : data.mockIds[0] ?? null;
       setSelectedMockId(nextSelected);
       const mock = data.mocks.find((item) => item.mockId === nextSelected);
-      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), data.options));
+      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
       setConfigDirty(false);
       showToast(configMutationToast("Deleted override", selectedMockId, mutation.apply.lifecycle));
     } catch (deleteError) {
@@ -393,7 +394,7 @@ export default function App() {
   function selectMock(mockId: string) {
     setSelectedMockId(mockId);
     const mock = configView?.mocks.find((item) => item.mockId === mockId);
-    setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), configView?.options ?? []));
+    setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
     setConfigDirty(false);
   }
 
@@ -419,7 +420,7 @@ export default function App() {
     if (!selectedMock || !configView) {
       return;
     }
-    setDraft(draftFromConfig(selectedMock.effective, configView.options));
+    setDraft(draftFromConfig(selectedMock.effective, optionCatalog?.options ?? []));
     setConfigDirty(false);
   }
 
@@ -561,10 +562,10 @@ export default function App() {
   }
 
   function collapseAllOptionGroups() {
-    if (!configView) {
+    if (!optionCatalog) {
       return;
     }
-    setCollapsedOptionGroups(new Set(optionGroupNames(configView.options)));
+    setCollapsedOptionGroups(new Set(optionGroupNames(optionCatalog.options)));
   }
 
   async function confirmAction() {
@@ -674,19 +675,19 @@ export default function App() {
   }, [activeTab, configView]);
 
   useEffect(() => {
-    if (configView === null || optionCollapseStateReadyRef.current) {
+    if (configView === null || optionCatalog === null || optionCollapseStateReadyRef.current) {
       return;
     }
-    setCollapsedOptionGroups(new Set(optionGroupNames(configView.options)));
+    setCollapsedOptionGroups(new Set(optionGroupNames(optionCatalog.options)));
     optionCollapseStateReadyRef.current = true;
-  }, [configView]);
+  }, [configView, optionCatalog]);
 
   useEffect(() => {
-    if (configView === null || !optionCollapseStateReadyRef.current) {
+    if (configView === null || optionCatalog === null || !optionCollapseStateReadyRef.current) {
       return;
     }
     writeStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY, collapsedOptionGroups);
-  }, [collapsedOptionGroups, configView]);
+  }, [collapsedOptionGroups, configView, optionCatalog]);
 
   useEffect(() => {
     if (activeTab === "mappings" && mappingsView.enabled) {
@@ -862,7 +863,8 @@ export default function App() {
   }
 
   function renderConfigPanel() {
-    if (configView === null) {
+    const catalog = optionCatalog;
+    if (configView === null || catalog === null) {
       const unavailableStatus = loadingConfig
         ? "Loading configuration..."
         : "Configuration unavailable.";
@@ -891,7 +893,7 @@ export default function App() {
       );
     }
 
-    const groupedOptions = groupOptions(configView.options);
+    const groupedOptions = groupOptions(catalog.options);
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
@@ -973,7 +975,7 @@ export default function App() {
                     <span>
                       <h2>WireMock options</h2>
                       <span className="option-version-context">
-                        {wireMockVersionLabel(configView.wireMock.version)}
+                        {wireMockVersionLabel(catalog.wireMockVersion)}
                       </span>
                     </span>
                     <div className="option-toolbar">
@@ -985,7 +987,7 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                  {configView.wireMock.rangeStatus === "newer_unresearched" ? (
+                  {catalog.catalogStatus === "newer_unresearched" ? (
                     <p className="notice warning compact-notice" role="status">
                       This WireMock version is newer than the compatibility matrix. Known options remain usable, but compatibility is unknown.
                     </p>
@@ -1318,7 +1320,6 @@ export default function App() {
   }
 
   function renderOptionControl(option: OptionDefinition) {
-    const unavailable = optionIsDisabled(option);
     if (option.kind === "flag") {
       const inheritedFromBaseline = selectedMock ? hasOption(selectedMock.baseline.options, option.name) : false;
       return (
@@ -1330,10 +1331,10 @@ export default function App() {
             <input
               type="checkbox"
               checked={Boolean(draft.flags[option.name])}
-              disabled={inheritedFromBaseline || unavailable}
+              disabled={inheritedFromBaseline}
               aria-label={inheritedFromBaseline
                 ? `${option.label} is inherited from default config`
-                : unavailable ? `${option.label} is unavailable: ${option.unavailableReason}` : option.label}
+                : option.label}
               onChange={(event) => {
                 setConfigDirty(true);
                 setDraft((current) => ({
@@ -1354,7 +1355,6 @@ export default function App() {
           <OptionText option={option} />
           {option.kind === "select" ? (
             <select
-              disabled={unavailable}
               value={draft.values[option.name] ?? ""}
               onChange={(event) => setDraftValue(option.name, event.target.value)}
             >
@@ -1367,7 +1367,7 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={Boolean(draft.flags[option.name])}
-                  disabled={unavailable || Boolean(draft.values[option.name]?.trim())}
+                  disabled={Boolean(draft.values[option.name]?.trim())}
                   onChange={(event) => {
                     setConfigDirty(true);
                     setDraft((current) => ({
@@ -1381,7 +1381,6 @@ export default function App() {
               <input
                 type={option.kind === "optional_number" ? "number" : "text"}
                 {...numberInputAttributes(option)}
-                disabled={unavailable}
                 value={draft.values[option.name] ?? ""}
                 onChange={(event) => setDraftValue(option.name, event.target.value)}
               />
@@ -1390,7 +1389,6 @@ export default function App() {
             <input
               type={option.kind === "number" ? "number" : "text"}
               {...numberInputAttributes(option)}
-              disabled={unavailable}
               value={draft.values[option.name] ?? ""}
               onChange={(event) => setDraftValue(option.name, event.target.value)}
             />
@@ -1457,18 +1455,11 @@ export default function App() {
 }
 
 function OptionText({ option }: { option: OptionDefinition }) {
-  const warning = optionCompatibilityWarning(option);
   return (
     <span className="option-text">
       <span className="option-title">
         <span>{option.label}</span>
         <span className="option-name">{option.name}</span>
-        {warning ? (
-          <span className="option-warning" title={warning} aria-label={`Compatibility warning: ${warning}`}>(!)</span>
-        ) : null}
-        {!option.available ? (
-          <span className="option-unavailable" title="Secure Secret-backed storage is required.">Unavailable</span>
-        ) : null}
       </span>
       <span className="option-description">{option.description}</span>
     </span>

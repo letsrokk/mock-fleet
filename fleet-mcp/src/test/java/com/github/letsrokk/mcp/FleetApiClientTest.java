@@ -66,6 +66,8 @@ class FleetApiClientTest {
         client.startMock("orders");
         client.stopMock("orders");
         client.getConfig();
+        client.getOptionCatalog(null);
+        client.getOptionCatalog("3.13.2+candidate");
         client.updateConfig("orders", "42", List.of("--verbose"),
                 new MockResources(Map.of(), Map.of()), ConfigApplyMode.futureOnly);
         client.deleteConfig("orders", "43", ConfigApplyMode.restartActive);
@@ -76,12 +78,16 @@ class FleetApiClientTest {
                 "POST /__fleet/api/mocks/orders/start",
                 "DELETE /__fleet/api/mocks/orders",
                 "GET /__fleet/api/config",
+                "GET /__fleet/api/config/options",
+                "GET /__fleet/api/config/options?version=3.13.2%2Bcandidate",
                 "PUT /__fleet/api/config/orders",
                 "DELETE /__fleet/api/config/orders",
                 "GET /__fleet/api/mappings"), requests.stream().map(CapturedRequest::summary).toList());
         assertFalse(requests.stream().anyMatch(request -> request.uri().contains("/internal/mocks/")));
 
-        var update = mapper.readTree(requests.get(4).body());
+        var update = mapper.readTree(requests.stream()
+                .filter(request -> request.summary().equals("PUT /__fleet/api/config/orders"))
+                .findFirst().orElseThrow().body());
         assertEquals("42", update.path("resourceVersion").asText());
         assertEquals("futureOnly", update.path("applyMode").asText());
         assertEquals(List.of("--verbose"), mapper.convertValue(update.path("options"), List.class));

@@ -7,11 +7,6 @@ export type OptionDefinition = {
   values: string[];
   minimum: number | null;
   maximum: number | null;
-  available: boolean;
-  unavailableReason: "SECRET_STORAGE_REQUIRED" | null;
-  compatibility: "supported" | "unsupported" | "known_broken" | "unknown";
-  compatibilityMessage: string | null;
-  versionRanges: Array<{ minimumVersion: string; maximumVersion: string | null }>;
 };
 
 export type ResourceData = {
@@ -171,14 +166,6 @@ export function numberInputAttributes(option: OptionDefinition) {
     return {};
   }
   return { min: option.minimum, max: option.maximum, step: 1 };
-}
-
-export function optionCompatibilityWarning(option: OptionDefinition) {
-  return option.compatibility === "supported" ? null : option.compatibilityMessage;
-}
-
-export function optionIsDisabled(option: OptionDefinition) {
-  return !option.available;
 }
 
 function cleanRecord(values: Record<string, string>) {

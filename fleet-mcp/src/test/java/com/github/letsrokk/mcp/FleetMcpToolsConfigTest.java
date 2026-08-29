@@ -29,9 +29,14 @@ class FleetMcpToolsConfigTest {
                 {"mockId":"alpha","active":false,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}},"effective":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}}},
                 {"mockId":"zeta","active":true,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":[],"resources":{"requests":{},"limits":{}}},"effective":{"options":[],"resources":{"requests":{},"limits":{}}}}
               ],
-              "options":[{"name":"--verbose"}],
               "routing":{"mode":"PATH","host":"mock-fleet.localhost"}
             }
+            """;
+
+    private static final String OPTION_CATALOG = """
+            {"wireMockVersion":"3.13.2","catalogStatus":"newer_unresearched",
+             "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging",
+             "description":"Log details","values":[],"minimum":null,"maximum":null}]}
             """;
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -89,7 +94,7 @@ class FleetMcpToolsConfigTest {
     @Test
     void listsAnEmptySavedConfigCollection() throws Exception {
         responseBody = """
-                {"resourceVersion":"42","mockIds":["active-only"],"savedMockIds":[],"mocks":[],"options":[],"routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                {"resourceVersion":"42","mockIds":["active-only"],"savedMockIds":[],"mocks":[],"routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
                 """;
 
         var response = tools.listMockConfigs(null, null);
@@ -106,7 +111,7 @@ class FleetMcpToolsConfigTest {
     @Test
     void preservesNullResourceVersionInConfigWrapper() {
         responseBody = """
-                {"resourceVersion":null,"mockIds":[],"savedMockIds":[],"mocks":[],"options":[],
+                {"resourceVersion":null,"mockIds":[],"savedMockIds":[],"mocks":[],
                  "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
                 """;
 
@@ -150,6 +155,17 @@ class FleetMcpToolsConfigTest {
         assertTrue(response.isError());
         assertEquals("NOT_FOUND", ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
         assertEquals(List.of("GET /__fleet/api/config"), requests);
+    }
+
+    @Test
+    void forwardsTheVersionedCatalogWithoutReshapingIt() throws Exception {
+        responseBody = OPTION_CATALOG;
+
+        var response = tools.listOptionDefinitions("3.13.2+candidate");
+
+        assertFalse(response.isError());
+        assertEquals(mapper.readTree(OPTION_CATALOG), response.structuredContent());
+        assertEquals(List.of("GET /__fleet/api/config/options?version=3.13.2%2Bcandidate"), requests);
     }
 
     @Test

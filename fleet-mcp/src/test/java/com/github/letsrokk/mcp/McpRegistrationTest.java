@@ -116,6 +116,11 @@ class McpRegistrationTest {
             assertFalse(tool(tools, toolName).path("inputSchema").path("properties").has("contentBase64"));
         }
         assertFalse(tool(tools, "put_body_file").path("inputSchema").path("properties").has("contentType"));
+
+        JsonNode optionCatalog = tool(tools, "list_option_definitions");
+        JsonNode version = optionCatalog.path("inputSchema").path("properties").path("version");
+        assertEquals("string", version.path("type").asText());
+        assertFalse(textValues(optionCatalog.path("inputSchema").path("required")).contains("version"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -209,6 +214,12 @@ class McpRegistrationTest {
         assertEquals(0, stopMock.path("properties").path("retryAfterMs").path("minimum").asInt(-1));
         assertEquals(Set.of("mockId", "status", "podName", "message", "retryAfterMs"),
                 Set.copyOf(textValues(stopMock.path("required"))));
+
+        JsonNode optionCatalog = tool(tools, "list_option_definitions").path("outputSchema").path("oneOf").get(0);
+        assertEquals(Set.of("wireMockVersion", "catalogStatus", "options"),
+                Set.copyOf(textValues(optionCatalog.path("required"))));
+        assertFalse(optionCatalog.path("properties").path("options").path("items")
+                .path("additionalProperties").asBoolean(true));
     }
 
     @Test

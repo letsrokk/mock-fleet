@@ -13,6 +13,8 @@ import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +73,14 @@ public final class FleetApiClient {
 
     public JsonNode getConfig() {
         return json(HttpMethod.GET, "/__fleet/api/config", null);
+    }
+
+    public JsonNode getOptionCatalog(String version) {
+        String path = "/__fleet/api/config/options";
+        if (version != null) {
+            path += "?version=" + URLEncoder.encode(version, StandardCharsets.UTF_8).replace("+", "%20");
+        }
+        return json(HttpMethod.GET, path, null);
     }
 
     public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,

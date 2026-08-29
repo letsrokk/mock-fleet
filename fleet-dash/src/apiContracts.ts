@@ -27,8 +27,13 @@ export type ConfigView = {
     maximumResearchedVersion: string;
     rangeStatus: "supported" | "newer_unresearched";
   };
-  options: OptionDefinition[];
   routing: RoutingView;
+};
+
+export type OptionCatalogView = {
+  wireMockVersion: string;
+  catalogStatus: "supported" | "newer_unresearched";
+  options: OptionDefinition[];
 };
 
 export type ApplyMode = "futureOnly" | "restartActive";

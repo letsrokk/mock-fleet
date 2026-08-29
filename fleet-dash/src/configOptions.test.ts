@@ -4,8 +4,6 @@ import {
   emptyUserConfig,
   hasOption,
   numberInputAttributes,
-  optionCompatibilityWarning,
-  optionIsDisabled,
   optionsFromDraft,
   overrideOptions,
   resourcesFromDraft,
@@ -23,12 +21,7 @@ const definitions: OptionDefinition[] = [
     description: "Log more detail to stdout.",
     values: [],
     minimum: null,
-    maximum: null,
-    available: true,
-    unavailableReason: null,
-    compatibility: "supported",
-    compatibilityMessage: null,
-    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
+    maximum: null
   },
   {
     name: "--max-request-journal-entries",
@@ -38,12 +31,7 @@ const definitions: OptionDefinition[] = [
     description: "Sets the maximum number of request journal entries.",
     values: [],
     minimum: 0,
-    maximum: 100000,
-    available: true,
-    unavailableReason: null,
-    compatibility: "supported",
-    compatibilityMessage: null,
-    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
+    maximum: 100000
   },
   {
     name: "--use-chunked-encoding",
@@ -53,12 +41,7 @@ const definitions: OptionDefinition[] = [
     description: "Controls when responses use Transfer-Encoding: chunked.",
     values: ["always", "never", "body_file"],
     minimum: null,
-    maximum: null,
-    available: true,
-    unavailableReason: null,
-    compatibility: "supported",
-    compatibilityMessage: null,
-    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
+    maximum: null
   },
   {
     name: "--filename-template",
@@ -68,23 +51,9 @@ const definitions: OptionDefinition[] = [
     description: "Sets the Handlebars filename template for recorded mappings.",
     values: [],
     minimum: null,
-    maximum: null,
-    available: true,
-    unavailableReason: null,
-    compatibility: "supported",
-    compatibilityMessage: null,
-    versionRanges: [{ minimumVersion: "3.0.0", maximumVersion: null }]
+    maximum: null
   }
 ];
-
-const compatibilityDefinition: OptionDefinition = {
-  ...definitions[0],
-  available: true,
-  unavailableReason: null,
-  compatibility: "unsupported",
-  compatibilityMessage: "Introduced in WireMock 3.7.0.",
-  versionRanges: [{ minimumVersion: "3.7.0", maximumVersion: null }]
-};
 
 const emptyResources = { requests: {}, limits: {} };
 
@@ -100,16 +69,6 @@ describe("config option helpers", () => {
   it("uses API-provided integer bounds for numeric inputs", () => {
     expect(numberInputAttributes(definitions[1])).toEqual({ min: 0, max: 100000, step: 1 });
     expect(numberInputAttributes(definitions[0])).toEqual({});
-  });
-
-  it("treats compatibility as advisory and availability as enforced", () => {
-    expect(optionCompatibilityWarning(compatibilityDefinition)).toBe("Introduced in WireMock 3.7.0.");
-    expect(optionIsDisabled(compatibilityDefinition)).toBe(false);
-    expect(optionIsDisabled({
-      ...compatibilityDefinition,
-      available: false,
-      unavailableReason: "SECRET_STORAGE_REQUIRED"
-    })).toBe(true);
   });
 
   it("uses numeric attributes for optional numeric inputs", () => {
