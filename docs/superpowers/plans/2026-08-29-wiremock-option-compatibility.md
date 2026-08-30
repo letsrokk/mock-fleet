@@ -303,7 +303,7 @@
 
 - [x] **Step 2: Cover Fleet configuration and lifecycle tools**
 
-  Exercise `list_mocks`, `list_mock_configs`, `get_mock_config`, `list_option_definitions`, `update_mock_config`, `delete_mock_config`, `start_mock`, and `stop_mock`. Assert optimistic concurrency, apply modes, pinned-version metadata, all compatibility states, and hard-disabled secret entries.
+  Exercise `list_mocks`, `get_mock_config`, `list_option_definitions`, `update_mock_config`, `delete_mock_config`, `start_mock`, and `stop_mock`. Assert optimistic concurrency, apply modes, pinned-version metadata, all compatibility states, and hard-disabled secret entries.
 
 - [x] **Step 3: Cover stub, traffic, journal, recorder, body-file, and scenario tools**
 
