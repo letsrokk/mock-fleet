@@ -1,12 +1,18 @@
 {{- include "mock-fleet.validateWireMockImage" . }}
+{{- $name := include "mock-fleet.wiremockVersionCatalogConfigMapName" . -}}
+{{- $namespace := include "mock-fleet.namespace" . -}}
+{{- $existing := lookup "v1" "ConfigMap" $namespace $name -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
-  namespace: {{ include "mock-fleet.namespace" . }}
+  name: {{ $name }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
 data:
+  {{- if $existing }}
+{{- toYaml $existing.data | nindent 2 }}
+  {{- else }}
   {{- $defaultVersion := include "mock-fleet.wiremockDefaultVersion" . }}
   defaultVersion: {{ $defaultVersion }}
   selectable.{{ $defaultVersion }}: {{ .Values.wiremock.containerImage }}
@@ -15,5 +21,6 @@ data:
   {{- $version := regexFind "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)" $tag }}
   {{- if ne $version $defaultVersion }}
   selectable.{{ $version }}: {{ printf "%s:%s" $repository $tag }}
+  {{- end }}
   {{- end }}
   {{- end }}
