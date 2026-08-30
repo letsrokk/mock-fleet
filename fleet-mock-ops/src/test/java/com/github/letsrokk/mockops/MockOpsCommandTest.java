@@ -1,4 +1,4 @@
-package com.github.letsrokk.updater;
+package com.github.letsrokk.mockops;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -29,11 +29,11 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class UpdaterCommandTest {
+class MockOpsCommandTest {
 
     @Test
     void derivesPullableImageRepositoryForPrivateRegistry() {
-        String imageRepository = UpdaterCommand.imageRepository(
+        String imageRepository = MockOpsCommand.imageRepository(
                 URI.create("http://registry.testing.svc:5000"), "mirror/wiremock", Optional.empty());
 
         assertEquals("registry.testing.svc:5000/mirror/wiremock", imageRepository);
@@ -44,13 +44,13 @@ class UpdaterCommandTest {
     @Test
     void keepsDockerHubDefaultImageRepositoryUnqualified() {
         assertEquals("wiremock/wiremock",
-                UpdaterCommand.imageRepository(URI.create("https://registry-1.docker.io"),
+                MockOpsCommand.imageRepository(URI.create("https://registry-1.docker.io"),
                         "wiremock/wiremock", Optional.empty()));
         assertEquals("mirror.example/wiremock/team",
-                UpdaterCommand.imageRepository(URI.create("https://registry-1.docker.io"),
+                MockOpsCommand.imageRepository(URI.create("https://registry-1.docker.io"),
                         "wiremock/wiremock", Optional.of("mirror.example/wiremock/team")));
         assertThrows(IllegalArgumentException.class,
-                () -> UpdaterCommand.imageRepository(URI.create("https://registry-1.docker.io"),
+                () -> MockOpsCommand.imageRepository(URI.create("https://registry-1.docker.io"),
                         "wiremock/wiremock", Optional.of("wiremock:3")));
     }
 
@@ -58,15 +58,15 @@ class UpdaterCommandTest {
     void acceptsDockerRepositorySeparatorsAndRejectsMalformedComponents() {
         URI registry = URI.create("https://registry-1.docker.io");
         assertEquals("team/mock--image",
-                UpdaterCommand.imageRepository(registry, "wiremock/wiremock",
+                MockOpsCommand.imageRepository(registry, "wiremock/wiremock",
                         Optional.of("team/mock--image")));
         assertEquals("registry.example:5000/team/mock__image",
-                UpdaterCommand.imageRepository(registry, "wiremock/wiremock",
+                MockOpsCommand.imageRepository(registry, "wiremock/wiremock",
                         Optional.of("registry.example:5000/team/mock__image")));
 
         for (String invalid : List.of("team/-mock", "team/mock_", "team/mock:::image", "team//mock")) {
             assertThrows(IllegalArgumentException.class,
-                    () -> UpdaterCommand.imageRepository(registry, "wiremock/wiremock", Optional.of(invalid)));
+                    () -> MockOpsCommand.imageRepository(registry, "wiremock/wiremock", Optional.of(invalid)));
         }
     }
 
@@ -75,9 +75,9 @@ class UpdaterCommandTest {
         URI registry = URI.create("https://registry--prod.example:5000");
 
         assertEquals("registry--prod.example:5000/team/image",
-                UpdaterCommand.imageRepository(registry, "team/image", Optional.empty()));
+                MockOpsCommand.imageRepository(registry, "team/image", Optional.empty()));
         assertEquals("registry--prod.example:5000/team/image",
-                UpdaterCommand.imageRepository(URI.create("https://registry.example"), "team/image",
+                MockOpsCommand.imageRepository(URI.create("https://registry.example"), "team/image",
                         Optional.of("registry--prod.example:5000/team/image")));
     }
 
@@ -90,23 +90,23 @@ class UpdaterCommandTest {
                 "registry.example:port/team/image",
                 "registry.example:/team/image")) {
             assertThrows(IllegalArgumentException.class,
-                    () -> UpdaterCommand.imageRepository(dockerHub, "team/image", Optional.of(invalid)));
+                    () -> MockOpsCommand.imageRepository(dockerHub, "team/image", Optional.of(invalid)));
         }
         for (String invalidRegistry : List.of(
                 "https://-registry.example:5000",
                 "https://registry-.example:5000",
                 "https://registry.example:port")) {
             assertThrows(IllegalArgumentException.class,
-                    () -> UpdaterCommand.imageRepository(URI.create(invalidRegistry),
+                    () -> MockOpsCommand.imageRepository(URI.create(invalidRegistry),
                             "team/image", Optional.empty()));
         }
 
         IllegalArgumentException derivedIpv6 = assertThrows(IllegalArgumentException.class,
-                () -> UpdaterCommand.imageRepository(URI.create("http://[::1]:5000"),
+                () -> MockOpsCommand.imageRepository(URI.create("http://[::1]:5000"),
                         "team/image", Optional.empty()));
         assertTrue(derivedIpv6.getMessage().contains("IPv6"));
         IllegalArgumentException configuredIpv6 = assertThrows(IllegalArgumentException.class,
-                () -> UpdaterCommand.imageRepository(dockerHub, "team/image",
+                () -> MockOpsCommand.imageRepository(dockerHub, "team/image",
                         Optional.of("[::1]:5000/team/image")));
         assertTrue(configuredIpv6.getMessage().contains("IPv6"));
     }
@@ -120,7 +120,7 @@ class UpdaterCommandTest {
         registry.start();
         try {
             String registryUrl = "http://127.0.0.1:" + registry.getAddress().getPort();
-            UpdaterConfig config = config(registryUrl, "mirror/wiremock", Optional.empty());
+            MockOpsConfig config = config(registryUrl, "mirror/wiremock", Optional.empty());
             KubernetesClient kubernetes = mock(KubernetesClient.class);
             MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
             NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced =
@@ -145,7 +145,7 @@ class UpdaterCommandTest {
             when(user.get()).thenReturn(new ConfigMapBuilder(emptyConfig)
                     .editMetadata().withName("user").endMetadata().build());
             when(namespaced.resource(org.mockito.ArgumentMatchers.any(ConfigMap.class))).thenReturn(updated);
-            UpdaterCommand command = command(config, kubernetes);
+            MockOpsCommand command = command(config, kubernetes);
 
             assertEquals(0, command.run());
 
@@ -165,14 +165,14 @@ class UpdaterCommandTest {
         registry.createContext("/v2/example/wiremock/tags/list", exchange -> json(exchange, "not-json"));
         registry.start();
         try {
-            UpdaterConfig config = mock(UpdaterConfig.class);
+            MockOpsConfig config = mock(MockOpsConfig.class);
             KubernetesClient kubernetes = mock(KubernetesClient.class);
             when(config.registryUrl()).thenReturn("http://127.0.0.1:" + registry.getAddress().getPort());
             when(config.repository()).thenReturn("example/wiremock");
             when(config.pageSize()).thenReturn(100);
             when(config.registryUsername()).thenReturn(Optional.empty());
             when(config.registryPassword()).thenReturn(Optional.empty());
-            UpdaterCommand command = new UpdaterCommand();
+            MockOpsCommand command = new MockOpsCommand();
             command.config = config;
             command.kubernetes = kubernetes;
             command.json = new ObjectMapper();
@@ -186,9 +186,9 @@ class UpdaterCommandTest {
         }
     }
 
-    private static UpdaterConfig config(String registryUrl, String repository,
+    private static MockOpsConfig config(String registryUrl, String repository,
                                         Optional<String> imageRepository) {
-        UpdaterConfig config = mock(UpdaterConfig.class);
+        MockOpsConfig config = mock(MockOpsConfig.class);
         when(config.registryUrl()).thenReturn(registryUrl);
         when(config.repository()).thenReturn(repository);
         when(config.imageRepository()).thenReturn(imageRepository);
@@ -205,8 +205,8 @@ class UpdaterCommandTest {
         return config;
     }
 
-    private static UpdaterCommand command(UpdaterConfig config, KubernetesClient kubernetes) {
-        UpdaterCommand command = new UpdaterCommand();
+    private static MockOpsCommand command(MockOpsConfig config, KubernetesClient kubernetes) {
+        MockOpsCommand command = new MockOpsCommand();
         command.config = config;
         command.kubernetes = kubernetes;
         command.json = new ObjectMapper();

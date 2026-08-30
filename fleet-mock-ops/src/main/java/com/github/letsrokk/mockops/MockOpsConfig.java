@@ -1,10 +1,10 @@
-package com.github.letsrokk.updater;
+package com.github.letsrokk.mockops;
 
 import io.smallrye.config.ConfigMapping;
 import java.util.Optional;
 
-@ConfigMapping(prefix = "mock-fleet.wiremock-updater")
-interface UpdaterConfig {
+@ConfigMapping(prefix = "mock-fleet.mock-ops")
+interface MockOpsConfig {
     String namespace();
     String catalogConfigMapName();
     String baselineConfigMapName();

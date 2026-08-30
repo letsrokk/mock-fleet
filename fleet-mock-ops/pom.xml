@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.github.letsrokk</groupId>
-    <artifactId>fleet-wiremock-updater</artifactId>
+    <artifactId>fleet-mock-ops</artifactId>
     <version>1.5.1</version>
 
     <properties>

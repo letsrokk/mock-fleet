@@ -1,4 +1,4 @@
-package com.github.letsrokk.updater;
+package com.github.letsrokk.mockops;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 @QuarkusMain
-public final class UpdaterCommand implements QuarkusApplication {
+public final class MockOpsCommand implements QuarkusApplication {
     private static final String REPOSITORY_COMPONENT =
             "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
     private static final String DNS_LABEL = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
@@ -23,7 +23,7 @@ public final class UpdaterCommand implements QuarkusApplication {
                     + REPOSITORY_COMPONENT + "(?:/" + REPOSITORY_COMPONENT + ")*$");
 
     @Inject
-    UpdaterConfig config;
+    MockOpsConfig config;
 
     @Inject
     KubernetesClient kubernetes;

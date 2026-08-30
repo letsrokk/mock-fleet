@@ -1,4 +1,4 @@
-package com.github.letsrokk.updater;
+package com.github.letsrokk.mockops;
 
 import org.junit.jupiter.api.Test;
 import java.util.ArrayList;

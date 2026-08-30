@@ -2,7 +2,7 @@ quarkus:
   banner:
     enabled: false
 mock-fleet:
-  wiremock-updater:
+  mock-ops:
     namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
     catalog-config-map-name: ${MOCK_FLEET_WIREMOCK_VERSION_CATALOG_CONFIG_MAP_NAME:mock-fleet-wiremock-version-catalog}
     baseline-config-map-name: ${MOCK_FLEET_WIREMOCK_BASELINE_CONFIG_MAP_NAME:mock-fleet-wiremock-config}

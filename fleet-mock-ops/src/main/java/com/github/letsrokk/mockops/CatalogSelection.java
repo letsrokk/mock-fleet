@@ -1,4 +1,4 @@
-package com.github.letsrokk.updater;
+package com.github.letsrokk.mockops;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
