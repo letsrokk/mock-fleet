@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.github.letsrokk</groupId>
     <artifactId>mock-fleet-mcp</artifactId>
-    <version>1.5.1</version>
+    <version>2.0.0</version>
 
     <properties>
         <compiler-plugin.version>3.14.1</compiler-plugin.version>
@@ -146,6 +146,7 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <systemPropertyVariables>
+                        <expected.application.version>${project.version}</expected.application.version>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Mock Fleet API
-  version: 1.5.1
+  version: 2.0.0
   description: REST contract for mock lifecycle, configuration, and persisted mapping files.
 paths:
   /__fleet/api/mocks:
