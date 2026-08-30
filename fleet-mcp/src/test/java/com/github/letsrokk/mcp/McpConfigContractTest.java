@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -119,6 +120,22 @@ class McpConfigContractTest {
         assertTrue(deletion.path("deleted").asBoolean());
         assertEquals("restartActive", deletion.path("apply").path("mode").asText());
         assertFalse(deletion.has("mocks"));
+    }
+
+    @Test
+    void forwardsExplicitWireMockVersionThroughUpdateMockConfig() throws Exception {
+        when(fleetApi.updateConfig("catalog", "41", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly))
+                .thenReturn(mutation(configView(true), "futureOnly"));
+
+        JsonNode update = structured(callTool("update_mock_config", """
+                {"mockId":"catalog","resourceVersion":"41","wireMockVersion":"3.12.1",
+                 "options":["--verbose"],"applyMode":"futureOnly"}
+                """));
+
+        assertEquals("catalog", update.path("mock").path("mockId").asText());
+        verify(fleetApi).updateConfig("catalog", "41", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly);
     }
 
     @Test

@@ -95,6 +95,18 @@ class FleetApiClientTest {
     }
 
     @Test
+    void serializesExplicitWireMockVersionInConfigUpdate() throws Exception {
+        client.updateConfig("orders", "42", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly);
+
+        var update = mapper.readTree(requests.getFirst().body());
+        assertEquals(mapper.readTree("""
+                {"resourceVersion":"42","options":["--verbose"],"resources":null,
+                 "wireMockVersion":"3.12.1","applyMode":"futureOnly"}
+                """), update);
+    }
+
+    @Test
     void returnsThePublicStartingLifecycleResponse() {
         responseStatus = 202;
         responseBody = """

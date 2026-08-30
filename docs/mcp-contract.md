@@ -77,7 +77,7 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 
 MCP always publishes the complete retained tool set. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls gate these tools against the target mock's active runtime version, so desired/runtime drift fails with the tool name, required version, and actual runtime version. Legacy WireMock 3.0.x targets resolve their runtime through Fleet API after the Admin version endpoint is absent; an unknown runtime fails closed.
 
-`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit or set it to null to inherit the catalog default. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
+`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit `wireMockVersion` to inherit the catalog default. Explicit `null` is not accepted because the published input schema requires a string when the field is present. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
 
 ```json
 {
