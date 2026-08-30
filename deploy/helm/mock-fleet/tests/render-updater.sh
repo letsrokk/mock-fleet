@@ -96,8 +96,22 @@ for invalid_constraint in 3 3.12 3.12.1 4.x 3.-1.x; do
   fi
 done
 
+for valid_minor_lines in 1 50; do
+  helm template unusual-release "${chart_dir}" \
+    --set wiremock.versionUpdater.enabled=true \
+    --set wiremock.versionUpdater.minorLines="${valid_minor_lines}" >/dev/null
+done
+
+for invalid_minor_lines in 0 51; do
+  if helm template unusual-release "${chart_dir}" \
+      --set wiremock.versionUpdater.enabled=true \
+      --set wiremock.versionUpdater.minorLines="${invalid_minor_lines}" >/dev/null 2>&1; then
+    echo "Chart accepted invalid updater minorLines: ${invalid_minor_lines}" >&2
+    exit 1
+  fi
+done
+
 for invalid_setting in \
-  'wiremock.versionUpdater.minorLines=0' \
   'wiremock.versionUpdater.schedule=' \
   'wiremock.versionUpdater.registry.url=' \
   'wiremock.versionUpdater.registry.repository='; do
