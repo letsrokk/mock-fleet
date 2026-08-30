@@ -233,13 +233,11 @@ public class WireMockConfigService {
     }
 
     void handleUserConfigWatchEvent(Watcher.Action action, ConfigMap resource) {
-        if (action == Watcher.Action.ERROR || resource == null) {
+        if (action == Watcher.Action.ERROR || action == Watcher.Action.DELETED || resource == null) {
             return;
         }
         try {
-            wireMockOptions.setUserConfig(action == Watcher.Action.DELETED
-                    ? WireMockConfigDocument.empty()
-                    : loadUserConfig(resource));
+            wireMockOptions.setUserConfig(loadUserConfig(resource));
             String observedResourceVersion = resourceVersion(resource);
             if (observedResourceVersion != null) {
                 userConfigResourceVersion = observedResourceVersion;

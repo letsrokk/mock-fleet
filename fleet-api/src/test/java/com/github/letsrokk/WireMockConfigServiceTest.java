@@ -501,6 +501,28 @@ class WireMockConfigServiceTest {
     }
 
     @Test
+    void deletedWatchEventKeepsLastValidUserConfigAndResourceVersion() {
+        ConfigMap initial = configMap("user-config", "41", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: [--verbose]
+                """);
+        UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, null);
+        fixture.service.loadUserConfig();
+
+        fixture.service.handleUserConfigWatchEvent(Watcher.Action.DELETED,
+                configMap("user-config", "42", ""));
+        fixture.service.startUserConfigWatch();
+
+        assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
+        verify(fixture.resource, times(2)).watch(resourceVersion("41"), any(Watcher.class));
+    }
+
+    @Test
     void watchModifiedEventUpdatesLocalUserConfigWithoutReload() {
         WireMockConfigService service = service(mock(KubernetesClient.class), config());
         ConfigMap configMap = configMap("user-config", "42", """
