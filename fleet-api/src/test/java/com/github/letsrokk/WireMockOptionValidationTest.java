@@ -94,6 +94,14 @@ class WireMockOptionValidationTest {
     }
 
     @Test
+    void rejectsOptionsThatExitBeforeMockStartup() {
+        for (String option : List.of("--help", "--version")) {
+            assertInvalid(List.of(option),
+                    "WireMock option exits before mock startup and is unavailable: " + option);
+        }
+    }
+
+    @Test
     void rejectsNonIntegralAndOutOfRangeNumericOptionsBeforePersistence() {
         Stream.of(
                 new InvalidNumber("--async-response-threads", "-1", 1, 256),

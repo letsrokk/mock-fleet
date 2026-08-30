@@ -466,7 +466,7 @@ public class WireMockConfigService {
                     Map.of("version", requestedVersion == null ? "" : requestedVersion));
         }
         return new OptionCatalogView(catalog.version().toString(), catalog.rangeStatus(), catalog.options().stream()
-                .filter(option -> !WireMockOptionCatalog.isSensitive(option.name()))
+                .filter(WireMockOptionCatalog.OptionDefinition::available)
                 .map(PublicOptionDefinition::from)
                 .toList());
     }

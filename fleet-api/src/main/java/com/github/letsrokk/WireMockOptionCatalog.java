@@ -166,7 +166,7 @@ public final class WireMockOptionCatalog {
                 throw invalid("Unknown WireMock option: " + name, name);
             }
             if (!definition.available()) {
-                throw invalid("WireMock option requires secure Secret storage and is unavailable: " + name, name);
+                throw invalid(unavailableMessage(definition), name);
             }
             if (!seen.add(name)) {
                 throw invalid("Duplicate WireMock option: " + name, name);
@@ -208,6 +208,16 @@ public final class WireMockOptionCatalog {
             normalized.add(optionValue);
         }
         return List.copyOf(normalized);
+    }
+
+    private static String unavailableMessage(OptionDefinition definition) {
+        if ("SECRET_STORAGE_REQUIRED".equals(definition.unavailableReason())) {
+            return "WireMock option requires secure Secret storage and is unavailable: " + definition.name();
+        }
+        if ("PROCESS_EXIT".equals(definition.unavailableReason())) {
+            return "WireMock option exits before mock startup and is unavailable: " + definition.name();
+        }
+        return "WireMock option is unavailable: " + definition.name();
     }
 
     static List<String> tokenize(List<String> values) {

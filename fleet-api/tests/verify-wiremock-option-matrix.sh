@@ -10,7 +10,8 @@ jq -e '
   .minimumSupportedVersion == .stableReleases[0].version and
   .maximumResearchedVersion == .stableReleases[-1].version and
   ([.options[].name] | length == (unique | length)) and
-  ([.options[] | select(.unavailableReason == "SECRET_STORAGE_REQUIRED")] | length == 5)
+  ([.options[] | select(.unavailableReason == "SECRET_STORAGE_REQUIRED")] | length == 5) and
+  ([.options[] | select(.unavailableReason == "PROCESS_EXIT")] | length == 2)
 ' "${matrix}" >/dev/null
 
 if [[ ${mode} == --metadata-only ]]; then
