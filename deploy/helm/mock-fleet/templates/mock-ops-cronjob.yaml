@@ -1,15 +1,15 @@
-{{- if .Values.wiremock.versionUpdater.enabled }}
+{{- if .Values.mockOps.enabled }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ include "mock-fleet.wiremockUpdaterFullname" . }}
+  name: {{ include "mock-fleet.mockOpsFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: wiremock-updater
+    app.kubernetes.io/component: mock-ops
 spec:
-  schedule: {{ .Values.wiremock.versionUpdater.schedule | quote }}
-  timeZone: {{ .Values.wiremock.versionUpdater.timeZone | quote }}
+  schedule: {{ .Values.mockOps.schedule | quote }}
+  timeZone: {{ .Values.mockOps.timeZone | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 1
@@ -19,9 +19,9 @@ spec:
       template:
         metadata:
           labels:
-            {{- include "mock-fleet.wiremockUpdaterSelectorLabels" . | nindent 12 }}
+            {{- include "mock-fleet.mockOpsSelectorLabels" . | nindent 12 }}
         spec:
-          serviceAccountName: {{ required "wiremock.versionUpdater.serviceAccount.name is required when serviceAccount.create=false" (include "mock-fleet.wiremockUpdaterServiceAccountName" .) }}
+          serviceAccountName: {{ required "mockOps.serviceAccount.name is required when serviceAccount.create=false" (include "mock-fleet.mockOpsServiceAccountName" .) }}
           automountServiceAccountToken: true
           restartPolicy: Never
           securityContext:
@@ -29,9 +29,9 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           containers:
-            - name: wiremock-updater
-              image: {{ printf "%s:%s" .Values.wiremock.versionUpdater.image.repository (.Values.wiremock.versionUpdater.image.tag | default .Chart.AppVersion) }}
-              imagePullPolicy: {{ .Values.wiremock.versionUpdater.image.pullPolicy }}
+            - name: mock-ops
+              image: {{ printf "%s:%s" .Values.mockOps.image.repository (.Values.mockOps.image.tag | default .Chart.AppVersion) }}
+              imagePullPolicy: {{ .Values.mockOps.image.pullPolicy }}
               securityContext:
                 runAsNonRoot: true
                 runAsUser: 1001
@@ -56,16 +56,16 @@ spec:
                 - name: MOCK_FLEET_WIREMOCK_CONFIG_KEY
                   value: wiremock-options.yaml
                 - name: MOCK_FLEET_WIREMOCK_REGISTRY_URL
-                  value: {{ .Values.wiremock.versionUpdater.registry.url | quote }}
+                  value: {{ .Values.mockOps.registry.url | quote }}
                 - name: MOCK_FLEET_WIREMOCK_REPOSITORY
-                  value: {{ .Values.wiremock.versionUpdater.registry.repository | quote }}
+                  value: {{ .Values.mockOps.registry.repository | quote }}
                 - name: MOCK_FLEET_WIREMOCK_IMAGE_REPOSITORY
-                  value: {{ .Values.wiremock.versionUpdater.registry.imageRepository | quote }}
+                  value: {{ .Values.mockOps.registry.imageRepository | quote }}
                 - name: MOCK_FLEET_WIREMOCK_DEFAULT_VERSION_CONSTRAINT
-                  value: {{ .Values.wiremock.versionUpdater.defaultVersionConstraint | quote }}
+                  value: {{ .Values.mockOps.defaultVersionConstraint | quote }}
                 - name: MOCK_FLEET_WIREMOCK_MINOR_LINES
-                  value: {{ .Values.wiremock.versionUpdater.minorLines | quote }}
-                {{- with .Values.wiremock.versionUpdater.registry.credentialsSecretName }}
+                  value: {{ .Values.mockOps.minorLines | quote }}
+                {{- with .Values.mockOps.registry.credentialsSecretName }}
                 - name: MOCK_FLEET_WIREMOCK_REGISTRY_USERNAME
                   valueFrom:
                     secretKeyRef:
@@ -78,7 +78,7 @@ spec:
                       key: password
                 {{- end }}
               resources:
-                {{- toYaml .Values.wiremock.versionUpdater.resources | nindent 16 }}
+                {{- toYaml .Values.mockOps.resources | nindent 16 }}
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp

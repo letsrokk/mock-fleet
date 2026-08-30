@@ -1,18 +1,18 @@
-{{- if and .Values.wiremock.versionUpdater.enabled .Values.rbac.create }}
+{{- if and .Values.mockOps.enabled .Values.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "mock-fleet.wiremockUpdaterRoleBindingName" . }}
+  name: {{ include "mock-fleet.mockOpsRoleBindingName" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: wiremock-updater
+    app.kubernetes.io/component: mock-ops
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "mock-fleet.wiremockUpdaterRoleName" . }}
+  name: {{ include "mock-fleet.mockOpsRoleName" . }}
 subjects:
   - kind: ServiceAccount
-    name: {{ include "mock-fleet.wiremockUpdaterServiceAccountName" . }}
+    name: {{ include "mock-fleet.mockOpsServiceAccountName" . }}
     namespace: {{ include "mock-fleet.namespace" . }}
 {{- end }}
