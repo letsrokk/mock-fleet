@@ -214,6 +214,10 @@ class McpRegistrationTest {
         assertEquals(Set.of("mockId", "podName", "status", "message", "wireMockVersion", "runtimeVersion"),
                 Set.copyOf(textValues(mockRow.path("required"))));
         assertFalse(mockRow.path("additionalProperties").asBoolean(true));
+        assertVersionSchema(mockRow.path("properties").path("wireMockVersion"), false,
+                "list_mocks.wireMockVersion");
+        assertVersionSchema(mockRow.path("properties").path("runtimeVersion"), true,
+                "list_mocks.runtimeVersion");
 
         for (String toolName : List.of(
                 "list_mock_configs", "get_mock_config", "update_mock_config", "delete_mock_config")) {
@@ -262,11 +266,38 @@ class McpRegistrationTest {
         JsonNode optionCatalog = tool(tools, "list_option_definitions").path("outputSchema").path("oneOf").get(0);
         assertEquals(Set.of("wireMockVersion", "catalogStatus", "options"),
                 Set.copyOf(textValues(optionCatalog.path("required"))));
+        assertEquals("^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+                optionCatalog.path("properties").path("wireMockVersion").path("pattern").asText());
+        assertEquals("string", optionCatalog.path("properties").path("wireMockVersion").path("type").asText());
         assertFalse(optionCatalog.path("properties").path("options").path("items")
                 .path("additionalProperties").asBoolean(true));
         assertEquals(List.of("flag", "input", "number", "select", "optional_number", "optional_input"),
                 textValues(optionCatalog.path("properties").path("options").path("items")
                         .path("properties").path("kind").path("enum")));
+
+        for (String toolName : List.of("get_mock_config", "update_mock_config")) {
+            JsonNode mock = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("mock");
+            assertVersionSchema(mock.path("properties").path("baseline").path("properties").path("version"), true,
+                    toolName + ".baseline.version");
+            assertVersionSchema(mock.path("properties").path("user").path("properties").path("version"), true,
+                    toolName + ".user.version");
+            assertVersionSchema(mock.path("properties").path("effective").path("properties").path("version"), false,
+                    toolName + ".effective.version");
+            assertVersionSchema(mock.path("properties").path("wireMockVersion"), false,
+                    toolName + ".wireMockVersion");
+            assertVersionSchema(mock.path("properties").path("runtimeVersion"), true,
+                    toolName + ".runtimeVersion");
+        }
+    }
+
+    private void assertVersionSchema(JsonNode schema, boolean nullable, String field) {
+        assertEquals("^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", schema.path("pattern").asText(), field);
+        if (nullable) {
+            assertEquals(List.of("string", "null"), textValues(schema.path("type")), field);
+        } else {
+            assertEquals("string", schema.path("type").asText(), field);
+        }
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.github.letsrokk;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -9,6 +10,7 @@ import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
+import io.fabric8.kubernetes.client.dsl.Resource;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -56,6 +58,7 @@ public class WireMockConfigService {
     WireMockResourcePolicy resourcePolicy;
 
     private volatile Watch userConfigWatch;
+    private volatile String userConfigResourceVersion;
     private final ScheduledExecutorService userConfigWatchExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "wiremock-user-config-watch");
         thread.setDaemon(true);
@@ -68,6 +71,7 @@ public class WireMockConfigService {
     void loadUserConfig() {
         ConfigMap configMap = userConfigMap();
         wireMockOptions.setUserConfig(loadUserConfig(configMap));
+        userConfigResourceVersion = resourceVersion(configMap);
         startUserConfigWatch();
     }
 
@@ -178,15 +182,33 @@ public class WireMockConfigService {
             return;
         }
 
+        Resource<ConfigMap> resource = kubernetesClient.configMaps()
+                .inNamespace(currentNamespace())
+                .withName(name.get());
+        resyncUserConfig(resource);
         try {
-            userConfigWatch = kubernetesClient.configMaps()
-                    .inNamespace(currentNamespace())
-                    .withName(name.get())
-                    .watch(userConfigWatcher());
+            userConfigWatch = resource.watch(new ListOptionsBuilder()
+                    .withResourceVersion(userConfigResourceVersion)
+                    .build(), userConfigWatcher());
             userConfigWatchRestartAttempts = 0;
         } catch (RuntimeException error) {
             LOG.warnf(error, "Failed to start WireMock user ConfigMap watch.");
             scheduleUserConfigWatchRestart();
+        }
+    }
+
+    private void resyncUserConfig(Resource<ConfigMap> resource) {
+        try {
+            ConfigMap current = resource.get();
+            if (current == null) {
+                LOG.warn("WireMock user ConfigMap is missing during watch resync; retaining the last valid snapshot.");
+                return;
+            }
+            WireMockConfigDocument document = loadUserConfig(current);
+            wireMockOptions.setUserConfig(document);
+            userConfigResourceVersion = resourceVersion(current);
+        } catch (RuntimeException error) {
+            LOG.warn("WireMock user ConfigMap resync failed; retaining the last valid snapshot.", error);
         }
     }
 
@@ -211,12 +233,21 @@ public class WireMockConfigService {
     }
 
     void handleUserConfigWatchEvent(Watcher.Action action, ConfigMap resource) {
-        if (action == Watcher.Action.ERROR) {
+        if (action == Watcher.Action.ERROR || resource == null) {
             return;
         }
-        wireMockOptions.setUserConfig(action == Watcher.Action.DELETED
-                ? WireMockConfigDocument.empty()
-                : loadUserConfig(resource));
+        try {
+            wireMockOptions.setUserConfig(action == Watcher.Action.DELETED
+                    ? WireMockConfigDocument.empty()
+                    : loadUserConfig(resource));
+            String observedResourceVersion = resourceVersion(resource);
+            if (observedResourceVersion != null) {
+                userConfigResourceVersion = observedResourceVersion;
+            }
+        } catch (RuntimeException error) {
+            LOG.warnf(error, "Ignoring invalid WireMock user ConfigMap resourceVersion=%s.",
+                    resourceVersion(resource));
+        }
     }
 
     synchronized void scheduleUserConfigWatchRestart() {

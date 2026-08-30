@@ -26,7 +26,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
-                    "wireMockVersion", string(),
+                    "wireMockVersion", versionString(),
                     "catalogStatus", string().put("enum", new JsonArray().add("supported").add("newer_unresearched")),
                     "options", array(optionDefinition())),
                     "wireMockVersion", "catalogStatus", "options");
@@ -141,21 +141,21 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
         return strict(properties(
                 "mockId", string(),
                 "lifecycle", lifecycleStatus(),
-                "baseline", configData(false),
-                "user", configData(true),
-                "effective", configData(false),
+                "baseline", configData(true, false),
+                "user", configData(true, true),
+                "effective", configData(false, false),
                 "wireMockVersion", versionString(),
                 "runtimeVersion", nullableVersionString()),
                 "mockId", "lifecycle", "baseline", "user", "effective", "wireMockVersion", "runtimeVersion");
     }
 
-    private JsonObject configData(boolean nullableResources) {
+    private JsonObject configData(boolean nullableVersion, boolean nullableResources) {
         JsonObject resourceSchema = resources();
         if (nullableResources) {
             resourceSchema.put("type", new JsonArray().add("object").add("null"));
         }
         return strict(properties(
-                "version", nullableVersionString(),
+                "version", nullableVersion ? nullableVersionString() : versionString(),
                 "options", array(string()),
                 "resources", resourceSchema),
                 "version", "options", "resources");

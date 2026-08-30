@@ -253,6 +253,25 @@ assert_jq() {
   fi
 }
 
+assert_option_catalog_contract() {
+  local result=$1
+  local expected_version=$2
+  if ! jq -e --arg version "${expected_version}" '
+    (. | keys | sort) == ["catalogStatus", "options", "wireMockVersion"] and
+    .wireMockVersion == $version and
+    (.catalogStatus == "supported" or .catalogStatus == "newer_unresearched") and
+    (.options | type == "array" and length > 0) and
+    all(.options[];
+      (. | keys | sort) == ["description", "group", "kind", "label", "maximum", "minimum", "name", "values"] and
+      (.name | type == "string") and
+      (.values | type == "array")) and
+    ([.options[].name] | index("--verbose") != null)
+  ' >/dev/null <<<"${result}"; then
+    printf '%s\n' "${result}" | jq . >&2 || true
+    fail "MCP option definitions do not match the versioned catalog response contract."
+  fi
+}
+
 poll_until() {
   local description=$1
   local deadline=$((SECONDS + timeout_seconds))
@@ -896,8 +915,7 @@ run_contracts() {
   assert_jq "${result}" '.page | has("limit") and has("returned") and has("hasMore") and has("nextCursor")' \
     "MCP collection metadata is incomplete"
   result=$(mcp_success list_option_definitions '{}')
-  assert_jq "${result}" '.wireMock.version == "3.13.2" and .wireMock.minimumSupportedVersion == "3.0.0" and .wireMock.maximumResearchedVersion == "3.13.2" and (.optionDefinitions | type == "array") and ([.optionDefinitions[].compatibility] | index("supported") != null and index("unsupported") != null and index("known_broken") != null) and ([.optionDefinitions[] | select(.available == false and .unavailableReason == "SECRET_STORAGE_REQUIRED")] | length == 5)' \
-    "MCP option definitions omitted pinned-version, compatibility, or security metadata"
+  assert_option_catalog_contract "${result}" "${wiremock_version}"
 
   api_request GET /__fleet/api/config
   rv=$(jq -r '.resourceVersion' <<<"${api_body}")
@@ -1439,6 +1457,13 @@ self_test() {
     fail "MCP notification helper accepted a non-202 response."
   fi
   log "MCP notification response contract passed."
+  local option_catalog='{"wireMockVersion":"3.13.2","catalogStatus":"supported","options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"General","description":"Verbose logging","values":[],"minimum":null,"maximum":null}]}'
+  assert_option_catalog_contract "${option_catalog}" "3.13.2"
+  local stale_option_catalog='{"wireMock":{"version":"3.13.2","minimumSupportedVersion":"3.0.0","maximumResearchedVersion":"3.13.2"},"optionDefinitions":[]}'
+  if ( assert_option_catalog_contract "${stale_option_catalog}" "3.13.2" >/dev/null 2>&1 ); then
+    fail "MCP option catalog assertion accepted the retired response shape."
+  fi
+  log "MCP option catalog response contract passed."
   local ready_replacement='{"items":[
     {"metadata":{"name":"api-new-1"},"status":{"conditions":[{"type":"Ready","status":"True"}]}},
     {"metadata":{"name":"api-new-2"},"status":{"conditions":[{"type":"Ready","status":"True"}]}}
