@@ -61,7 +61,7 @@
     { "name": "--extensions" },
     { "name": "--filename-template" },
     { "name": "--global-response-templating" },
-    { "name": "--help" },
+    { "name": "--help", "unavailableReason": "PROCESS_EXIT" },
     { "name": "--https-keystore" },
     { "name": "--https-port" },
     { "name": "--https-require-client-cert" },
@@ -103,7 +103,7 @@
     { "name": "--truststore-type" },
     { "name": "--use-chunked-encoding" },
     { "name": "--verbose" },
-    { "name": "--version", "minimumVersion": "3.4.0" },
+    { "name": "--version", "minimumVersion": "3.4.0", "unavailableReason": "PROCESS_EXIT" },
     { "name": "--webhook-threadpool-size", "minimumVersion": "3.13.0" }
   ]
 }

@@ -100,6 +100,18 @@ class WireMockOptionMatrixTest {
     }
 
     @Test
+    void publishesProcessExitOptionsAsUnavailable() {
+        Map<String, WireMockOptionCatalog.OptionDefinition> options = matrix.resolve(new WireMockVersion(3, 13, 2))
+                .options().stream()
+                .collect(Collectors.toMap(WireMockOptionCatalog.OptionDefinition::name, Function.identity()));
+
+        for (String name : new String[]{"--help", "--version"}) {
+            assertFalse(options.get(name).available(), name);
+            assertEquals("PROCESS_EXIT", options.get(name).unavailableReason(), name);
+        }
+    }
+
+    @Test
     void marksTimeoutUnavailableBecauseWireMockCannotAcceptItsRequiredValue() {
         WireMockOptionCatalog.OptionDefinition timeout = matrix.resolve(new WireMockVersion(3, 13, 2))
                 .options().stream()

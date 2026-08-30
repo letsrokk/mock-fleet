@@ -149,7 +149,7 @@ class WireMockConfigServiceTest {
     }
 
     @Test
-    void optionCatalogUsesTheConfiguredVersionForBlankRequestsAndExcludesCredentials() {
+    void optionCatalogUsesTheConfiguredVersionForBlankRequestsAndExcludesUnavailableOptions() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         WireMockConfigService service = service(kubernetesClient, config());
 
@@ -164,7 +164,9 @@ class WireMockConfigServiceTest {
                 "--ca-keystore-password",
                 "--keystore-password",
                 "--key-manager-password",
-                "--truststore-password").contains(option.name())));
+                "--truststore-password",
+                "--help",
+                "--version").contains(option.name())));
         assertTrue(catalog.options().stream().allMatch(option -> option.name() != null
                 && option.label() != null
                 && option.kind() != null

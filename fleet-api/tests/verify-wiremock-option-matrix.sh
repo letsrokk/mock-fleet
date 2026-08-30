@@ -11,6 +11,7 @@ jq -e '
   .maximumResearchedVersion == .stableReleases[-1].version and
   ([.options[].name] | length == (unique | length)) and
   ([.options[] | select(.unavailableReason == "SECRET_STORAGE_REQUIRED")] | length == 5) and
+  ([.options[] | select(.unavailableReason == "PROCESS_EXIT")] | length == 2) and
   ([.options[] | select(.unavailableReason == "INCONSISTENT_VALUE_HANDLING")] | length == 1)
 ' "${matrix}" >/dev/null
 

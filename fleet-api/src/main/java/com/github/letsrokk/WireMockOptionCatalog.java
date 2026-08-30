@@ -218,6 +218,9 @@ public final class WireMockOptionCatalog {
         if ("SECRET_STORAGE_REQUIRED".equals(definition.unavailableReason())) {
             return "WireMock option requires secure Secret storage and is unavailable: " + definition.name();
         }
+        if ("PROCESS_EXIT".equals(definition.unavailableReason())) {
+            return "WireMock option exits before mock startup and is unavailable: " + definition.name();
+        }
         if ("INCONSISTENT_VALUE_HANDLING".equals(definition.unavailableReason())) {
             return "WireMock option is unavailable because its CLI definition cannot accept the value it requires: "
                     + definition.name();
