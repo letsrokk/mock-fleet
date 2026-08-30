@@ -15,14 +15,14 @@ shell-quote = '$(subst ','"'"',$(1))'
 
 help:
 	@echo "Local mock-fleet lifecycle targets:"
-	@echo "  make local-deploy [NAMESPACE=name] [LOGS=true] [DEV=true|api|proxy] [PORT_FORWARD=true] [REBUILD=dash|api|proxy|mcp|all]"
+	@echo "  make local-deploy [NAMESPACE=name] [LOGS=true] [DEV=true|api|proxy] [PORT_FORWARD=true] [REBUILD=dash|api|proxy|mcp|mock-ops|all]"
 	@echo "  make local-destroy [NAMESPACE=name] [RELEASE=name] [DELETE_NAMESPACE=true]"
 
 local-deploy:
 	$(if $(call is-one-of,$(LOGS),true false),,$(error LOGS must be true or false))
 	$(if $(call is-one-of,$(PORT_FORWARD),true false),,$(error PORT_FORWARD must be true or false))
 	$(if $(call is-one-of,$(DEV),false true api proxy),,$(error DEV must be false, true, api, or proxy))
-	$(if $(call is-one-of,$(REBUILD),false dash api proxy mcp all),,$(error REBUILD must be false, dash, api, proxy, mcp, or all))
+	$(if $(call is-one-of,$(REBUILD),false dash api proxy mcp mock-ops all),,$(error REBUILD must be false, dash, api, proxy, mcp, mock-ops, or all))
 	@bin/local/deploy.sh --namespace $(call shell-quote,$(NAMESPACE))$(if $(filter true,$(LOGS)), --logs)$(if $(filter true,$(DEV)), --remote-dev api,$(if $(filter api proxy,$(DEV)), --remote-dev $(DEV)))$(if $(filter true,$(PORT_FORWARD)), --port-forward)$(if $(filter-out false,$(REBUILD)), --rebuild $(call shell-quote,$(REBUILD)))
 
 local-destroy:

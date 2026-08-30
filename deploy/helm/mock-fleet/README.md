@@ -519,7 +519,7 @@ The chart creates `<fullname>-wiremock-user-config` for a new release and marks 
 
 ## Local Minikube Values
 
-`values.minikube.yaml` enables a Traefik ingress and MCP at `mock-fleet.minikube.localhost`, attaches the ingress to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`. `make local-deploy` applies restricted PSA labels but does not inspect or alter Minikube's CNI; run the denial probe above before relying on NetworkPolicy.
+`values.minikube.yaml` enables a Traefik ingress, MCP, and Fleet Mock Ops at `mock-fleet.minikube.localhost`, attaches the ingress to the `websecure` entrypoint with router TLS enabled, sets `fleet.proxy.routing.mode=PATH`, and configures local persistent S3 storage values. Run `minikube tunnel` while using the deployment and trust the Minikube local CA in clients. The dashboard is available at `https://mock-fleet.minikube.localhost/__fleet/`; MCP uses `https://mock-fleet.minikube.localhost/__fleet/mcp`; the default WireMock mock is available at `https://mock-fleet.minikube.localhost/wiremock`. `make local-deploy` applies restricted PSA labels but does not inspect or alter Minikube's CNI; run the denial probe above before relying on NetworkPolicy.
 
 ```bash
 helm upgrade --install mock-fleet deploy/helm/mock-fleet \
@@ -528,4 +528,4 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   -f deploy/helm/mock-fleet/values.minikube.yaml
 ```
 
-The repository Makefile builds local images directly in the Minikube Docker daemon. Force a specific image rebuild after pulling clean source changes with `make local-deploy REBUILD=mcp`, replacing `mcp` with `dash`, `api`, or `proxy` as needed. Use `REBUILD=all` to rebuild every local image.
+The repository Makefile builds local images directly in the Minikube Docker daemon. Force a specific image rebuild after pulling clean source changes with `make local-deploy REBUILD=mcp`, replacing `mcp` with `dash`, `api`, `proxy`, or `mock-ops` as needed. Use `REBUILD=all` to rebuild every local image.

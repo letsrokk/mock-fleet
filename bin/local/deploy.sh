@@ -12,6 +12,7 @@ LOCAL_PROXY_IMAGE="ghcr.io/letsrokk/mock-fleet/proxy:latest"
 LOCAL_API_IMAGE="ghcr.io/letsrokk/mock-fleet/api:latest"
 LOCAL_MCP_IMAGE="ghcr.io/letsrokk/mock-fleet/mcp:latest"
 LOCAL_DASH_IMAGE="ghcr.io/letsrokk/mock-fleet/dash:latest"
+LOCAL_MOCK_OPS_IMAGE="ghcr.io/letsrokk/mock-fleet/mock-ops:latest"
 REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
@@ -20,7 +21,7 @@ CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
@@ -33,7 +34,7 @@ Options:
   --remote-dev <module>
                       Enable Quarkus remote dev for one module. Allowed: proxy, api.
   --rebuild <target>  Force one module image, or all module images, to rebuild.
-                      Allowed: dash, api, proxy, mcp, all.
+                      Allowed: dash, api, proxy, mcp, mock-ops, all.
   --help              Show this help.
 EOF
 }
@@ -143,6 +144,11 @@ mark_changed_modules() {
                     changed_modules+=(dash)
                 fi
                 ;;
+            fleet-mock-ops/*)
+                if ! has_module mock-ops ${changed_modules[@]+"${changed_modules[@]}"}; then
+                    changed_modules+=(mock-ops)
+                fi
+                ;;
         esac
     done < <(
         {
@@ -159,7 +165,11 @@ mark_changed_modules() {
 build_maven_module() {
     local module="$1"
 
-    echo "Packaging ${module} application and building image via Maven..."
+    if [[ "${module}" == "mock-ops" ]]; then
+        echo "Packaging ${module} application via Maven..."
+    else
+        echo "Packaging ${module} application and building image via Maven..."
+    fi
     if [[ "${module}" == "mcp" ]]; then
         "${REPO_ROOT}/fleet-api/mvnw" -f "${REPO_ROOT}/fleet-mcp/pom.xml" "${MAVEN_ARGS[@]}"
     else
@@ -252,8 +262,9 @@ if [[ -n "${REMOTE_DEV_MODULE}" && "${REMOTE_DEV_MODULE}" != "proxy" && "${REMOT
 fi
 
 if [[ "${REBUILD_TARGET}" != "false" && "${REBUILD_TARGET}" != "dash" && "${REBUILD_TARGET}" != "api" \
-    && "${REBUILD_TARGET}" != "proxy" && "${REBUILD_TARGET}" != "mcp" && "${REBUILD_TARGET}" != "all" ]]; then
-    echo "Invalid rebuild target: ${REBUILD_TARGET}. Expected false, dash, api, proxy, mcp, or all." >&2
+    && "${REBUILD_TARGET}" != "proxy" && "${REBUILD_TARGET}" != "mcp" && "${REBUILD_TARGET}" != "mock-ops" \
+    && "${REBUILD_TARGET}" != "all" ]]; then
+    echo "Invalid rebuild target: ${REBUILD_TARGET}. Expected false, dash, api, proxy, mcp, mock-ops, or all." >&2
     usage >&2
     exit 1
 fi
@@ -299,7 +310,7 @@ require_minikube_running
 
 CHANGED_MODULES=()
 if ! release_exists; then
-    CHANGED_MODULES=(proxy api mcp dash)
+    CHANGED_MODULES=(proxy api mcp dash mock-ops)
     echo "Helm release ${RELEASE_NAME} is not installed in namespace ${NAMESPACE}; building all module images."
 else
     while IFS= read -r module; do
@@ -310,7 +321,7 @@ else
 fi
 
 if [[ "${REBUILD_TARGET}" == "all" ]]; then
-    CHANGED_MODULES=(proxy api mcp dash)
+    CHANGED_MODULES=(proxy api mcp dash mock-ops)
 elif [[ "${REBUILD_TARGET}" != "false" ]] && ! has_module "${REBUILD_TARGET}" ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     CHANGED_MODULES+=("${REBUILD_TARGET}")
 fi
@@ -351,6 +362,14 @@ if [[ ${#CHANGED_MODULES[@]} -gt 0 ]]; then
         docker build -t "${LOCAL_DASH_IMAGE}" "${REPO_ROOT}/fleet-dash"
     fi
 
+    if has_module mock-ops "${CHANGED_MODULES[@]}"; then
+        build_maven_module mock-ops
+        echo "Building Mock Ops image..."
+        docker build -t "${LOCAL_MOCK_OPS_IMAGE}" \
+            -f "${REPO_ROOT}/fleet-mock-ops/src/main/docker/Dockerfile.jvm" \
+            "${REPO_ROOT}/fleet-mock-ops"
+    fi
+
     echo "Resetting Docker commands back to the host daemon..."
     reset_docker_daemon
 else
@@ -374,6 +393,8 @@ HELM_ARGS=(
     --set "fleet.mcp.image.tag=latest"
     --set "fleet.dash.image.repository=ghcr.io/letsrokk/mock-fleet/dash"
     --set "fleet.dash.image.tag=latest"
+    --set "mockOps.image.repository=ghcr.io/letsrokk/mock-fleet/mock-ops"
+    --set "mockOps.image.tag=latest"
 )
 
 if [[ "${REMOTE_DEV_MODULE}" == "proxy" ]]; then
@@ -395,7 +416,7 @@ else
     profile_message="default Quarkus profile"
 fi
 
-echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, MCP image=${LOCAL_MCP_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
+echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, MCP image=${LOCAL_MCP_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, Mock Ops image=${LOCAL_MOCK_OPS_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
 if has_module proxy ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
