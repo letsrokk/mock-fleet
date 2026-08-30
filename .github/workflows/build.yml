@@ -6,6 +6,11 @@ on:
       - "**"
   workflow_call:
     inputs:
+      build_all:
+        description: Build every module and upload every package for release publishing.
+        required: false
+        default: false
+        type: boolean
       maven_version:
         description: Maven project version to use for packaged API/proxy/MCP/Mock Ops artifacts.
         required: false
@@ -25,8 +30,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changed modules
+    runs-on: ubuntu-latest
+
+    outputs:
+      proxy: ${{ inputs.build_all || steps.filter.outputs.proxy == 'true' }}
+      api: ${{ inputs.build_all || steps.filter.outputs.api == 'true' }}
+      mcp: ${{ inputs.build_all || steps.filter.outputs.mcp == 'true' }}
+      mock_ops: ${{ inputs.build_all || steps.filter.outputs.mock_ops == 'true' }}
+      dash: ${{ inputs.build_all || steps.filter.outputs.dash == 'true' }}
+
+    steps:
+      - name: Checkout
+        if: ${{ !inputs.build_all }}
+        uses: actions/checkout@v4
+
+      - name: Detect changed modules
+        id: filter
+        if: ${{ !inputs.build_all }}
+        uses: dorny/paths-filter@v4
+        with:
+          base: ${{ github.event.created && github.event.repository.default_branch || github.ref }}
+          filters: |
+            proxy:
+              - 'fleet-proxy/**'
+              - '.github/workflows/build.yml'
+            api:
+              - 'fleet-api/**'
+              - '.github/workflows/build.yml'
+            mcp:
+              - 'fleet-mcp/**'
+              - 'fleet-api/mvnw'
+              - 'fleet-api/.mvn/**'
+              - 'fleet-api/tests/verify-wiremock-option-matrix.sh'
+              - 'fleet-api/src/main/resources/wiremock-option-compatibility.json'
+              - '.github/workflows/build.yml'
+            mock_ops:
+              - 'fleet-mock-ops/**'
+              - '.github/workflows/build.yml'
+            dash:
+              - 'fleet-dash/**'
+              - '.github/workflows/build.yml'
+
   fleet-proxy:
     name: Build fleet-proxy
+    needs: changes
+    if: needs.changes.outputs.proxy == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -58,6 +108,8 @@ jobs:
 
   fleet-api:
     name: Build fleet-api
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -89,6 +141,8 @@ jobs:
 
   fleet-mcp:
     name: Build fleet-mcp
+    needs: changes
+    if: needs.changes.outputs.mcp == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -121,6 +175,8 @@ jobs:
 
   fleet-mock-ops:
     name: Build fleet-mock-ops
+    needs: changes
+    if: needs.changes.outputs.mock_ops == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -152,6 +208,8 @@ jobs:
 
   fleet-dash:
     name: Build fleet-dash
+    needs: changes
+    if: needs.changes.outputs.dash == 'true'
     runs-on: ubuntu-latest
 
     steps:
