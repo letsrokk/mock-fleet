@@ -62,6 +62,9 @@ export function draftFromConfig(config: ConfigData, definitions: OptionDefinitio
   const optionalOptions = new Set(definitions
     .filter((option) => option.kind.startsWith("optional_"))
     .map((option) => option.name));
+  const booleanSelectOptions = new Set(definitions
+    .filter((option) => option.kind === "select" && option.values.join(",") === "true,false")
+    .map((option) => option.name));
   const rawArgs: string[] = [];
   const optionTokens = normalizeOptions(config.options);
 
@@ -79,6 +82,8 @@ export function draftFromConfig(config: ConfigData, definitions: OptionDefinitio
         if (nextValue && !nextValue.startsWith("--")) {
           draft.values[token] = nextValue;
           index += 1;
+        } else if (booleanSelectOptions.has(name)) {
+          draft.values[name] = "true";
         } else if (optionalOptions.has(name)) {
           draft.flags[name] = true;
         } else {

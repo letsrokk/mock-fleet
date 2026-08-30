@@ -156,6 +156,36 @@ describe("config option helpers", () => {
     expect(draft.rawArgs).toBe("");
   });
 
+  it("maps retained valueless boolean options to true and saves canonical pairs", () => {
+    const booleanDefinitions: OptionDefinition[] = [
+      "--proxy-pass-through",
+      "--disable-connection-reuse",
+      "--async-response-enabled"
+    ].map((name) => ({
+      ...definitions[2],
+      name,
+      values: ["true", "false"]
+    }));
+    const config: ConfigData = {
+      options: booleanDefinitions.map(({ name }) => name),
+      resources: emptyResources
+    };
+
+    const draft = draftFromConfig(config, booleanDefinitions);
+
+    expect(draft.values).toEqual({
+      "--proxy-pass-through": "true",
+      "--disable-connection-reuse": "true",
+      "--async-response-enabled": "true"
+    });
+    expect(draft.rawArgs).toBe("");
+    expect(optionsFromDraft(draft, booleanDefinitions, config)).toEqual([
+      "--proxy-pass-through", "true",
+      "--disable-connection-reuse", "true",
+      "--async-response-enabled", "true"
+    ]);
+  });
+
   it("serializes only a changed value option when overriding combined baseline args", () => {
     const baseline: ConfigData = {
       options: ["--verbose --max-request-journal-entries 10"],

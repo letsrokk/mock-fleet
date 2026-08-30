@@ -186,6 +186,10 @@ public final class WireMockOptionCatalog {
             if (optionValue == null && optional) {
                 continue;
             }
+            if (optionValue == null && "select".equals(definition.kind())
+                    && definition.values().equals(List.of("true", "false"))) {
+                optionValue = "true";
+            }
             if (optionValue == null || optionValue.isBlank()) {
                 throw invalid("WireMock option requires a value: " + name, name);
             }

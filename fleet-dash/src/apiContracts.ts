@@ -86,6 +86,7 @@ export async function errorMessage(response: Response, fallback: string) {
     const parsed = JSON.parse(text) as unknown;
     if (isApiError(parsed)) {
       const details = Object.entries(parsed.details)
+        .filter(([, value]) => !parsed.message.includes(formatDetail(value)))
         .map(([key, value]) => `${key}=${formatDetail(value)}`)
         .join(", ");
       return `${parsed.message} [${parsed.code}]${details ? ` ${details}` : ""}`;

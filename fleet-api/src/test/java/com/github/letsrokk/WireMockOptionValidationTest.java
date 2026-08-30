@@ -78,6 +78,25 @@ class WireMockOptionValidationTest {
     }
 
     @Test
+    void normalizesLegacyValuelessBooleanOptionsToTrueBeforePersistence() {
+        Fixture fixture = fixture();
+
+        fixture.service.upsertMockConfig("demo", request(List.of(
+                "--proxy-pass-through",
+                "--disable-connection-reuse",
+                "--async-response-enabled")));
+
+        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespacedConfigMaps).resource(persisted.capture());
+        assertEquals(List.of(
+                        "--proxy-pass-through", "true",
+                        "--disable-connection-reuse", "true",
+                        "--async-response-enabled", "true"),
+                WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
+                        .mockConfigs().get("demo").options());
+    }
+
+    @Test
     void rejectsPasswordOptionsInSplitAndEqualsFormsWithoutDisclosingValues() {
         List.of(
                 "--admin-api-basic-auth",

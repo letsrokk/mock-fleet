@@ -70,6 +70,20 @@ describe("Fleet API dashboard contracts", () => {
     );
   });
 
+  it("does not repeat a structured detail already present in the error message", async () => {
+    const response = new Response(JSON.stringify({
+      code: "INVALID_OPTIONS",
+      message: "WireMock option requires a value: --disable-connection-reuse",
+      retryable: false,
+      stateMayHaveChanged: false,
+      details: { option: "--disable-connection-reuse" }
+    }), { status: 400, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+      "WireMock option requires a value: --disable-connection-reuse [INVALID_OPTIONS]"
+    );
+  });
+
   it("keeps a non-JSON server message instead of replacing it with a client rule", async () => {
     const response = new Response("Mappings storage is unavailable.", { status: 503 });
 
