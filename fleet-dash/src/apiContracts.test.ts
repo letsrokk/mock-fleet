@@ -84,6 +84,21 @@ describe("Fleet API dashboard contracts", () => {
     );
   });
 
+  it("keeps distinct details with matching values and option-name prefixes", async () => {
+    const response = new Response(JSON.stringify({
+      code: "CONFIG_CONFLICT",
+      message: "Unknown option --foobar; expected version 42.",
+      retryable: true,
+      stateMayHaveChanged: false,
+      details: { option: "--foo", expectedVersion: "42", currentVersion: "42" }
+    }), { status: 409, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+      "Unknown option --foobar; expected version 42. [CONFIG_CONFLICT] "
+      + "option=--foo, expectedVersion=42, currentVersion=42"
+    );
+  });
+
   it("keeps a non-JSON server message instead of replacing it with a client rule", async () => {
     const response = new Response("Mappings storage is unavailable.", { status: 503 });
 

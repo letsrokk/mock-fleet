@@ -158,6 +158,7 @@ class WireMockConfigServiceTest {
         assertEquals("3.13.2", catalog.wireMockVersion());
         assertEquals("supported", catalog.catalogStatus());
         assertTrue(catalog.options().stream().anyMatch(option -> "--verbose".equals(option.name())));
+        assertTrue(catalog.options().stream().noneMatch(option -> "--timeout".equals(option.name())));
         assertTrue(catalog.options().stream().noneMatch(option -> Set.of(
                 "--admin-api-basic-auth",
                 "--ca-keystore-password",

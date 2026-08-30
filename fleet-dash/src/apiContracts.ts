@@ -86,7 +86,7 @@ export async function errorMessage(response: Response, fallback: string) {
     const parsed = JSON.parse(text) as unknown;
     if (isApiError(parsed)) {
       const details = Object.entries(parsed.details)
-        .filter(([, value]) => !parsed.message.includes(formatDetail(value)))
+        .filter(([key, value]) => !repeatsDetailInMessage(parsed.message, key, value))
         .map(([key, value]) => `${key}=${formatDetail(value)}`)
         .join(", ");
       return `${parsed.message} [${parsed.code}]${details ? ` ${details}` : ""}`;
@@ -95,6 +95,14 @@ export async function errorMessage(response: Response, fallback: string) {
     // A non-JSON response is still useful server feedback.
   }
   return text;
+}
+
+function repeatsDetailInMessage(message: string, key: string, value: unknown) {
+  if (key !== "option" || typeof value !== "string") {
+    return false;
+  }
+  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\w-])${escapedValue}(?=$|[^\\w-])`).test(message);
 }
 
 function isApiError(value: unknown): value is ApiError {

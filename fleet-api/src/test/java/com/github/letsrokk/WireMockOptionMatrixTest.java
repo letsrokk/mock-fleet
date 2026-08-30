@@ -100,6 +100,17 @@ class WireMockOptionMatrixTest {
     }
 
     @Test
+    void marksTimeoutUnavailableBecauseWireMockCannotAcceptItsRequiredValue() {
+        WireMockOptionCatalog.OptionDefinition timeout = matrix.resolve(new WireMockVersion(3, 13, 2))
+                .options().stream()
+                .filter(option -> "--timeout".equals(option.name()))
+                .findFirst().orElseThrow();
+
+        assertFalse(timeout.available());
+        assertEquals("INCONSISTENT_VALUE_HANDLING", timeout.unavailableReason());
+    }
+
+    @Test
     void resolvesStableReleaseChangePointsFromTaggedWireMockSource() {
         Map<String, WireMockOptionCatalog.OptionDefinition> versionThreeZero = matrix
                 .resolve(new WireMockVersion(3, 0, 0)).options().stream()
