@@ -217,9 +217,13 @@
               "properties": {
                 "url": { "type": "string", "minLength": 1, "pattern": "^https?://" },
                 "repository": { "type": "string", "minLength": 1 },
+                "imageRepository": {
+                  "type": "string",
+                  "pattern": "^$|^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]*)?/)?[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$"
+                },
                 "credentialsSecretName": { "type": "string" }
               },
-              "required": ["url", "repository", "credentialsSecretName"]
+              "required": ["url", "repository", "imageRepository", "credentialsSecretName"]
             },
             "image": { "$ref": "#/definitions/image" },
             "serviceAccount": {

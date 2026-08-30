@@ -9,9 +9,16 @@ import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 @QuarkusMain
 public final class UpdaterCommand implements QuarkusApplication {
+    private static final Pattern IMAGE_REPOSITORY = Pattern.compile(
+            "^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]*)?/)?"
+                    + "[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$");
+
     @Inject
     UpdaterConfig config;
 
@@ -23,11 +30,13 @@ public final class UpdaterCommand implements QuarkusApplication {
 
     @Override
     public int run(String... args) {
+        URI registryUri = URI.create(config.registryUrl());
         RegistryV2Client registry = new RegistryV2Client(
                 HttpClient.newHttpClient(), json, registryCredentials());
+        String imageRepository = imageRepository(registryUri, config.repository(), config.imageRepository());
         CatalogSelection.Selection selection = CatalogSelection.select(
-                config.repository(),
-                registry.tags(URI.create(config.registryUrl()), config.repository(), config.pageSize()),
+                imageRepository,
+                registry.tags(registryUri, config.repository(), config.pageSize()),
                 config.minorLines());
 
         new CatalogReconciler(kubernetes, new ObjectMapper(new YAMLFactory())).reconcile(
@@ -36,10 +45,30 @@ public final class UpdaterCommand implements QuarkusApplication {
                 config.baselineConfigMapName(),
                 config.userConfigMapName(),
                 config.configKey(),
-                config.repository(),
+                imageRepository,
                 selection,
                 config.defaultVersionConstraint());
         return 0;
+    }
+
+    static String imageRepository(URI registry, String repository, Optional<String> configured) {
+        String result = configured.filter(value -> !value.isBlank()).orElseGet(() -> {
+            if ("https".equalsIgnoreCase(registry.getScheme())
+                    && "registry-1.docker.io".equalsIgnoreCase(registry.getHost())
+                    && registry.getPort() == -1) {
+                return repository;
+            }
+            if (registry.getHost() == null || registry.getUserInfo() != null
+                    || !("http".equalsIgnoreCase(registry.getScheme())
+                    || "https".equalsIgnoreCase(registry.getScheme()))) {
+                throw new IllegalArgumentException("registry URL must be an absolute HTTP(S) origin.");
+            }
+            return registry.getRawAuthority().toLowerCase(Locale.ROOT) + "/" + repository;
+        });
+        if (!IMAGE_REPOSITORY.matcher(result).matches()) {
+            throw new IllegalArgumentException("imageRepository must be a pullable image repository without a tag.");
+        }
+        return result;
     }
 
     private RegistryV2Client.Credentials registryCredentials() {

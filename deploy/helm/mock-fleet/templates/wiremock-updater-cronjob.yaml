@@ -59,6 +59,8 @@ spec:
                   value: {{ .Values.wiremock.versionUpdater.registry.url | quote }}
                 - name: MOCK_FLEET_WIREMOCK_REPOSITORY
                   value: {{ .Values.wiremock.versionUpdater.registry.repository | quote }}
+                - name: MOCK_FLEET_WIREMOCK_IMAGE_REPOSITORY
+                  value: {{ .Values.wiremock.versionUpdater.registry.imageRepository | quote }}
                 - name: MOCK_FLEET_WIREMOCK_DEFAULT_VERSION_CONSTRAINT
                   value: {{ .Values.wiremock.versionUpdater.defaultVersionConstraint | quote }}
                 - name: MOCK_FLEET_WIREMOCK_MINOR_LINES

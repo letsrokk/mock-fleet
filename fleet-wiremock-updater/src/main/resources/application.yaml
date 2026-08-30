@@ -12,6 +12,7 @@ mock-fleet:
     config-key: ${MOCK_FLEET_WIREMOCK_CONFIG_KEY:wiremock-options.yaml}
     registry-url: ${MOCK_FLEET_WIREMOCK_REGISTRY_URL:https://registry-1.docker.io}
     repository: ${MOCK_FLEET_WIREMOCK_REPOSITORY:wiremock/wiremock}
+    image-repository: ${MOCK_FLEET_WIREMOCK_IMAGE_REPOSITORY:}
     default-version-constraint: ${MOCK_FLEET_WIREMOCK_DEFAULT_VERSION_CONSTRAINT:3.x}
     minor-lines: ${MOCK_FLEET_WIREMOCK_MINOR_LINES:5}
     page-size: ${MOCK_FLEET_WIREMOCK_PAGE_SIZE:100}

@@ -36,6 +36,7 @@ enabled_render=$(helm template unusual-release "${chart_dir}" \
   --set wiremock.versionUpdater.minorLines=2 \
   --set wiremock.versionUpdater.registry.url=http://registry.testing.svc:5000 \
   --set wiremock.versionUpdater.registry.repository=mirror/wiremock \
+  --set wiremock.versionUpdater.registry.imageRepository=registry.testing.svc:5000/mirror/wiremock \
   --set wiremock.versionUpdater.registry.credentialsSecretName=registry-credentials \
   --set wiremock.versionUpdater.image.repository=example.test/mock-fleet/updater \
   --set wiremock.versionUpdater.image.tag=test-tag \
@@ -67,6 +68,8 @@ for fragment in \
   'value: "2"' \
   'value: "http://registry.testing.svc:5000"' \
   'value: "mirror/wiremock"' \
+  'name: MOCK_FLEET_WIREMOCK_IMAGE_REPOSITORY' \
+  'value: "registry.testing.svc:5000/mirror/wiremock"' \
   'key: username' \
   'key: password'; do
   grep -Fq "${fragment}" <<<"${enabled_render}" \
@@ -120,6 +123,16 @@ for invalid_setting in \
       --set wiremock.versionUpdater.enabled=true \
       --set-string "${invalid_setting}" >/dev/null 2>&1; then
     echo "Chart accepted invalid updater value: ${invalid_setting}" >&2
+    exit 1
+  fi
+done
+
+for invalid_image_repository in https://registry.testing/wiremock wiremock:3; do
+  if helm template unusual-release "${chart_dir}" \
+      --set wiremock.versionUpdater.enabled=true \
+      --set-string wiremock.versionUpdater.registry.imageRepository="${invalid_image_repository}" \
+      >/dev/null 2>&1; then
+    echo "Chart accepted invalid image repository: ${invalid_image_repository}" >&2
     exit 1
   fi
 done

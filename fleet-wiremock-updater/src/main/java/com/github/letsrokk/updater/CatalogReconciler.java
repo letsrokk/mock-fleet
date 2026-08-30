@@ -13,6 +13,7 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 final class CatalogReconciler {
@@ -42,9 +43,12 @@ final class CatalogReconciler {
         ConfigMap baseline = requireConfigMap(configMaps, baselineName);
         ConfigMap user = requireConfigMap(configMaps, userName);
 
+        Map<String, String> effectiveVersions = configuredVersions(baseline, configKey);
+        effectiveVersions.putAll(configuredVersions(user, configKey));
         Set<String> referencedVersions = new TreeSet<>();
-        referencedVersions.addAll(referencedVersions(baseline, configKey));
-        referencedVersions.addAll(referencedVersions(user, configKey));
+        effectiveVersions.values().stream()
+                .filter(version -> version != null)
+                .forEach(referencedVersions::add);
 
         Map<String, String> currentData = requireData(catalog, catalogName);
         String currentDefault = validateCatalog(currentData);
@@ -116,15 +120,25 @@ final class CatalogReconciler {
         Map<String, String> next = new LinkedHashMap<>();
         next.put(DEFAULT_VERSION, nextDefault);
         selectable.forEach((version, image) -> next.put(SELECTABLE_PREFIX + version, image));
+        Map<String, String> retained = new TreeMap<>();
+        currentData.forEach((key, image) -> {
+            if (key.startsWith(SELECTABLE_PREFIX)) {
+                String version = key.substring(SELECTABLE_PREFIX.length());
+                if (!selectable.containsKey(version)) {
+                    retained.put(version, image);
+                }
+            }
+        });
         for (String version : referencedVersions) {
             if (!selectable.containsKey(version)) {
-                next.put(RETAINED_PREFIX + version, requireCatalogImage(currentData, version));
+                retained.put(version, requireCatalogImage(currentData, version));
             }
         }
+        retained.forEach((version, image) -> next.put(RETAINED_PREFIX + version, image));
         return next;
     }
 
-    private Set<String> referencedVersions(ConfigMap configMap, String key) {
+    private Map<String, String> configuredVersions(ConfigMap configMap, String key) {
         Map<String, String> data = requireData(configMap, configMap.getMetadata().getName());
         String document = data.get(key);
         if (document == null) {
@@ -137,18 +151,27 @@ final class CatalogReconciler {
             if (mocks == null || !mocks.isArray()) {
                 throw new IllegalStateException("wiremock.mocks must be an array.");
             }
-            Set<String> references = new TreeSet<>();
+            Map<String, String> versions = new LinkedHashMap<>();
             for (JsonNode mock : mocks) {
-                JsonNode version = requireObject(mock, "wiremock.mocks[]").get("version");
-                if (version == null || version.isNull()) {
-                    continue;
+                JsonNode row = requireObject(mock, "wiremock.mocks[]");
+                JsonNode id = row.get("id");
+                if (id == null || !id.isTextual() || id.textValue().isBlank()) {
+                    throw new IllegalStateException("wiremock.mocks[].id must be a non-empty string.");
                 }
-                if (!version.isTextual()) {
-                    throw new IllegalStateException("wiremock.mocks[].version must be a string or null.");
+                JsonNode version = row.get("version");
+                String configuredVersion = null;
+                if (version != null && !version.isNull()) {
+                    if (!version.isTextual()) {
+                        throw new IllegalStateException("wiremock.mocks[].version must be a string or null.");
+                    }
+                    configuredVersion = requireStableVersion(version.textValue(), "wiremock.mocks[].version");
                 }
-                references.add(requireStableVersion(version.textValue(), "wiremock.mocks[].version"));
+                if (versions.containsKey(id.textValue())) {
+                    throw new IllegalStateException("wiremock.mocks[] contains a duplicate id: " + id.textValue());
+                }
+                versions.put(id.textValue(), configuredVersion);
             }
-            return references;
+            return versions;
         } catch (JsonProcessingException error) {
             throw new IllegalStateException(
                     "Invalid WireMock YAML in ConfigMap '" + configMap.getMetadata().getName() + "'.", error);

@@ -12,6 +12,7 @@ interface UpdaterConfig {
     String configKey();
     String registryUrl();
     String repository();
+    Optional<String> imageRepository();
     String defaultVersionConstraint();
     int minorLines();
     int pageSize();

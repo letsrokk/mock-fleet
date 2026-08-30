@@ -247,6 +247,7 @@ wiremock:
     registry:
       url: https://registry-1.docker.io
       repository: wiremock/wiremock
+      imageRepository: ""
       credentialsSecretName: ""
     image:
       repository: ghcr.io/letsrokk/mock-fleet/wiremock-updater

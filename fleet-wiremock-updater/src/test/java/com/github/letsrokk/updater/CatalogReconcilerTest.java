@@ -64,6 +64,7 @@ class CatalogReconcilerTest {
                 "selectable.3.14.4", "example/wiremock:3.14.4-3",
                 "selectable.3.13.9", "example/wiremock:3.13.9-5",
                 "retained.3.12.1", "example/wiremock:3.12.1-2",
+                "retained.3.13.2", "example/wiremock:3.13.2-7",
                 "retained.3.10.0", "example/wiremock:3.10.0-4"), updated.getValue().getData());
         verify(fixture.catalog, times(1)).get();
         verify(fixture.baseline, times(1)).get();
@@ -218,6 +219,98 @@ class CatalogReconcilerTest {
                 "retained.3.13.2", "example/wiremock:3.13.2-2"), null);
     }
 
+    @Test
+    void userRowsOverrideBaselinePinsByMockIdIncludingOmittedAndNullVersions() {
+        KubernetesFixture fixture = fixture(
+                configMap("catalog", "26", Map.of(
+                        "defaultVersion", "3.13.2",
+                        "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                        "retained.3.12.1", "example/wiremock:3.12.1-2",
+                        "retained.3.11.0", "example/wiremock:3.11.0-4")),
+                configYaml("baseline", """
+                        wiremock:
+                          mocks:
+                            - id: demo
+                              version: 3.12.1
+                            - id: other
+                              version: 3.11.0
+                        """),
+                configYaml("user", """
+                        wiremock:
+                          mocks:
+                            - id: demo
+                            - id: other
+                              version: null
+                        """));
+        CatalogSelection.Selection selection = CatalogSelection.select(
+                "example/wiremock", List.of("3.14.1"), 1);
+
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                selection, "3.x");
+
+        ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespaced).resource(updated.capture());
+        assertEquals(Map.of(
+                "defaultVersion", "3.14.1",
+                "selectable.3.14.1", "example/wiremock:3.14.1",
+                "retained.3.13.2", "example/wiremock:3.13.2-2"), updated.getValue().getData());
+    }
+
+    @Test
+    void newlyUnselectedVersionGetsOneUnreferencedRetainedCycle() {
+        KubernetesFixture fixture = fixture(
+                configMap("catalog", "27", Map.of(
+                        "defaultVersion", "3.13.2",
+                        "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                        "selectable.3.12.1", "example/wiremock:3.12.1-7",
+                        "retained.3.11.0", "example/wiremock:3.11.0-3")),
+                configDocument("baseline", null, null), configDocument("user", null, null));
+        CatalogSelection.Selection selection = CatalogSelection.select(
+                "example/wiremock", List.of("3.14.1"), 1);
+
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                selection, "3.x");
+
+        ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespaced).resource(updated.capture());
+        assertEquals(Map.of(
+                "defaultVersion", "3.14.1",
+                "selectable.3.14.1", "example/wiremock:3.14.1",
+                "retained.3.13.2", "example/wiremock:3.13.2-2",
+                "retained.3.12.1", "example/wiremock:3.12.1-7"), updated.getValue().getData());
+    }
+
+    @Test
+    void apiSaveAfterConfigReadCanReferenceGraceVersionOnNextCycle() {
+        CatalogSelection.Selection selection = CatalogSelection.select(
+                "example/wiremock", List.of("3.14.1"), 1);
+        KubernetesFixture firstCycle = fixture(
+                configMap("catalog", "28", Map.of(
+                        "defaultVersion", "3.13.2",
+                        "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                        "selectable.3.12.1", "example/wiremock:3.12.1-7")),
+                configDocument("baseline", null, null), configDocument("user", null, null));
+        new CatalogReconciler(firstCycle.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                selection, "3.x");
+        ArgumentCaptor<ConfigMap> firstUpdate = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(firstCycle.namespaced).resource(firstUpdate.capture());
+
+        KubernetesFixture nextCycle = fixture(
+                configMap("catalog", "29", firstUpdate.getValue().getData()),
+                configDocument("baseline", null, null), configDocument("user", "saved-after-read", "3.12.1"));
+        new CatalogReconciler(nextCycle.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                selection, "3.x");
+
+        ArgumentCaptor<ConfigMap> secondUpdate = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(nextCycle.namespaced).resource(secondUpdate.capture());
+        assertEquals("example/wiremock:3.12.1-7",
+                secondUpdate.getValue().getData().get("retained.3.12.1"));
+    }
+
     private static void assertInvalidCatalog(Map<String, String> catalogData, String referencedVersion) {
         KubernetesFixture fixture = fixture(configMap("catalog", "25", catalogData),
                 configDocument("baseline", referencedVersion == null ? null : "demo", referencedVersion),
@@ -242,8 +335,12 @@ class CatalogReconcilerTest {
 
     private static ConfigMap configDocument(String name, String mockId, String version) {
         String mock = mockId == null ? "[]" : "\n    - id: " + mockId + "\n      version: " + version;
+        return configYaml(name, "wiremock:\n  mocks: " + mock + "\n");
+    }
+
+    private static ConfigMap configYaml(String name, String yaml) {
         return new ConfigMapBuilder().withNewMetadata().withName(name).endMetadata()
-                .withData(Map.of("wiremock.yaml", "wiremock:\n  mocks: " + mock + "\n")).build();
+                .withData(Map.of("wiremock.yaml", yaml)).build();
     }
 
     @SuppressWarnings("unchecked")
