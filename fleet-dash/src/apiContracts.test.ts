@@ -99,6 +99,26 @@ describe("Fleet API dashboard contracts", () => {
     );
   });
 
+  it("does not repeat other structured details embedded in their messages", async () => {
+    for (const [message, details] of [
+      ["Unsupported WireMock resource: gpu", { resource: "gpu" }],
+      ["Invalid WireMock resource quantity: requests.cpu", { field: "requests.cpu" }],
+      ["Unsupported config apply mode: restartNever", { applyMode: "restartNever" }]
+    ] as const) {
+      const response = new Response(JSON.stringify({
+        code: "INVALID_REQUEST",
+        message,
+        retryable: false,
+        stateMayHaveChanged: false,
+        details
+      }), { status: 400, headers: { "Content-Type": "application/json" } });
+
+      await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+        `${message} [INVALID_REQUEST]`
+      );
+    }
+  });
+
   it("keeps a non-JSON server message instead of replacing it with a client rule", async () => {
     const response = new Response("Mappings storage is unavailable.", { status: 503 });
 

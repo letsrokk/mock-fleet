@@ -85,8 +85,15 @@ export async function errorMessage(response: Response, fallback: string) {
   try {
     const parsed = JSON.parse(text) as unknown;
     if (isApiError(parsed)) {
-      const details = Object.entries(parsed.details)
-        .filter(([key, value]) => !repeatsDetailInMessage(parsed.message, key, value))
+      const detailEntries = Object.entries(parsed.details);
+      const detailValueCounts = detailEntries.reduce((counts, [, value]) => {
+        const formatted = formatDetail(value);
+        counts.set(formatted, (counts.get(formatted) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>());
+      const details = detailEntries
+        .filter(([, value]) => detailValueCounts.get(formatDetail(value)) !== 1
+          || !containsExactDetail(parsed.message, value))
         .map(([key, value]) => `${key}=${formatDetail(value)}`)
         .join(", ");
       return `${parsed.message} [${parsed.code}]${details ? ` ${details}` : ""}`;
@@ -97,11 +104,8 @@ export async function errorMessage(response: Response, fallback: string) {
   return text;
 }
 
-function repeatsDetailInMessage(message: string, key: string, value: unknown) {
-  if (key !== "option" || typeof value !== "string") {
-    return false;
-  }
-  const escapedValue = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function containsExactDetail(message: string, value: unknown) {
+  const escapedValue = formatDetail(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[^\\w-])${escapedValue}(?=$|[^\\w-])`).test(message);
 }
 
