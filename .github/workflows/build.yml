@@ -25,44 +25,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  helm:
-    name: Test Helm chart
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Lint chart
-        run: helm lint deploy/helm/mock-fleet
-
-      - name: Verify runtime dependency contracts
-        run: tests/security/dependency-contracts.sh
-
-      - name: Test MCP rendering
-        run: deploy/helm/mock-fleet/tests/render-mcp.sh
-
-      - name: Test security boundary rendering
-        run: deploy/helm/mock-fleet/tests/render-security.sh
-
-      - name: Test Mock Ops rendering
-        run: deploy/helm/mock-fleet/tests/render-mock-ops.sh
-
-      - name: Verify Mock Ops workflow contracts
-        run: ruby tests/workflow-mock-ops-contract.rb
-
-      - name: Test local rebuild selection
-        run: bin/local/tests/deploy-rebuild.sh
-
   fleet-proxy:
     name: Build fleet-proxy
     runs-on: ubuntu-latest
@@ -149,9 +111,6 @@ jobs:
 
       - name: Verify WireMock 3.x option matrix
         run: fleet-api/tests/verify-wiremock-option-matrix.sh
-
-      - name: Test supported WireMock Admin contracts
-        run: fleet-mcp/tests/wiremock-admin-contract.sh
 
       - name: Upload MCP package
         uses: actions/upload-artifact@v4

@@ -223,8 +223,6 @@ The admission policy accepts zero identity projections or exactly one projection
 
 `storage.s3.mountOptions` includes `allow-delete`, `allow-overwrite`, and `metadata-ttl minimal` by default. The first two options support dashboard and MCP file mutations. The minimal metadata TTL reduces cross-mount staleness while the CSI data cache is enabled; Mountpoint does not coordinate concurrent writes to the same key, so clients must not race those writes.
 
-For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live suite requires a prepared SeaweedFS-compatible S3 CSI driver and explicit S3 credentials. It creates a unique namespace and bucket, validates two API replicas and the REST/MCP recovery paths, and removes all owned resources through an EXIT trap. `--dry-run` prints the resolved scope, `--self-test` performs static harness checks, and `--keep` retains failed-run resources for investigation. The `Cluster E2E` GitHub Actions workflow runs only through `workflow_dispatch` on a prepared runner; normal push checks stay unchanged.
-
 ## Values
 
 ### Global
