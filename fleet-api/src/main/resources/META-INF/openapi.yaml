@@ -91,7 +91,7 @@ paths:
         - name: version
           in: query
           required: false
-          description: Exact WireMock 3.x semantic version. Defaults to the configured WireMock image version when omitted or blank.
+          description: Exact WireMock 3.x semantic version. Defaults to the version catalog default when omitted or blank.
           schema:
             oneOf:
               - type: string
@@ -281,13 +281,15 @@ components:
       enum: [STOPPED, STARTING, RUNNING, FAILED]
     MockRow:
       type: object
-      required: [mockId, podName, status, message]
+      required: [mockId, podName, status, message, wireMockVersion, runtimeVersion]
       properties:
         mockId: { type: string }
         podName: { type: [string, "null"] }
         status:
           $ref: "#/components/schemas/MockLifecycle"
         message: { type: [string, "null"] }
+        wireMockVersion: { type: string }
+        runtimeVersion: { type: [string, "null"] }
     MockLifecycleResponse:
       type: object
       required: [mockId, status, podName, message, retryAfterMs]
@@ -323,8 +325,9 @@ components:
           additionalProperties: { type: string }
     ResolvedConfigData:
       type: object
-      required: [options, resources]
+      required: [version, options, resources]
       properties:
+        version: { type: [string, "null"] }
         options:
           type: array
           items: { type: string }
@@ -332,8 +335,9 @@ components:
           $ref: "#/components/schemas/ResourceData"
     UserConfigData:
       type: object
-      required: [options, resources]
+      required: [version, options, resources]
       properties:
+        version: { type: [string, "null"] }
         options:
           type: array
           items: { type: string }
@@ -343,7 +347,7 @@ components:
             - type: "null"
     MockConfigView:
       type: object
-      required: [mockId, lifecycle, baseline, user, effective]
+      required: [mockId, lifecycle, baseline, user, effective, wireMockVersion, runtimeVersion]
       properties:
         mockId: { type: string }
         lifecycle:
@@ -354,6 +358,16 @@ components:
           $ref: "#/components/schemas/UserConfigData"
         effective:
           $ref: "#/components/schemas/ResolvedConfigData"
+        wireMockVersion: { type: string }
+        runtimeVersion: { type: [string, "null"] }
+    VersionView:
+      type: object
+      additionalProperties: false
+      required: [version, image, selectable]
+      properties:
+        version: { type: string }
+        image: { type: string }
+        selectable: { type: boolean }
     PublicOptionDefinition:
       type: object
       additionalProperties: false
@@ -397,7 +411,7 @@ components:
         host: { type: string }
     ConfigView:
       type: object
-      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing]
+      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing, defaultVersion, versions, catalogResourceVersion]
       properties:
         resourceVersion: { type: [string, "null"] }
         mockIds:
@@ -414,10 +428,19 @@ components:
           $ref: "#/components/schemas/WireMockVersionView"
         routing:
           $ref: "#/components/schemas/RoutingView"
+        defaultVersion: { type: string }
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/VersionView"
+        catalogResourceVersion: { type: [string, "null"] }
     ConfigUpdateRequest:
       type: object
       properties:
         resourceVersion: { type: [string, "null"] }
+        wireMockVersion:
+          type: [string, "null"]
+          pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
         options:
           type: array
           items: { type: string }

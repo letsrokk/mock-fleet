@@ -355,6 +355,21 @@ for fragment in \
   fi
 done
 
+versioned_config_render="$(helm template versioned "${chart_dir}" \
+  --set-json 'wiremock.config.mocks=[{"id":"demo","version":"3.12.1","options":["--verbose"]}]' \
+  --show-only templates/wiremock-configmap.yaml)"
+for fragment in 'id: demo' 'version: 3.12.1' 'options:' '--verbose'; do
+  if ! grep -Fq -- "${fragment}" <<<"${versioned_config_render}"; then
+    echo "Versioned baseline config is missing: ${fragment}" >&2
+    exit 1
+  fi
+done
+if helm template invalid-version "${chart_dir}" \
+    --set-json 'wiremock.config.mocks=[{"id":"demo","version":"latest","options":[]}]' >/dev/null 2>&1; then
+  echo "Baseline mock versions must be exact stable WireMock 3.x versions" >&2
+  exit 1
+fi
+
 invalid_images=(
   wiremock/wiremock:latest
   wiremock/wiremock:2.35.1

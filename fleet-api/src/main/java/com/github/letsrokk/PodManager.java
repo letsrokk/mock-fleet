@@ -224,8 +224,10 @@ public class PodManager {
     }
 
     public MockPodStatus status(String mockId) {
+        MockPodRef pod = podState.getPod(mockId);
         MockPodLifecycle lifecycle = podState.lifecycle(mockId);
-        return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message());
+        return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message(),
+                pod == null ? null : pod.runtimeVersion());
     }
 
     private MockPodRef startClaimedMock(String mockId, String attemptId, String previousPodName) {
@@ -415,7 +417,8 @@ public class PodManager {
                     entry.getKey(), lifecycle.podName(), lifecycle.status(), lifecycle.message()));
         });
         podState.getPods().entrySet().forEach(entry -> mocks.put(entry.getKey(),
-                new MockPodStatus(entry.getKey(), entry.getValue().podName(), MockLifecycleStatus.RUNNING, null)));
+                new MockPodStatus(entry.getKey(), entry.getValue().podName(), MockLifecycleStatus.RUNNING, null,
+                        entry.getValue().runtimeVersion())));
         return mocks.values().stream()
                 .sorted(Comparator.comparing(MockPodStatus::mockId))
                 .toList();
@@ -448,9 +451,11 @@ public class PodManager {
         LOG.infof("Creating pod for mock id '%s'...", mockId);
 
         String podNamePrefix = String.format("%s-%s-", config.wiremockPodNamePrefix(), mockId);
-        Pod pod = podFactory.createPodSpec(podNamePrefix, mockId,
-                wireMockOptions.optionsFor(mockId),
-                wireMockOptions.resourcesFor(mockId));
+        WireMockResolvedConfig resolved = wireMockOptions.resolveFor(mockId);
+        Pod pod = resolved == null
+                ? podFactory.createPodSpec(podNamePrefix, mockId,
+                        wireMockOptions.optionsFor(mockId), wireMockOptions.resourcesFor(mockId))
+                : podFactory.createPodSpec(podNamePrefix, mockId, resolved);
         String namespace = currentNamespace();
 
         if (attemptId != null) {
@@ -483,7 +488,7 @@ public class PodManager {
         pod = waitForPodToBeRunning(pod, podCreationTimeout);
         LOG.infof("Created pod '%s' for mock id '%s' in namespace '%s'.",
                 pod.getMetadata().getName(), mockId, namespace);
-        return podRef(pod);
+        return podRef(pod, resolved == null ? null : resolved.version().toString());
     }
 
     String buildPodBaseUrl(MockPodRef pod) {
@@ -491,6 +496,10 @@ public class PodManager {
     }
 
     MockPodRef podRef(Pod pod) {
+        return podRef(pod, null);
+    }
+
+    MockPodRef podRef(Pod pod, String runtimeVersion) {
         String podName = pod.getMetadata() == null ? null : pod.getMetadata().getName();
         String podIp = pod.getStatus() == null ? null : pod.getStatus().getPodIP();
         if (podName == null || podName.isBlank()) {
@@ -499,7 +508,7 @@ public class PodManager {
         if (podIp == null || podIp.isBlank()) {
             throw new PodCreationException("Pod '" + podName + "' did not receive a pod IP.");
         }
-        return new MockPodRef(podName, podIp);
+        return new MockPodRef(podName, podIp, runtimeVersion);
     }
 
     String currentNamespace() {
@@ -811,7 +820,11 @@ public class PodManager {
     public record ActiveMockPod(String mockId, String podName) {
     }
 
-    public record MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message) {
+    public record MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message,
+                                String runtimeVersion) {
+        public MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message) {
+            this(mockId, podName, status, message, null);
+        }
     }
 
     public enum DeleteMockResult {

@@ -26,7 +26,7 @@ class FleetResourceTest {
     @Test
     void listsActiveMocks() {
         when(podManager.listMocks()).thenReturn(List.of(new PodManager.MockPodStatus(
-                "demo", "mock-fleet-demo-1", MockLifecycleStatus.STARTING, null)));
+                "demo", "mock-fleet-demo-1", MockLifecycleStatus.STARTING, null, "3.12.1")));
 
         given()
         .when()
@@ -35,7 +35,9 @@ class FleetResourceTest {
                 .statusCode(200)
                 .body("[0].mockId", is("demo"))
                 .body("[0].podName", is("mock-fleet-demo-1"))
-                .body("[0].status", is("STARTING"));
+                .body("[0].status", is("STARTING"))
+                .body("[0].wireMockVersion", is("3.13.2"))
+                .body("[0].runtimeVersion", is("3.12.1"));
 
         verify(podManager).listMocks();
     }

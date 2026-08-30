@@ -18,6 +18,128 @@ import static org.mockito.Mockito.when;
 class WireMockOptionsTest {
 
     @Test
+    void userEntryWithoutVersionClearsBaselinePinWhileAbsentEntryPreservesIt() {
+        WireMockConfigDocument baseline = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: cleared
+                      version: 3.12.1
+                      options: []
+                    - id: preserved
+                      version: 3.11.0
+                      options: []
+                """);
+        WireMockConfigDocument user = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: cleared
+                      options: []
+                """);
+
+        Map<String, WireMockPodConfig> effective = baseline.merge(user).mockConfigs();
+
+        assertEquals(null, effective.get("cleared").version());
+        assertEquals("3.11.0", effective.get("preserved").version());
+    }
+
+    @Test
+    void configDocumentRoundTripsExplicitMockVersionAndOmitsInheritedVersion() {
+        WireMockConfigDocument document = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: pinned
+                      version: 3.12.1
+                      options: []
+                    - id: inherited
+                      version: null
+                      options: []
+                """);
+
+        String rendered = document.toYaml();
+
+        assertEquals("3.12.1", WireMockConfigDocument.load(rendered).mockConfigs().get("pinned").version());
+        assertEquals(null, WireMockConfigDocument.load(rendered).mockConfigs().get("inherited").version());
+        org.junit.jupiter.api.Assertions.assertFalse(rendered.contains("version: null"));
+    }
+
+    @Test
+    void resolvesVersionImageOptionsAndResourcesFromOneCatalogSnapshot() {
+        WireMockOptions options = optionsWithCatalog(catalog());
+        options.load(input("""
+                wiremock:
+                  default:
+                    options: [--verbose]
+                  mocks:
+                    - id: demo
+                      version: 3.12.1
+                      options: []
+                """));
+
+        WireMockResolvedConfig resolved = options.resolveFor("demo");
+
+        assertEquals("3.12.1", resolved.version().toString());
+        assertEquals("wiremock/wiremock:3.12.1-2", resolved.image());
+        assertEquals(List.of("--verbose"), resolved.options());
+    }
+
+    @Test
+    void inheritedVersionUsesCatalogDefaultInsteadOfConfiguredCompatibilityImage() {
+        WireMockOptions options = optionsWithCatalog(catalog());
+
+        WireMockResolvedConfig resolved = options.resolveFor("demo");
+
+        assertEquals("3.13.2", resolved.version().toString());
+        assertEquals("wiremock/wiremock:3.13.2-7", resolved.image());
+    }
+
+    @Test
+    void reportsEveryOptionThatConflictsWithTheDesiredVersion() {
+        WireMockOptions options = optionsWithCatalog(new WireMockVersionCatalog(
+                WireMockVersion.parse("3.0.0"),
+                Map.of(WireMockVersion.parse("3.0.0"), new WireMockVersionCatalog.VersionEntry(
+                        WireMockVersion.parse("3.0.0"), "wiremock/wiremock:3.0.0-1", true)),
+                "18"));
+        options.load(input("""
+                wiremock:
+                  default:
+                    options:
+                      - --disable-http2-plain
+                      - --version
+                  mocks: []
+                """));
+
+        ApiException exception = assertThrows(ApiException.class, () -> options.resolveFor("demo"));
+
+        assertEquals("UNSUPPORTED_WIREMOCK_OPTION", ((ApiError) exception.getResponse().getEntity()).code());
+        assertEquals(List.of("--disable-http2-plain", "--version"),
+                ((ApiError) exception.getResponse().getEntity()).details().get("options"));
+    }
+
+    private WireMockOptions optionsWithCatalog(WireMockVersionCatalog catalog) {
+        WireMockVersionCatalogService catalogService = org.mockito.Mockito.mock(WireMockVersionCatalogService.class);
+        org.mockito.Mockito.when(catalogService.catalog()).thenReturn(catalog);
+        WireMockOptions options = new WireMockOptions();
+        options.catalogService = catalogService;
+        return options;
+    }
+
+    private WireMockVersionCatalog catalog() {
+        WireMockVersion defaultVersion = WireMockVersion.parse("3.13.2");
+        WireMockVersion retainedVersion = WireMockVersion.parse("3.12.1");
+        return new WireMockVersionCatalog(defaultVersion, Map.of(
+                defaultVersion, new WireMockVersionCatalog.VersionEntry(
+                        defaultVersion, "wiremock/wiremock:3.13.2-7", true),
+                retainedVersion, new WireMockVersionCatalog.VersionEntry(
+                        retainedVersion, "wiremock/wiremock:3.12.1-2", false)), "17");
+    }
+
+    @Test
     void loadWithoutConfiguredPathKeepsOptionsEmpty() {
         MockFleetConfig config = mock(MockFleetConfig.class);
         WireMockOptions options = new WireMockOptions();

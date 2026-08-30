@@ -112,6 +112,7 @@ class OpenApiResourceTest {
 
         assertTrue(schema.path("required").isMissingNode() || schema.path("required").isEmpty());
         assertTrue(schema.path("properties").has("resourceVersion"));
+        assertTrue(schema.path("properties").has("wireMockVersion"));
         assertTrue(schema.path("properties").has("options"));
         assertTrue(schema.path("properties").has("resources"));
         assertTrue(schema.path("properties").has("applyMode"));
@@ -151,6 +152,13 @@ class OpenApiResourceTest {
         assertTrue(config.path("required").toString().contains("wireMock"));
         assertEquals("#/components/schemas/WireMockVersionView",
                 config.path("properties").path("wireMock").path("$ref").asText());
+        assertTrue(config.path("required").toString().contains("defaultVersion"));
+        assertTrue(config.path("required").toString().contains("versions"));
+        assertTrue(config.path("required").toString().contains("catalogResourceVersion"));
+
+        JsonNode mock = schemas.path("MockConfigView");
+        assertTrue(mock.path("required").toString().contains("wireMockVersion"));
+        assertTrue(mock.path("required").toString().contains("runtimeVersion"));
 
     }
 

@@ -483,7 +483,7 @@ class PodManagerTest {
         when(podState.getPods()).thenReturn(pods);
         when(podState.getPodLifecycles()).thenReturn(lifecycles);
         when(pods.entrySet()).thenReturn(Map.of(
-                "running", new MockPodRef("mock-fleet-running-1", "10.0.0.1")).entrySet());
+                "running", new MockPodRef("mock-fleet-running-1", "10.0.0.1", "3.12.1")).entrySet());
         when(lifecycles.entrySet()).thenReturn(Map.of(
                 "starting", MockPodLifecycle.starting("mock-fleet-starting-1"),
                 "failed", MockPodLifecycle.failed("mock-fleet-failed-1", "image pull failed")).entrySet());
@@ -491,7 +491,8 @@ class PodManagerTest {
         assertEquals(List.of(
                 new PodManager.MockPodStatus("failed", "mock-fleet-failed-1", MockLifecycleStatus.FAILED,
                         "image pull failed"),
-                new PodManager.MockPodStatus("running", "mock-fleet-running-1", MockLifecycleStatus.RUNNING, null),
+                new PodManager.MockPodStatus("running", "mock-fleet-running-1", MockLifecycleStatus.RUNNING, null,
+                        "3.12.1"),
                 new PodManager.MockPodStatus("starting", "mock-fleet-starting-1", MockLifecycleStatus.STARTING, null)
         ), podManager.listMocks());
     }
@@ -1404,10 +1405,11 @@ class PodManagerTest {
         ResourceRequirements resources = resources("0.5", "512Mi", "1", "1Gi");
         when(config.namespace()).thenReturn("mock-fleet");
         when(config.wiremockPodNamePrefix()).thenReturn("custom");
-        when(wireMockOptions.optionsFor("demo")).thenReturn(List.of("--verbose"));
-        when(wireMockOptions.resourcesFor("demo")).thenReturn(resources);
+        WireMockResolvedConfig resolved = new WireMockResolvedConfig(WireMockVersion.parse("3.12.1"),
+                "wiremock/wiremock:3.12.1-2", List.of("--verbose"), resources);
+        when(wireMockOptions.resolveFor("demo")).thenReturn(resolved);
         when(kubernetesClient.getNamespace()).thenReturn("test");
-        when(podFactory.createPodSpec("custom-demo-", "demo", List.of("--verbose"), resources)).thenReturn(podSpec);
+        when(podFactory.createPodSpec("custom-demo-", "demo", resolved)).thenReturn(podSpec);
         when(kubernetesClient.resource(podSpec)).thenReturn(podHandle);
         when(podHandle.inNamespace("test")).thenReturn(podHandle);
         when(podHandle.create()).thenReturn(createdPod);
@@ -1416,8 +1418,8 @@ class PodManagerTest {
 
         MockPodRef spawnedPod = podManager.spawnPod("demo");
 
-        assertEquals(new MockPodRef("custom-demo-1", "10.0.0.1"), spawnedPod);
-        verify(podFactory).createPodSpec("custom-demo-", "demo", List.of("--verbose"), resources);
+        assertEquals(new MockPodRef("custom-demo-1", "10.0.0.1", "3.12.1"), spawnedPod);
+        verify(podFactory).createPodSpec("custom-demo-", "demo", resolved);
         verify(podHandle).create();
         verify(podState).markStartupPodName("demo", "custom-demo-1");
         verify(podHandle).get();

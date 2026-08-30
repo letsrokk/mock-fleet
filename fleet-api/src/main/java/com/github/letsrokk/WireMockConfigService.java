@@ -97,16 +97,18 @@ public class WireMockConfigService {
                 .sorted()
                 .forEach(mockIds::add);
 
-        Map<String, MockLifecycleStatus> lifecycles = new LinkedHashMap<>();
-        podStatuses.forEach(status -> lifecycles.put(status.mockId(), status.status()));
+        Map<String, PodManager.MockPodStatus> statuses = new LinkedHashMap<>();
+        podStatuses.forEach(status -> statuses.put(status.mockId(), status));
         List<String> savedMockIds = userConfig.mockConfigs().keySet().stream()
                 .sorted()
                 .toList();
+        WireMockVersionCatalog versionCatalog = wireMockOptions.catalog();
 
         List<MockConfigView> mocks = mockIds.stream()
                 .sorted()
                 .map(mockId -> mockConfigView(mockId, baseline, userConfig, effective,
-                        lifecycles.getOrDefault(mockId, MockLifecycleStatus.STOPPED)))
+                        statuses.getOrDefault(mockId, new PodManager.MockPodStatus(
+                                mockId, null, MockLifecycleStatus.STOPPED, null)), versionCatalog))
                 .toList();
 
         return new ConfigView(
@@ -114,8 +116,13 @@ public class WireMockConfigService {
                 List.copyOf(mockIds.stream().sorted().toList()),
                 savedMockIds,
                 mocks,
-                wireMockView(),
-                routingView());
+                wireMockView(versionCatalog),
+                routingView(),
+                versionCatalog.defaultVersion().toString(),
+                versionCatalog.versions().values().stream()
+                        .map(entry -> new VersionView(entry.version().toString(), entry.image(), entry.selectable()))
+                        .toList(),
+                versionCatalog.resourceVersion());
     }
 
     private RoutingView routingView() {
@@ -129,10 +136,20 @@ public class WireMockConfigService {
             throw ApiException.badRequest("INVALID_REQUEST", "Config update request body is required.", Map.of());
         }
         ApplyMode applyMode = ApplyMode.from(request.applyMode());
+        WireMockVersionCatalog catalog = wireMockOptions.catalog();
         WireMockPodConfig mockConfig = new WireMockPodConfig(
-                validateOptions(request.options()), toResources(mockId, request.resources()));
-        updateUserConfigMap(mockId, "saved", request.resourceVersion(), current ->
-                current.withMockConfig(mockId, mockConfig));
+                request.options() == null ? List.of() : request.options(),
+                toResources(mockId, request.resources()), request.wireMockVersion());
+        updateUserConfigMap(mockId, "saved", request.resourceVersion(), current -> {
+            validateVersionSelection(mockId, request.wireMockVersion(), current, catalog);
+            WireMockConfigDocument candidate = current.withMockConfig(mockId, mockConfig);
+            WireMockResolvedConfig resolved = wireMockOptions.resolveFor(
+                    mockId, wireMockOptions.baselineConfig(), candidate, catalog);
+            List<String> normalizedOverride = WireMockOptionCatalog.validateAndNormalize(
+                    mockConfig.options(), resolved.version());
+            return current.withMockConfig(mockId,
+                    new WireMockPodConfig(normalizedOverride, mockConfig.resources(), request.wireMockVersion()));
+        });
         refreshUserConfig();
         MockLifecycleStatus lifecycle = applyMode.apply(mockId, podManager);
         return new ConfigMutationResult(view(), new ApplyResult(mockId, applyMode.wireValue, lifecycle));
@@ -216,22 +233,26 @@ public class WireMockConfigService {
     private MockConfigView mockConfigView(String mockId, WireMockConfigDocument baseline,
                                           WireMockConfigDocument userConfig,
                                           WireMockConfigDocument effective,
-                                          MockLifecycleStatus lifecycle) {
+                                          PodManager.MockPodStatus status,
+                                          WireMockVersionCatalog catalog) {
+        String desiredVersion = wireMockOptions.desiredVersionFor(mockId, catalog).toString();
         return new MockConfigView(
                 mockId,
-                lifecycle,
-                configData(baseline.optionsFor(mockId), baseline.resourcesFor(mockId)),
+                status.status(),
+                configData(wireMockOptions.explicitVersion(baseline, mockId),
+                        baseline.optionsFor(mockId), baseline.resourcesFor(mockId)),
                 userConfigData(userConfig.mockConfigs().getOrDefault(mockId, new WireMockPodConfig(List.of(), null))),
-                configData(effective.optionsFor(mockId), effective.resourcesFor(mockId)));
+                configData(desiredVersion, effective.optionsFor(mockId), effective.resourcesFor(mockId)),
+                desiredVersion, status.runtimeVersion());
     }
 
     private ConfigData userConfigData(WireMockPodConfig config) {
-        return new ConfigData(WireMockOptionCatalog.redactSensitive(config.options()),
+        return new ConfigData(config.version(), WireMockOptionCatalog.redactSensitive(config.options()),
                 config.resources() == null ? null : ResourceData.from(config.resources()));
     }
 
-    private ConfigData configData(List<String> options, ResourceRequirements resources) {
-        return new ConfigData(WireMockOptionCatalog.redactSensitive(options), ResourceData.from(resources));
+    private ConfigData configData(String version, List<String> options, ResourceRequirements resources) {
+        return new ConfigData(version, WireMockOptionCatalog.redactSensitive(options), ResourceData.from(resources));
     }
 
     private ConfigMap userConfigMap() {
@@ -361,15 +382,38 @@ public class WireMockConfigService {
                 : configMap.getMetadata().getResourceVersion();
     }
 
-    private List<String> validateOptions(List<String> options) {
-        return WireMockOptionCatalog.validateAndNormalize(options, WireMockVersion.parseImage(config.wiremockImage()));
-    }
-
     static void validateMockId(String mockId) {
         if (mockId == null || !VALID_MOCK_ID.matcher(mockId).matches()) {
             throw ApiException.badRequest("INVALID_MOCK_ID", MOCK_ID_VALIDATION_MESSAGE,
                     Map.of("mockId", mockId == null ? "" : mockId));
         }
+    }
+
+    void validateVersionSelection(String mockId, String requestedVersion,
+                                  WireMockConfigDocument currentUser,
+                                  WireMockVersionCatalog catalog) {
+        if (requestedVersion == null) {
+            return;
+        }
+        WireMockVersion version;
+        try {
+            version = WireMockVersion.parse(requestedVersion);
+        } catch (IllegalArgumentException error) {
+            throw unsupportedVersion(requestedVersion);
+        }
+        WireMockVersionCatalog.VersionEntry entry = catalog.versions().get(version);
+        boolean alreadyReferenced = requestedVersion.equals(
+                wireMockOptions.explicitVersion(wireMockOptions.baselineConfig(), mockId))
+                || requestedVersion.equals(wireMockOptions.explicitVersion(currentUser, mockId));
+        if (entry == null || (!entry.selectable() && !alreadyReferenced)) {
+            throw unsupportedVersion(requestedVersion);
+        }
+    }
+
+    private ApiException unsupportedVersion(String requestedVersion) {
+        return ApiException.badRequest("UNSUPPORTED_WIREMOCK_VERSION",
+                "WireMock version is not selectable for this mock.",
+                Map.of("version", requestedVersion == null ? "" : requestedVersion));
     }
 
     private ResourceRequirements toResources(String mockId, ResourceData resources) {
@@ -385,7 +429,7 @@ public class WireMockConfigService {
         WireMockOptionMatrix.ResolvedCatalog catalog;
         try {
             WireMockVersion version = requestedVersion == null || requestedVersion.isBlank()
-                    ? WireMockVersion.parseImage(config.wiremockImage())
+                    ? wireMockOptions.catalog().defaultVersion()
                     : WireMockVersion.parse(requestedVersion);
             catalog = WireMockOptionMatrix.loadDefault().resolve(version);
         } catch (IllegalArgumentException exception) {
@@ -399,14 +443,11 @@ public class WireMockConfigService {
                 .toList());
     }
 
-    private WireMockOptionMatrix.ResolvedCatalog resolvedCatalog() {
-        return WireMockOptionMatrix.loadDefault().resolve(WireMockVersion.parseImage(config.wiremockImage()));
-    }
-
-    private WireMockVersionView wireMockView() {
-        WireMockOptionMatrix.ResolvedCatalog catalog = resolvedCatalog();
+    private WireMockVersionView wireMockView(WireMockVersionCatalog versionCatalog) {
+        WireMockOptionMatrix.ResolvedCatalog catalog = WireMockOptionMatrix.loadDefault()
+                .resolve(versionCatalog.defaultVersion());
         return new WireMockVersionView(
-                config.wiremockImage(),
+                versionCatalog.versions().get(versionCatalog.defaultVersion()).image(),
                 catalog.version().toString(),
                 catalog.minimumSupportedVersion().toString(),
                 catalog.maximumResearchedVersion().toString(),
@@ -414,7 +455,13 @@ public class WireMockConfigService {
     }
 
     public record ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
-                             List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing) {
+                             List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing,
+                             String defaultVersion, List<VersionView> versions, String catalogResourceVersion) {
+        public ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
+                          List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing) {
+            this(resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing,
+                    wireMock.version(), List.of(), null);
+        }
     }
 
     public record OptionCatalogView(String wireMockVersion, String catalogStatus,
@@ -434,10 +481,20 @@ public class WireMockConfigService {
     }
 
     public record MockConfigView(String mockId, MockLifecycleStatus lifecycle, ConfigData baseline, ConfigData user,
-                                 ConfigData effective) {
+                                 ConfigData effective, String wireMockVersion, String runtimeVersion) {
+        public MockConfigView(String mockId, MockLifecycleStatus lifecycle, ConfigData baseline, ConfigData user,
+                              ConfigData effective) {
+            this(mockId, lifecycle, baseline, user, effective, effective.version(), null);
+        }
     }
 
-    public record ConfigData(List<String> options, ResourceData resources) {
+    public record ConfigData(String version, List<String> options, ResourceData resources) {
+        public ConfigData(List<String> options, ResourceData resources) {
+            this(null, options, resources);
+        }
+    }
+
+    public record VersionView(String version, String image, boolean selectable) {
     }
 
     enum ApplyMode {
@@ -474,8 +531,12 @@ public class WireMockConfigService {
         }
     }
 
-    public record ConfigUpdateRequest(String resourceVersion, List<String> options, ResourceData resources,
-                                      String applyMode) {
+    public record ConfigUpdateRequest(String resourceVersion, String wireMockVersion, List<String> options,
+                                      ResourceData resources, String applyMode) {
+        public ConfigUpdateRequest(String resourceVersion, List<String> options, ResourceData resources,
+                                   String applyMode) {
+            this(resourceVersion, null, options, resources, applyMode);
+        }
     }
 
     public record ConfigMutationResult(ConfigView config, ApplyResult apply) {

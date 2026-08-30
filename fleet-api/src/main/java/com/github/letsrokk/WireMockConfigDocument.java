@@ -75,7 +75,7 @@ final class WireMockConfigDocument {
             WireMockPodConfig base = mergedMocks.getOrDefault(mockId, new WireMockPodConfig(List.of(), null));
             ResourceRequirements resources = mergeResources(base.resources(), override.resources());
             List<String> options = mergeOptions(base.options(), override.options());
-            mergedMocks.put(mockId, new WireMockPodConfig(List.copyOf(options), resources));
+            mergedMocks.put(mockId, new WireMockPodConfig(List.copyOf(options), resources, override.version()));
         });
 
         List<String> mergedDefaults = mergeOptions(defaultOptions, overrides.defaultOptions);
@@ -138,6 +138,9 @@ final class WireMockConfigDocument {
         mockConfigs.forEach((mockId, mockConfig) -> {
             Map<String, Object> mock = new LinkedHashMap<>();
             mock.put("id", mockId);
+            if (mockConfig.version() != null) {
+                mock.put("version", mockConfig.version());
+            }
             mock.put("options", mockConfig.options());
             if (mockConfig.resources() != null) {
                 mock.put("resources", resourcesToMap(mockConfig.resources()));
@@ -268,7 +271,8 @@ final class WireMockConfigDocument {
             }
             List<String> options = List.copyOf(optionalStringList(mock.get("options"), "wiremock.mocks[" + index + "].options"));
             ResourceRequirements resources = optionalResources(mock.get("resources"), "wiremock.mocks[" + index + "].resources");
-            configs.put(id, new WireMockPodConfig(options, resources));
+            String version = optionalString(mock.get("version"), "wiremock.mocks[" + index + "].version");
+            configs.put(id, new WireMockPodConfig(options, resources, version));
         }
         return configs;
     }
@@ -339,6 +343,10 @@ final class WireMockConfigDocument {
             return value;
         }
         throw new IllegalStateException(field + " must be a non-blank string.");
+    }
+
+    private static String optionalString(Object node, String field) {
+        return node == null ? null : requireString(node, field);
     }
 
     private record OptionEntry(String optionName, List<String> tokens) {

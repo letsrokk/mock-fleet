@@ -181,8 +181,8 @@ class WireMockOptionValidationTest {
                 () -> WireMockOptionCatalog.validateAndNormalize(
                         List.of("--disable-connection-reuse", "true"), new WireMockVersion(3, 0, 0)));
         assertEquals("Unknown WireMock option: --disable-connection-reuse", introducedLater.getMessage());
-        assertInvalid(List.of("--disable-optimize-xml-factories-loading"),
-                "Unknown WireMock option: --disable-optimize-xml-factories-loading");
+        assertVersionUnsupported(List.of("--disable-optimize-xml-factories-loading"),
+                "--disable-optimize-xml-factories-loading");
         assertInvalid(List.of("--websocket-idle-timeout", "1000"),
                 "Unknown WireMock option: --websocket-idle-timeout");
     }
@@ -241,6 +241,18 @@ class WireMockOptionValidationTest {
         org.junit.jupiter.api.Assertions.assertTrue(exception.getMessage().contains(option));
         org.junit.jupiter.api.Assertions.assertFalse(exception.getMessage().contains(submittedValue));
         org.junit.jupiter.api.Assertions.assertFalse(exception.getResponse().getEntity().toString().contains(submittedValue));
+        verify(fixture.namespacedConfigMaps, never()).resource(any());
+    }
+
+    private void assertVersionUnsupported(List<String> options, String option) {
+        Fixture fixture = fixture();
+
+        WebApplicationException exception = assertThrows(WebApplicationException.class,
+                () -> fixture.service.upsertMockConfig("demo", request(options)));
+
+        ApiError error = (ApiError) exception.getResponse().getEntity();
+        assertEquals("UNSUPPORTED_WIREMOCK_OPTION", error.code());
+        assertEquals(List.of(option), error.details().get("options"));
         verify(fixture.namespacedConfigMaps, never()).resource(any());
     }
 

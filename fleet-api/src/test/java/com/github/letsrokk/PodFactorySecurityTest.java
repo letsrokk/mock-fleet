@@ -40,6 +40,20 @@ class PodFactorySecurityTest {
     }
 
     @Test
+    void resolvedCatalogImageIsTheOnlyImageUsedForTheWireMockContainer() {
+        MockFleetConfig config = config(false);
+        WireMockVersion version = WireMockVersion.parse("3.12.1");
+
+        Pod pod = new PodFactory(config).createPodSpec("mock-fleet-demo-", "demo",
+                new WireMockResolvedConfig(version, "registry.example/wiremock:3.12.1-9",
+                        List.of("--verbose"), resources()));
+
+        assertEquals("registry.example/wiremock:3.12.1-9",
+                pod.getSpec().getContainers().getFirst().getImage());
+        assertEquals(List.of("--verbose"), pod.getSpec().getContainers().getFirst().getArgs());
+    }
+
+    @Test
     void persistentMappingsInitContainerIsRestrictedWithoutChangingStorageOrResources() {
         MockFleetConfig config = config(true);
         ResourceRequirements resources = resources();
