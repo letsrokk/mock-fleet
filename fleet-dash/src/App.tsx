@@ -29,6 +29,7 @@ import {
   errorMessage,
   isActiveLifecycle,
   lifecycleLabel,
+  wireMockVersionOptions,
   type ApplyMode,
   type ConfigMutationResult,
   type ConfigView,
@@ -1051,7 +1052,7 @@ export default function App() {
                     void loadOptionCatalog(version);
                   }}>
                     <option value="">Inherit default ({configView.defaultVersion})</option>
-                    {configView.versions.filter((version) => version.selectable || version.version === selectedMock.wireMockVersion)
+                    {wireMockVersionOptions(configView.versions, selectedMock.wireMockVersion)
                       .map((version) => <option key={version.version} value={version.version}>
                         {version.version}{version.selectable ? "" : " (retained)"}
                       </option>)}

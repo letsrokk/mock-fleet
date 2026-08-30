@@ -76,6 +76,20 @@ export function configMutation(result: ConfigMutationResult) {
   return result;
 }
 
+export function wireMockVersionOptions(versions: VersionView[], selectedVersion: string) {
+  return versions
+    .filter((version) => version.selectable || version.version === selectedVersion)
+    .sort((left, right) => compareWireMockVersions(right.version, left.version));
+}
+
+function compareWireMockVersions(left: string, right: string) {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  return leftParts[0] - rightParts[0]
+    || leftParts[1] - rightParts[1]
+    || leftParts[2] - rightParts[2];
+}
+
 export async function errorMessage(response: Response, fallback: string) {
   const text = (await response.text()).trim();
   if (!text) {
