@@ -85,6 +85,11 @@ public final class FleetApiClient {
 
     public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,
             ConfigApplyMode applyMode) {
+        return updateConfig(mockId, resourceVersion, options, resources, null, applyMode);
+    }
+
+    public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,
+            String wireMockVersion, ConfigApplyMode applyMode) {
         if (resourceVersion == null || resourceVersion.isBlank()) {
             throw new IllegalArgumentException("resourceVersion is required");
         }
@@ -105,6 +110,11 @@ public final class FleetApiClient {
             payload.putNull("resources");
         } else {
             payload.set("resources", mapper.valueToTree(resources));
+        }
+        if (wireMockVersion == null) {
+            payload.putNull("wireMockVersion");
+        } else {
+            payload.put("wireMockVersion", wireMockVersion);
         }
         payload.put("applyMode", applyMode.name());
         return json(HttpMethod.PUT, "/__fleet/api/config/" + MockIdValidator.requireValid(mockId), payload);

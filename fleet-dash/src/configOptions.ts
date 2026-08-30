@@ -15,11 +15,13 @@ export type ResourceData = {
 };
 
 export type ConfigData = {
+  version?: string | null;
   options: string[];
   resources: ResourceData;
 };
 
 export type UserConfigData = {
+  version?: string | null;
   options: string[];
   resources: ResourceData | null;
 };

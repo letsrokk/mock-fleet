@@ -14,7 +14,8 @@ export async function loadConfigAndOptionCatalog(fetcher: typeof fetch = fetch) 
     throw new Error(await errorMessage(configResponse, `Unable to load config (${configResponse.status})`));
   }
 
-  const optionCatalogResponse = await fetcher(CONFIG_OPTIONS_API_PATH);
+  const config = (await configResponse.json()) as ConfigView;
+  const optionCatalogResponse = await fetcher(`${CONFIG_OPTIONS_API_PATH}?version=${encodeURIComponent(config.defaultVersion)}`);
   if (!optionCatalogResponse.ok) {
     throw new Error(await errorMessage(
       optionCatalogResponse,
@@ -23,7 +24,7 @@ export async function loadConfigAndOptionCatalog(fetcher: typeof fetch = fetch) 
   }
 
   return {
-    config: (await configResponse.json()) as ConfigView,
+    config,
     optionCatalog: (await optionCatalogResponse.json()) as OptionCatalogView
   };
 }

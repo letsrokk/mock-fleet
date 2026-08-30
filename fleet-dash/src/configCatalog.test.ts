@@ -4,7 +4,7 @@ import { loadConfigAndOptionCatalog, refreshConfigAndOptionCatalog } from "./con
 describe("configuration catalog loading", () => {
   it("loads config and the versioned option catalog from their separate API endpoints", async () => {
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ mockIds: ["orders"] }))
+      .mockResolvedValueOnce(jsonResponse({ mockIds: ["orders"], defaultVersion: "3.13.2" }))
       .mockResolvedValueOnce(jsonResponse({
         wireMockVersion: "3.13.2",
         catalogStatus: "newer_unresearched",
@@ -14,9 +14,9 @@ describe("configuration catalog loading", () => {
     const result = await loadConfigAndOptionCatalog(fetcher);
 
     expect(fetcher).toHaveBeenNthCalledWith(1, "/__fleet/api/config");
-    expect(fetcher).toHaveBeenNthCalledWith(2, "/__fleet/api/config/options");
+    expect(fetcher).toHaveBeenNthCalledWith(2, "/__fleet/api/config/options?version=3.13.2");
     expect(result).toEqual({
-      config: { mockIds: ["orders"] },
+      config: { mockIds: ["orders"], defaultVersion: "3.13.2" },
       optionCatalog: {
         wireMockVersion: "3.13.2",
         catalogStatus: "newer_unresearched",
@@ -27,14 +27,14 @@ describe("configuration catalog loading", () => {
 
   it("retains the complete prior state when a catalog refresh fails", async () => {
     const previous = await loadConfigAndOptionCatalog(vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ mockIds: ["orders"] }))
+      .mockResolvedValueOnce(jsonResponse({ mockIds: ["orders"], defaultVersion: "3.13.2" }))
       .mockResolvedValueOnce(jsonResponse({
         wireMockVersion: "3.13.2",
         catalogStatus: "supported",
         options: [{ name: "--verbose" }]
       })));
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ mockIds: ["payments"] }))
+      .mockResolvedValueOnce(jsonResponse({ mockIds: ["payments"], defaultVersion: "3.13.2" }))
       .mockResolvedValueOnce(errorResponse("Catalog service unavailable"));
 
     const result = await refreshConfigAndOptionCatalog(previous, fetcher);

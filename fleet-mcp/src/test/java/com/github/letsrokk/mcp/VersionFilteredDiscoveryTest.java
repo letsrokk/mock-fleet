@@ -2,7 +2,6 @@ package com.github.letsrokk.mcp;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
@@ -13,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class VersionFilteredDiscoveryTest {
 
     @Test
-    void toolsListOmitsOperationsUnsupportedByTheConfiguredWireMockVersion() {
+    void toolsListRetainsOperationsForMixedVersionMocks() {
         String sessionId = given()
                 .contentType("application/json")
                 .accept("application/json, text/event-stream")
@@ -50,7 +49,7 @@ class VersionFilteredDiscoveryTest {
         .then()
                 .statusCode(200)
                 .body(containsString("list_stubs"))
-                .body(not(containsString("get_body_file")))
-                .body(not(containsString("list_unmatched_stubs")));
+                .body(containsString("get_body_file"))
+                .body(containsString("list_unmatched_stubs"));
     }
 }

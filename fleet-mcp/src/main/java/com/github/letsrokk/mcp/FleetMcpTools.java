@@ -116,6 +116,7 @@ public final class FleetMcpTools {
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
+            @ToolArg(description = "Exact selectable WireMock version; omit to inherit the catalog default", required = false) String wireMockVersion,
             @ToolArg(description = "Complete mock-specific WireMock CLI option override list") List<String> options,
             @ToolArg(description = "Kubernetes requests and limits override; omit to inherit baseline resources", required = false) MockResources resources,
             @ToolArg(description = "How to apply the saved configuration") String applyMode) {
@@ -127,7 +128,9 @@ public final class FleetMcpTools {
                 throw new IllegalArgumentException("resources.limits is required when resources are provided");
             }
             ConfigApplyMode parsedApplyMode = parseApplyMode(applyMode);
-            JsonNode view = fleetApi.updateConfig(mockId, resourceVersion, options, resources, parsedApplyMode);
+            JsonNode view = wireMockVersion == null
+                    ? fleetApi.updateConfig(mockId, resourceVersion, options, resources, parsedApplyMode)
+                    : fleetApi.updateConfig(mockId, resourceVersion, options, resources, wireMockVersion, parsedApplyMode);
             JsonNode configView = requireMutationEnvelope(view, mockId);
             ObjectNode result = mapper.createObjectNode();
             result.set("resourceVersion", configView.path("resourceVersion"));
@@ -542,6 +545,7 @@ public final class FleetMcpTools {
             return action.get();
         });
     }
+
 
     private ObjectNode requireLifecycleResponse(String mockId) {
         return requireLifecycleResponse(mockId, "start", Set.of("RUNNING", "STARTING"),

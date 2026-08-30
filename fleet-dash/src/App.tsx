@@ -104,6 +104,7 @@ export default function App() {
   const [selectedMockId, setSelectedMockId] = useState<string | null>(null);
   const [selectedMappingsMockId, setSelectedMappingsMockId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
+  const [draftWireMockVersion, setDraftWireMockVersion] = useState<string | null>(null);
   const [activeMocksFilter, setActiveMocksFilter] = useState("");
   const [mappingsFilter, setMappingsFilter] = useState("");
   const [newMockId, setNewMockId] = useState("");
@@ -125,6 +126,7 @@ export default function App() {
   const mountedRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
   const optionCollapseStateReadyRef = useRef(hasStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY));
+  const optionCatalogRequestRef = useRef(0);
 
   const selectedMock = useMemo(
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
@@ -163,6 +165,7 @@ export default function App() {
       if (nextSelected && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
         setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
+        setDraftWireMockVersion(mock?.user.version ?? null);
         setConfigDirty(false);
       }
       setError(null);
@@ -172,6 +175,25 @@ export default function App() {
       if (mountedRef.current) {
         setLoadingConfig(false);
         setRefreshing(false);
+      }
+    }
+  }
+
+  async function loadOptionCatalog(version: string) {
+    const request = ++optionCatalogRequestRef.current;
+    try {
+      const response = await fetch(`/__fleet/api/config/options?version=${encodeURIComponent(version)}`);
+      if (!response.ok) {
+        throw new Error(await errorMessage(response, "Unable to load WireMock option catalog."));
+      }
+      const catalog = (await response.json()) as OptionCatalogView;
+      if (request === optionCatalogRequestRef.current && catalog.wireMockVersion === version) {
+        setConfigCatalogState((current) => current ? { ...current, optionCatalog: catalog } : current);
+        setError(null);
+      }
+    } catch (loadError) {
+      if (request === optionCatalogRequestRef.current) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to load WireMock option catalog.");
       }
     }
   }
@@ -278,6 +300,7 @@ export default function App() {
           resourceVersion: configView.resourceVersion,
           options: nextOptions,
           resources: resourcesFromDraft(draft, selectedMock?.baseline ?? emptyConfig()),
+          wireMockVersion: draftWireMockVersion,
           applyMode
         })
       });
@@ -412,6 +435,7 @@ export default function App() {
     setSelectedMockId(mockId);
     const mock = configView?.mocks.find((item) => item.mockId === mockId);
     setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
+    setDraftWireMockVersion(mock?.user.version ?? null);
     setConfigDirty(false);
   }
 
@@ -438,6 +462,7 @@ export default function App() {
       return;
     }
     setDraft(draftFromConfig(selectedMock.effective, optionCatalog?.options ?? []));
+    setDraftWireMockVersion(selectedMock.user.version ?? null);
     setConfigDirty(false);
   }
 
@@ -986,6 +1011,24 @@ export default function App() {
                 <span className="panel-status">{lifecycleLabel(selectedMock.lifecycle)}</span>
               </div>
               <div className="editor-body">
+                <label className="form-section">
+                  WireMock version
+                  <select value={draftWireMockVersion ?? ""} onChange={(event) => {
+                    const version = event.target.value || null;
+                    setDraftWireMockVersion(version);
+                    setConfigDirty(true);
+                    void loadOptionCatalog(version ?? configView.defaultVersion);
+                  }}>
+                    <option value="">Inherit default ({configView.defaultVersion})</option>
+                    {configView.versions.filter((version) => version.selectable || version.version === selectedMock.wireMockVersion)
+                      .map((version) => <option key={version.version} value={version.version}>
+                        {version.version}{version.selectable ? "" : " (retained)"}
+                      </option>)}
+                  </select>
+                  {selectedMock.runtimeVersion && selectedMock.runtimeVersion !== selectedMock.wireMockVersion ? (
+                    <span className="option-description">Desired {selectedMock.wireMockVersion}; active runtime {selectedMock.runtimeVersion}.</span>
+                  ) : null}
+                </label>
                 <div className="form-section">
                   <OptionCatalogPresentation
                     catalog={catalog}
@@ -1119,7 +1162,8 @@ export default function App() {
                 <button className="danger-text-button" onClick={requestDeleteOverride} disabled={saving}>
                   Delete override
                 </button>
-                <button className="primary-button" onClick={requestSaveConfig} disabled={saving}>
+                <button className="primary-button" onClick={requestSaveConfig}
+                  disabled={saving || catalog.wireMockVersion !== (draftWireMockVersion ?? configView.defaultVersion)}>
                   {saving ? "Saving..." : "Save"}
                 </button>
               </div>
@@ -1497,7 +1541,7 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
 }
 
 function emptyMockConfigView(mockId: string): MockConfigView {
-  return { mockId, lifecycle: "STOPPED", baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig() };
+  return { mockId, lifecycle: "STOPPED", baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig(), wireMockVersion: "", runtimeVersion: null };
 }
 
 function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
