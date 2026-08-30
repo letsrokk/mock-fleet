@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import com.hazelcast.config.Config;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.map.IMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MockCapacityTest {
@@ -51,10 +53,12 @@ class MockCapacityTest {
         secondHazelcast = newJoinedHazelcast(clusterName, secondMemberPort, members);
         assertEquals(2, hazelcast.getCluster().getMembers().size());
         assertEquals(2, secondHazelcast.getCluster().getMembers().size());
+        awaitClusterSafe(hazelcast);
         MockCapacity firstReplica = new MockCapacity(hazelcast, config(2, 2, 2));
         MockCapacity secondReplica = new MockCapacity(secondHazelcast, config(2, 2, 2));
         CountDownLatch ready = new CountDownLatch(3);
         CountDownLatch claim = new CountDownLatch(1);
+        CountDownLatch completed = new CountDownLatch(3);
         AtomicInteger accepted = new AtomicInteger();
         AtomicInteger exhausted = new AtomicInteger();
         ExecutorService callers = Executors.newFixedThreadPool(3);
@@ -66,20 +70,24 @@ class MockCapacityTest {
                 MockCapacity replica = index % 2 == 0 ? firstReplica : secondReplica;
                 results.add(callers.submit(() -> {
                     ready.countDown();
-                    assertTrue(claim.await(1, TimeUnit.SECONDS));
+                    assertTrue(claim.await(10, TimeUnit.SECONDS));
                     try {
                         reserve(replica, hazelcast, mockId, "attempt-" + mockId);
                         accepted.incrementAndGet();
                     } catch (MockCapacity.CapacityExceededException expected) {
                         exhausted.incrementAndGet();
+                    } finally {
+                        completed.countDown();
                     }
                     return null;
                 }));
             }
-            assertTrue(ready.await(1, TimeUnit.SECONDS));
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
             claim.countDown();
+            assertTrue(completed.await(10, TimeUnit.SECONDS),
+                    "Concurrent capacity claims did not complete.");
             for (Future<?> result : results) {
-                result.get(2, TimeUnit.SECONDS);
+                result.get();
             }
 
             assertEquals(2, accepted.get());
@@ -195,6 +203,139 @@ class MockCapacityTest {
                 () -> capacity.reserve("beta", "attempt-beta"));
         assertTrue(capacity.complete("alpha", "attempt-alpha", () -> lifecycles.put("alpha",
                 MockPodLifecycle.running("attempt-alpha", "mock-fleet-alpha-attempt-alpha"))));
+    }
+
+    @Test
+    void renewingAReservationDoesNotWaitForAnUnrelatedLifecycleLock() throws Exception {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
+                HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        reserve(capacity, hazelcast, "alpha", "attempt-alpha");
+        reserve(capacity, hazelcast, "beta", "attempt-beta");
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+
+        lifecycles.lock("beta");
+        try {
+            Future<Boolean> renewal = worker.submit(
+                    () -> capacity.renew("alpha", "attempt-alpha"));
+
+            assertTrue(renewal.get(10, TimeUnit.SECONDS));
+        } finally {
+            lifecycles.unlock("beta");
+            worker.shutdownNow();
+        }
+    }
+
+    @Test
+    void reservingAvailableCapacityDoesNotWaitForAnUnrelatedLifecycleLock() throws Exception {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
+                HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        reserve(capacity, hazelcast, "alpha", "attempt-alpha");
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+
+        lifecycles.lock("alpha");
+        try {
+            Future<?> reservation = worker.submit(
+                    () -> reserve(capacity, hazelcast, "beta", "attempt-beta"));
+
+            reservation.get(10, TimeUnit.SECONDS);
+        } finally {
+            lifecycles.unlock("alpha");
+            worker.shutdownNow();
+        }
+    }
+
+    @Test
+    void reservationFenceDoesNotHoldTheGlobalCapacityLockDuringItsAction() throws Exception {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        reserve(capacity, hazelcast, "alpha", "attempt-alpha");
+        CountDownLatch actionEntered = new CountDownLatch(1);
+        CountDownLatch finishAction = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> fenced = workers.submit(() -> capacity.withReservationFence(
+                    "alpha", "attempt-alpha", () -> {
+                        actionEntered.countDown();
+                        try {
+                            assertTrue(finishAction.await(15, TimeUnit.SECONDS));
+                        } catch (InterruptedException error) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(error);
+                        }
+                        return null;
+                    }));
+            assertTrue(actionEntered.await(10, TimeUnit.SECONDS));
+            Future<?> unrelatedReservation = workers.submit(
+                    () -> reserve(capacity, hazelcast, "beta", "attempt-beta"));
+
+            unrelatedReservation.get(10, TimeUnit.SECONDS);
+            finishAction.countDown();
+            fenced.get(10, TimeUnit.SECONDS);
+        } finally {
+            finishAction.countDown();
+            workers.shutdownNow();
+        }
+    }
+
+    @Test
+    void renewalDoesNotWaitForItsReservationFence() throws Exception {
+        hazelcast = newHazelcast();
+        MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        reserve(capacity, hazelcast, "alpha", "attempt-alpha");
+        CountDownLatch actionEntered = new CountDownLatch(1);
+        CountDownLatch finishAction = new CountDownLatch(1);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+
+        try {
+            Future<?> fenced = workers.submit(() -> capacity.withReservationFence(
+                    "alpha", "attempt-alpha", () -> {
+                        actionEntered.countDown();
+                        try {
+                            assertTrue(finishAction.await(15, TimeUnit.SECONDS));
+                        } catch (InterruptedException error) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(error);
+                        }
+                        return null;
+                    }));
+            assertTrue(actionEntered.await(10, TimeUnit.SECONDS));
+
+            Future<Boolean> renewal = workers.submit(
+                    () -> capacity.renew("alpha", "attempt-alpha"));
+
+            assertTrue(renewal.get(10, TimeUnit.SECONDS));
+            finishAction.countDown();
+            fenced.get(10, TimeUnit.SECONDS);
+            assertTrue(capacity.isCurrentReservation("alpha", "attempt-alpha"));
+        } finally {
+            finishAction.countDown();
+            workers.shutdownNow();
+        }
+    }
+
+    @Test
+    void olderRenewalRetriesInsteadOfOverwritingANewerTimestamp() {
+        @SuppressWarnings("unchecked")
+        IMap<String, MockCapacity.ReservationLiveness> liveness = mock(IMap.class);
+        MockCapacity.ReservationLiveness original =
+                new MockCapacity.ReservationLiveness("attempt-alpha", "owner", 100L);
+        MockCapacity.ReservationLiveness newer =
+                new MockCapacity.ReservationLiveness("attempt-alpha", "owner", 300L);
+        MockCapacity.ReservationLiveness firstUpdate =
+                new MockCapacity.ReservationLiveness("attempt-alpha", "owner", 200L);
+        when(liveness.get("alpha")).thenReturn(original, newer);
+        when(liveness.replace("alpha", original, firstUpdate)).thenReturn(false);
+        when(liveness.replace("alpha", newer, newer)).thenReturn(true);
+
+        assertTrue(MockCapacity.renewLiveness(
+                liveness, "alpha", "attempt-alpha", "owner", 200L));
+
+        verify(liveness).replace("alpha", newer, newer);
     }
 
     @Test
@@ -342,6 +483,16 @@ class MockCapacityTest {
             return socket.getLocalPort();
         } catch (IOException error) {
             throw new IllegalStateException("Cannot allocate a local test port.", error);
+        }
+    }
+
+    private void awaitClusterSafe(HazelcastInstance instance) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!instance.getPartitionService().isClusterSafe()) {
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError("Hazelcast cluster did not become partition-safe.");
+            }
+            Thread.sleep(10L);
         }
     }
 
