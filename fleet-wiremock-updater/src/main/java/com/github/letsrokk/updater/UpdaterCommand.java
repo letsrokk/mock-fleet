@@ -7,7 +7,6 @@ import io.quarkus.runtime.annotations.QuarkusMain;
 import jakarta.inject.Inject;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.util.Map;
 
 @QuarkusMain
 public final class UpdaterCommand implements QuarkusApplication {
@@ -18,12 +17,13 @@ public final class UpdaterCommand implements QuarkusApplication {
         RegistryV2Client.Credentials credentials = config.registryUsername().map(username ->
                 new RegistryV2Client.Credentials(username, config.registryPassword().orElseThrow(
                         () -> new IllegalArgumentException("registryPassword is required with registryUsername.")))).orElse(null);
-        Map<String, String> selectable = CatalogSelection.select(config.repository(),
+        CatalogSelection.Selection selection = CatalogSelection.select(config.repository(),
                 new RegistryV2Client(HttpClient.newHttpClient(), json, credentials).tags(URI.create(config.registryUrl()), config.repository(), config.pageSize()), config.minorLines());
+        var selectable = selection.selectable();
         String current = kubernetes.configMaps().inNamespace(config.namespace()).withName(config.catalogConfigMapName()).get()
                 .getData().get("defaultVersion");
-        String next = selectable.keySet().stream().filter(version -> CatalogSelection.matchesConstraint(config.defaultVersionConstraint(), version))
-                .max((left, right) -> WireMockTag.ORDER.compare(WireMockTag.parse(left).orElseThrow(), WireMockTag.parse(right).orElseThrow()))
+        String next = selection.candidates().stream().filter(tag -> CatalogSelection.matchesConstraint(config.defaultVersionConstraint(), tag.version()))
+                .max(WireMockTag.ORDER).map(WireMockTag::version)
                 .filter(candidate -> current == null || WireMockTag.ORDER.compare(WireMockTag.parse(candidate).orElseThrow(), WireMockTag.parse(current).orElseThrow()) >= 0)
                 .orElse(current);
         if (next == null) throw new IllegalStateException("No selectable version satisfies defaultVersionConstraint.");
