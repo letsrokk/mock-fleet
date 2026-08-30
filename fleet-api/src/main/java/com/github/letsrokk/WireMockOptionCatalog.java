@@ -186,6 +186,10 @@ public final class WireMockOptionCatalog {
             if (optionValue == null && optional) {
                 continue;
             }
+            if (optionValue == null && "select".equals(definition.kind())
+                    && definition.values().equals(List.of("true", "false"))) {
+                optionValue = "true";
+            }
             if (optionValue == null || optionValue.isBlank()) {
                 throw invalid("WireMock option requires a value: " + name, name);
             }
@@ -216,6 +220,10 @@ public final class WireMockOptionCatalog {
         }
         if ("PROCESS_EXIT".equals(definition.unavailableReason())) {
             return "WireMock option exits before mock startup and is unavailable: " + definition.name();
+        }
+        if ("INCONSISTENT_VALUE_HANDLING".equals(definition.unavailableReason())) {
+            return "WireMock option is unavailable because its CLI definition cannot accept the value it requires: "
+                    + definition.name();
         }
         return "WireMock option is unavailable: " + definition.name();
     }

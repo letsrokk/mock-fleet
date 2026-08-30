@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -21,6 +22,44 @@ class WireMockOptionMatrixTest {
     void declaresTheResearchedWireMockThreeRange() {
         assertEquals("3.0.0", matrix.minimumSupportedVersion().toString());
         assertEquals("3.13.2", matrix.maximumResearchedVersion().toString());
+    }
+
+    @Test
+    void exposesAuditedWireMockControlShapes() {
+        Map<String, Set<String>> optionsByKind = WireMockOptionCatalog.baseDefinitions().stream()
+                .collect(Collectors.groupingBy(
+                        WireMockOptionCatalog.OptionDefinition::kind,
+                        Collectors.mapping(WireMockOptionCatalog.OptionDefinition::name, Collectors.toSet())));
+
+        assertEquals(Set.of(
+                "--admin-api-require-https", "--help", "--version", "--disable-http", "--verbose",
+                "--print-all-network-traffic", "--disable-request-logging", "--disable-banner",
+                "--no-request-journal", "--record-mappings", "--preserve-host-header",
+                "--preserve-user-agent-proxy-header", "--enable-browser-proxying", "--trust-all-proxy-targets",
+                "--https-require-client-cert", "--disable-http2-plain", "--disable-http2-tls", "--disable-gzip",
+                "--enable-stub-cors", "--disable-strict-http-headers", "--global-response-templating",
+                "--local-response-templating", "--disable-response-templating", "--disable-extensions-scanning",
+                "--disable-optimize-xml-factories-loading"), optionsByKind.get("flag"));
+        assertEquals(Set.of(
+                "--admin-api-basic-auth", "--bind-address", "--root-dir", "--load-resources-from-classpath",
+                "--match-headers", "--filename-template", "--proxy-all", "--proxy-via",
+                "--supported-proxy-encodings", "--allow-proxy-targets", "--deny-proxy-targets", "--ca-keystore",
+                "--ca-keystore-password", "--ca-keystore-type", "--trust-proxy-target", "--https-keystore",
+                "--keystore-type", "--keystore-password", "--key-manager-password", "--https-truststore",
+                "--truststore-type", "--truststore-password", "--extensions", "--timeout"),
+                optionsByKind.get("input"));
+        assertEquals(Set.of(
+                "--port", "--https-port", "--logged-response-body-size-limit", "--max-request-journal-entries",
+                "--proxy-timeout", "--async-response-threads", "--container-threads",
+                "--max-http-client-connections", "--jetty-acceptor-threads", "--jetty-accept-queue-size",
+                "--jetty-header-buffer-size", "--jetty-header-request-size", "--jetty-header-response-size",
+                "--jetty-idle-timeout", "--jetty-stop-timeout", "--webhook-threadpool-size"),
+                optionsByKind.get("number"));
+        assertEquals(Set.of(
+                "--proxy-pass-through", "--use-chunked-encoding", "--disable-connection-reuse",
+                "--async-response-enabled"), optionsByKind.get("select"));
+        assertEquals(Set.of("--max-template-cache-entries"), optionsByKind.get("optional_number"));
+        assertEquals(Set.of("--permitted-system-keys"), optionsByKind.get("optional_input"));
     }
 
     @Test
@@ -70,6 +109,17 @@ class WireMockOptionMatrixTest {
             assertFalse(options.get(name).available(), name);
             assertEquals("PROCESS_EXIT", options.get(name).unavailableReason(), name);
         }
+    }
+
+    @Test
+    void marksTimeoutUnavailableBecauseWireMockCannotAcceptItsRequiredValue() {
+        WireMockOptionCatalog.OptionDefinition timeout = matrix.resolve(new WireMockVersion(3, 13, 2))
+                .options().stream()
+                .filter(option -> "--timeout".equals(option.name()))
+                .findFirst().orElseThrow();
+
+        assertFalse(timeout.available());
+        assertEquals("INCONSISTENT_VALUE_HANDLING", timeout.unavailableReason());
     }
 
     @Test
