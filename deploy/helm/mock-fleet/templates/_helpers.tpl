@@ -51,6 +51,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-mcp" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "mock-fleet.wiremockUpdaterFullname" -}}
+{{- printf "%s-wiremock-updater" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
 {{- define "mock-fleet.wiremockEgressNetworkPolicyName" -}}
 {{- printf "%s-wiremock-egress" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
@@ -144,6 +148,11 @@ app.kubernetes.io/component: dash
 app.kubernetes.io/component: mcp
 {{- end -}}
 
+{{- define "mock-fleet.wiremockUpdaterSelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: wiremock-updater
+{{- end -}}
+
 {{- define "mock-fleet.serviceAccountName" -}}
 {{- if .Values.serviceAccount.name -}}
 {{- .Values.serviceAccount.name -}}
@@ -158,6 +167,22 @@ app.kubernetes.io/component: mcp
 {{- else if .Values.wiremock.serviceAccount.create -}}
 {{- printf "%s-wiremock" (include "mock-fleet.fullname" .) -}}
 {{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockUpdaterServiceAccountName" -}}
+{{- if .Values.wiremock.versionUpdater.serviceAccount.name -}}
+{{- .Values.wiremock.versionUpdater.serviceAccount.name -}}
+{{- else if .Values.wiremock.versionUpdater.serviceAccount.create -}}
+{{- include "mock-fleet.wiremockUpdaterFullname" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockUpdaterRoleName" -}}
+{{- printf "%s-role" (include "mock-fleet.wiremockUpdaterFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.wiremockUpdaterRoleBindingName" -}}
+{{- printf "%s-role-binding" (include "mock-fleet.wiremockUpdaterFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "mock-fleet.roleName" -}}

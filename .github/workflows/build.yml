@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       maven_version:
-        description: Maven project version to use for packaged API/proxy/MCP artifacts.
+        description: Maven project version to use for packaged API/proxy/MCP/updater artifacts.
         required: false
         default: ""
         type: string
@@ -53,6 +53,12 @@ jobs:
 
       - name: Test security boundary rendering
         run: deploy/helm/mock-fleet/tests/render-security.sh
+
+      - name: Test WireMock updater rendering
+        run: deploy/helm/mock-fleet/tests/render-updater.sh
+
+      - name: Verify WireMock updater workflow contracts
+        run: ruby tests/workflow-updater-contract.rb
 
       - name: Test local rebuild selection
         run: bin/local/tests/deploy-rebuild.sh
@@ -152,6 +158,37 @@ jobs:
         with:
           name: fleet-mcp-package
           path: fleet-mcp/target/quarkus-app
+          if-no-files-found: error
+
+  fleet-wiremock-updater:
+    name: Build fleet-wiremock-updater
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Set updater version
+        if: ${{ inputs.maven_version != '' }}
+        working-directory: fleet-wiremock-updater
+        run: ./mvnw -B versions:set -DnewVersion="${{ inputs.maven_version }}" -DgenerateBackupPoms=false
+
+      - name: Build updater
+        working-directory: fleet-wiremock-updater
+        run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Upload updater package
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-wiremock-updater-package
+          path: fleet-wiremock-updater/target/quarkus-app
           if-no-files-found: error
 
   fleet-dash:

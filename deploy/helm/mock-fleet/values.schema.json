@@ -199,6 +199,61 @@
     "wiremock": {
       "type": "object",
       "properties": {
+        "versionUpdater": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "schedule": { "type": "string", "minLength": 1 },
+            "timeZone": { "type": "string", "minLength": 1 },
+            "defaultVersionConstraint": {
+              "type": "string",
+              "pattern": "^3\\.(x|(?:0|[1-9][0-9]*)\\.x)$"
+            },
+            "minorLines": { "type": "integer", "minimum": 1 },
+            "registry": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "url": { "type": "string", "minLength": 1, "pattern": "^https?://" },
+                "repository": { "type": "string", "minLength": 1 },
+                "credentialsSecretName": { "type": "string" }
+              },
+              "required": ["url", "repository", "credentialsSecretName"]
+            },
+            "image": { "$ref": "#/definitions/image" },
+            "serviceAccount": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "create": { "type": "boolean" },
+                "name": { "type": "string" },
+                "annotations": { "type": "object" }
+              },
+              "required": ["create", "name", "annotations"]
+            },
+            "resources": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "requests": { "$ref": "#/definitions/resourcePair" },
+                "limits": { "$ref": "#/definitions/resourcePair" }
+              },
+              "required": ["requests", "limits"]
+            }
+          },
+          "required": [
+            "enabled",
+            "schedule",
+            "timeZone",
+            "defaultVersionConstraint",
+            "minorLines",
+            "registry",
+            "image",
+            "serviceAccount",
+            "resources"
+          ]
+        },
         "podNamePrefix": { "type": "string", "minLength": 1 },
         "containerName": { "type": "string", "minLength": 1 },
         "containerImage": { "type": "string", "minLength": 1 },
@@ -305,6 +360,7 @@
       },
       "required": [
         "podNamePrefix",
+        "versionUpdater",
         "containerName",
         "containerImage",
         "supportedImageTags",

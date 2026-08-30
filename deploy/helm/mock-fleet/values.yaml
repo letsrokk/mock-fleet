@@ -237,8 +237,32 @@ fleet:
       limits:
         cpu: "0.5"
         memory: 512Mi
-
 wiremock:
+  versionUpdater:
+    enabled: false
+    schedule: "0 2 * * *"
+    timeZone: Etc/UTC
+    defaultVersionConstraint: "3.x"
+    minorLines: 5
+    registry:
+      url: https://registry-1.docker.io
+      repository: wiremock/wiremock
+      credentialsSecretName: ""
+    image:
+      repository: ghcr.io/letsrokk/mock-fleet/wiremock-updater
+      tag: ""
+      pullPolicy: IfNotPresent
+    serviceAccount:
+      create: true
+      name: ""
+      annotations: {}
+    resources:
+      requests:
+        cpu: "0.05"
+        memory: 128Mi
+      limits:
+        cpu: "0.5"
+        memory: 512Mi
   podNamePrefix: mock-fleet
   containerName: wiremock
   containerImage: wiremock/wiremock:3.13.2-2
