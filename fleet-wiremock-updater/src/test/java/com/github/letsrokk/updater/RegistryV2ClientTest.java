@@ -96,7 +96,7 @@ class RegistryV2ClientTest {
                 .tags(base(server), "acme/image", 10));
     }
 
-    @Test void rejectsMalformedPaginationInsteadOfSilentlyStopping() throws Exception {
+    @Test void treatsWellFormedUnrelatedLinkRelationsAsPaginationComplete() throws Exception {
         HttpServer server = server();
         server.createContext("/v2/acme/image/tags/list", exchange -> {
             exchange.getResponseHeaders().add("Link", "</next>; rel=\"previous\"");
@@ -104,9 +104,13 @@ class RegistryV2ClientTest {
         });
         server.start();
 
-        IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> client(null).tags(base(server), "acme/image", 10));
-        assertTrue(error.getMessage().contains("Link"));
+        assertEquals(List.of("3.1.0"), client(null).tags(base(server), "acme/image", 10));
+    }
+
+    @Test void rejectsMalformedInvalidAndAmbiguousPaginationLinks() throws Exception {
+        assertRejectedLink("not-a-link", "Malformed");
+        assertRejectedLink("<http://[invalid>; rel=next", "invalid next target");
+        assertRejectedLink("</next-a>; rel=next, </next-b>; rel=next", "multiple next");
     }
 
     @Test void rejectsOffOriginPaginationBeforeLeakingAuthorization() throws Exception {
@@ -216,6 +220,19 @@ class RegistryV2ClientTest {
 
     private RegistryV2Client client(RegistryV2Client.Credentials credentials) {
         return client(credentials, RegistryV2Client.Limits.defaults());
+    }
+
+    private void assertRejectedLink(String link, String message) throws Exception {
+        HttpServer server = server();
+        server.createContext("/v2/acme/image/tags/list", exchange -> {
+            exchange.getResponseHeaders().add("Link", link);
+            json(exchange, 200, "{\"tags\":[\"3.1.0\"]}");
+        });
+        server.start();
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client(null).tags(base(server), "acme/image", 10));
+        assertTrue(error.getMessage().contains(message), error.getMessage());
     }
 
     private RegistryV2Client client(RegistryV2Client.Credentials credentials, RegistryV2Client.Limits limits) {

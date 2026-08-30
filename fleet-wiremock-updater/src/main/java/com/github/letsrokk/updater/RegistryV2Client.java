@@ -206,7 +206,7 @@ final class RegistryV2Client {
                 }
             }
         }
-        if (result == null) throw new IllegalStateException("Registry Link header lacks required rel=next.");
+        if (result == null) return null;
         requireSameOrigin(origin, result);
         if (result.getUserInfo() != null || result.getFragment() != null) {
             throw new IllegalStateException("Registry Link next target is malformed.");
