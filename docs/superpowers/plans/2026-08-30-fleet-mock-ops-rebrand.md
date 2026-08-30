@@ -447,7 +447,7 @@ git commit -m "Update operations for Fleet Mock Ops"
 
 ---
 
-### Task 5: Run integrated verification and update PR #114
+### Task 5: Run integrated verification and refresh PR #114
 
 **Files:**
 - Verify only; modify files only to correct an in-scope failure discovered by these checks.
@@ -505,13 +505,42 @@ git diff master...HEAD --stat
 
 Expected: no unstaged changes, no ignored wrapper JAR staged, and only the approved rebrand plus the preceding simplification work in PR #114.
 
-- [ ] **Step 5: Push and verify the PR**
+- [ ] **Step 5: Push, refresh, and verify the PR**
 
-Push `codex/repository-simplification`, then verify PR #114 reports the new commits and remains based on `master`.
+Push `codex/repository-simplification`, then update PR #114 to this exact title:
+
+```text
+Simplify repository and introduce Fleet Mock Ops
+```
+
+Replace the PR description with:
+
+```markdown
+## Summary
+
+- Simplify duplicate routing, version resolution, schema generation, JSON transport, payload validation, and dense control flow across the repository.
+- Rebrand the WireMock catalog reconciliation component as Fleet Mock Ops with a clean break across its module, Java package, Helm values, Kubernetes resources, image, workflows, scripts, tests, and current documentation.
+- Give Fleet MCP and Fleet Mock Ops independent Maven Wrapper 3.3.2 launchers pinned to Maven 3.9.9.
+- Keep Mock Ops reconciliation behavior unchanged and expose its existing configurable schedule as `mockOps.schedule`, defaulting to daily at `0 2 * * *` in `Etc/UTC`.
+
+## Verification
+
+- Fleet API: 313 tests; package build passed.
+- Fleet Proxy: 64 tests; package build passed.
+- Fleet MCP: 299 tests; package build passed.
+- Fleet Mock Ops: 38 tests; package build passed through its own wrapper.
+- Dashboard: 48 tests; production build passed.
+- Helm render, lint, workflow, cluster/static, dependency-security, module identity, and stale-name contracts passed.
+- `git diff --check` passed.
+
+Total: 762 tests passed with no failures or skips.
+```
+
+Use `gh pr edit 114 --title ... --body ...` only after every listed check has fresh passing evidence. Then verify PR #114 reports the refreshed metadata, new commits, and the expected base and head.
 
 ```bash
 git push https://github.com/letsrokk/mock-fleet.git codex/repository-simplification
-gh pr view 114 --json url,state,baseRefName,headRefName,commits
+gh pr view 114 --json url,state,title,body,baseRefName,headRefName,commits
 ```
 
-Expected: PR state `OPEN`, base `master`, head `codex/repository-simplification`, and all Fleet Mock Ops commits present.
+Expected: PR state `OPEN`, title `Simplify repository and introduce Fleet Mock Ops`, base `master`, head `codex/repository-simplification`, the exact refreshed description, and all Fleet Mock Ops commits present.
