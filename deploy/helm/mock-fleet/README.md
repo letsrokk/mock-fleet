@@ -401,33 +401,33 @@ MCP publishes 31 tools, including `start_mock` and `get_recording_status`; `reco
 
 Set `wiremock.serviceAccount.create=false` with a name to use an existing dedicated service account. When admission is enabled, the resolved WireMock and API service-account names must differ, and WireMock must resolve to a nonempty name. The chart rejects a shared identity instead of falling back to the namespace default service account.
 
-### WireMock Version Updater
+### Fleet Mock Ops
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `wiremock.versionUpdater.enabled` | `false` | Deploy the catalog updater CronJob, ServiceAccount, and least-privilege RBAC. |
-| `wiremock.versionUpdater.schedule` | `"0 2 * * *"` | Cron schedule. Jobs use `Forbid` concurrency and make one attempt with no same-Job retry. |
-| `wiremock.versionUpdater.timeZone` | `Etc/UTC` | Kubernetes CronJob time zone. |
-| `wiremock.versionUpdater.defaultVersionConstraint` | `"3.x"` | Default-advance constraint. Accepts only `3.x` or an exact minor line such as `3.13.x`. |
-| `wiremock.versionUpdater.minorLines` | `5` | Number of latest stable 3.x minor lines kept selectable, from 1 through 50. |
-| `wiremock.versionUpdater.registry.url` | `https://registry-1.docker.io` | Registry V2 HTTP(S) origin. |
-| `wiremock.versionUpdater.registry.repository` | `wiremock/wiremock` | Repository path used by the Registry V2 tag-discovery API. |
-| `wiremock.versionUpdater.registry.imageRepository` | `""` | Pullable image repository written to the catalog. Empty derives it from the registry origin and API repository. |
-| `wiremock.versionUpdater.registry.credentialsSecretName` | `""` | Existing Secret whose `username` and `password` keys provide optional registry credentials. |
-| `wiremock.versionUpdater.image.repository` | `ghcr.io/letsrokk/mock-fleet/wiremock-updater` | Updater image repository. |
-| `wiremock.versionUpdater.image.tag` | `""` | Updater image tag. Defaults to the chart `appVersion` when empty. |
-| `wiremock.versionUpdater.image.pullPolicy` | `IfNotPresent` | Updater image pull policy. |
-| `wiremock.versionUpdater.serviceAccount.create` | `true` | Create a dedicated updater ServiceAccount. |
-| `wiremock.versionUpdater.serviceAccount.name` | `""` | Updater ServiceAccount name. A generated name is used when creation is enabled and this is empty. |
-| `wiremock.versionUpdater.serviceAccount.annotations` | `{}` | Annotations for the updater ServiceAccount. |
-| `wiremock.versionUpdater.resources.requests.cpu` | `"0.05"` | Updater CPU request. |
-| `wiremock.versionUpdater.resources.requests.memory` | `128Mi` | Updater memory request. |
-| `wiremock.versionUpdater.resources.limits.cpu` | `"0.5"` | Updater CPU limit. |
-| `wiremock.versionUpdater.resources.limits.memory` | `512Mi` | Updater memory limit. |
+| `mockOps.enabled` | `false` | Deploy the Fleet Mock Ops CronJob, ServiceAccount, and least-privilege RBAC. |
+| `mockOps.schedule` | `"0 2 * * *"` | Cron schedule. Jobs use `Forbid` concurrency and make one attempt with no same-Job retry. |
+| `mockOps.timeZone` | `Etc/UTC` | Kubernetes CronJob time zone. |
+| `mockOps.defaultVersionConstraint` | `"3.x"` | Default-advance constraint. Accepts only `3.x` or an exact minor line such as `3.13.x`. |
+| `mockOps.minorLines` | `5` | Number of latest stable 3.x minor lines kept selectable, from 1 through 50. |
+| `mockOps.registry.url` | `https://registry-1.docker.io` | Registry V2 HTTP(S) origin. |
+| `mockOps.registry.repository` | `wiremock/wiremock` | Repository path used by the Registry V2 tag-discovery API. |
+| `mockOps.registry.imageRepository` | `""` | Pullable image repository written to the catalog. Empty derives it from the registry origin and API repository. |
+| `mockOps.registry.credentialsSecretName` | `""` | Existing Secret whose `username` and `password` keys provide optional registry credentials. |
+| `mockOps.image.repository` | `ghcr.io/letsrokk/mock-fleet/mock-ops` | Fleet Mock Ops image repository. |
+| `mockOps.image.tag` | `""` | Fleet Mock Ops image tag. Defaults to the chart `appVersion` when empty. |
+| `mockOps.image.pullPolicy` | `IfNotPresent` | Fleet Mock Ops image pull policy. |
+| `mockOps.serviceAccount.create` | `true` | Create a dedicated Fleet Mock Ops ServiceAccount. |
+| `mockOps.serviceAccount.name` | `""` | Fleet Mock Ops ServiceAccount name. A generated name is used when creation is enabled and this is empty. |
+| `mockOps.serviceAccount.annotations` | `{}` | Annotations for the Fleet Mock Ops ServiceAccount. |
+| `mockOps.resources.requests.cpu` | `"0.05"` | Fleet Mock Ops CPU request. |
+| `mockOps.resources.requests.memory` | `128Mi` | Fleet Mock Ops memory request. |
+| `mockOps.resources.limits.cpu` | `"0.5"` | Fleet Mock Ops CPU limit. |
+| `mockOps.resources.limits.memory` | `512Mi` | Fleet Mock Ops memory limit. |
 
-The updater implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges. If credentials are configured, the Secret must contain both exact keys. An HTTPS registry accepts only HTTPS Bearer realms, including legitimate cross-origin services such as `auth.docker.io`. An HTTP registry accepts only a same-origin HTTP realm and is intended for a controlled local test registry. Realm userinfo is always rejected, and configured credentials are never sent cross-origin over HTTP. With an empty `imageRepository`, the Docker Hub defaults remain `wiremock/wiremock:<tag>`; another registry derives `<registry-host[:port]>/<repository>:<tag>`. Bracketed IPv6 image-repository authorities are not supported; use a DNS registry name. Set `imageRepository` when the pullable image name uses a different host or path from tag discovery.
+Fleet Mock Ops implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges. If credentials are configured, the Secret must contain both exact keys. An HTTPS registry accepts only HTTPS Bearer realms, including legitimate cross-origin services such as `auth.docker.io`. An HTTP registry accepts only a same-origin HTTP realm and is intended for a controlled local test registry. Realm userinfo is always rejected, and configured credentials are never sent cross-origin over HTTP. With an empty `imageRepository`, the Docker Hub defaults remain `wiremock/wiremock:<tag>`; another registry derives `<registry-host[:port]>/<repository>:<tag>`. Bracketed IPv6 image-repository authorities are not supported; use a DNS registry name. Set `imageRepository` when the pullable image name uses a different host or path from tag discovery.
 
-Each run reads the named baseline, user, and catalog ConfigMaps exactly once. It computes references from the effective per-mock merge: a baseline row applies only when no user row has the same ID, and a user row with an omitted or null version clears a baseline pin. It ignores unstable tags and selects the newest image revision for the latest patch in each of the newest `minorLines` stable 3.x lines. The default advances only to a newer candidate that matches `defaultVersionConstraint`; it never downgrades. If the constrained default is outside that latest-minor window, it is also kept selectable. A version leaving the selectable set receives one reconciliation cycle as `retained.*`, which lets a concurrent API save keep referencing it. A referenced retained version remains; an unreferenced version already retained is removed on the next reconciliation. The updater preserves each retained version's exact image. It does not mutate configuration and has no Pod permissions, so it cannot restart active mocks or resolve desired/runtime drift.
+Each run reads the named baseline, user, and catalog ConfigMaps exactly once. It computes references from the effective per-mock merge: a baseline row applies only when no user row has the same ID, and a user row with an omitted or null version clears a baseline pin. It ignores unstable tags and selects the newest image revision for the latest patch in each of the newest `minorLines` stable 3.x lines. The default advances only to a newer candidate that matches `defaultVersionConstraint`; it never downgrades. If the constrained default is outside that latest-minor window, it is also kept selectable. A version leaving the selectable set receives one reconciliation cycle as `retained.*`, which lets a concurrent API save keep referencing it. A referenced retained version remains; an unreferenced version already retained is removed on the next reconciliation. Fleet Mock Ops preserves each retained version's exact image. It does not mutate configuration and has no Pod permissions, so it cannot restart active mocks or resolve desired/runtime drift.
 
 Reconciliation validates the complete registry result, both configuration documents, every referenced version, and every current catalog entry before it performs one catalog update. The catalog may contain only `defaultVersion`, `selectable.<exact-version>`, and `retained.<exact-version>` keys; every image must be exact and match its key, a version cannot occur in both sections, and the default must be selectable. A malformed response, document, or catalog entry, missing reference, invalid constraint, or other precondition failure leaves the catalog unchanged. The update carries the ConfigMap's observed `resourceVersion`; a concurrent write produces a Kubernetes conflict and the Job fails without overwriting the newer catalog. `backoffLimit: 0` gives each scheduled Job one attempt and no same-Job retry. The next scheduled Job reconciles from a fresh snapshot.
 
@@ -517,7 +517,7 @@ Reconciliation validates the complete registry result, both configuration docume
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
 | `hazelcast.gracefulShutdownMaxWaitSeconds` | `30` | Maximum wait for graceful member shutdown. |
 
-The chart creates `<fullname>-wiremock-user-config` for a new release and marks it `helm.sh/resource-policy: keep`. The API persists UI changes with named `get`, `watch`, `update`, and `patch` operations; it does not create, list, or delete ConfigMaps. A connected upgrade retains a pre-existing object instead of adopting it. For ArgoCD or another offline render/apply workflow, configure reconciliation so it does not overwrite UI-saved data. If `rbac.create=false`, grant the API service account those four named operations on this ConfigMap and pod `get`, `list`, `create`, and `delete`. When the updater is enabled, grant its service account named `get` on `<fullname>-wiremock-config` and `<fullname>-wiremock-user-config`, plus named `get`, `update`, and `patch` on `<fullname>-wiremock-version-catalog`. Do not restore namespace-wide ConfigMap or Deployment authority.
+The chart creates `<fullname>-wiremock-user-config` for a new release and marks it `helm.sh/resource-policy: keep`. The API persists UI changes with named `get`, `watch`, `update`, and `patch` operations; it does not create, list, or delete ConfigMaps. A connected upgrade retains a pre-existing object instead of adopting it. For ArgoCD or another offline render/apply workflow, configure reconciliation so it does not overwrite UI-saved data. If `rbac.create=false`, grant the API service account those four named operations on this ConfigMap and pod `get`, `list`, `create`, and `delete`. When Fleet Mock Ops is enabled, grant its service account named `get` on `<fullname>-wiremock-config` and `<fullname>-wiremock-user-config`, plus named `get`, `update`, and `patch` on `<fullname>-wiremock-version-catalog`. Do not restore namespace-wide ConfigMap or Deployment authority.
 
 ## Local Minikube Values
 
