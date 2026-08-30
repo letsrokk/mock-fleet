@@ -9,6 +9,14 @@ if grep -Fq 'app.kubernetes.io/component: mock-ops' <<<"${disabled_render}"; the
   exit 1
 fi
 
+if helm template unusual-release "${chart_dir}" \
+    --namespace testing \
+    --set wiremock.versionUpdater.enabled=true \
+    >/dev/null 2>&1; then
+  echo "Chart accepted removed wiremock.versionUpdater values" >&2
+  exit 1
+fi
+
 default_enabled_render=$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet \

@@ -257,6 +257,7 @@
     },
     "wiremock": {
       "type": "object",
+      "not": { "required": ["versionUpdater"] },
       "properties": {
         "podNamePrefix": { "type": "string", "minLength": 1 },
         "containerName": { "type": "string", "minLength": 1 },
