@@ -153,6 +153,23 @@ export function incompatibleOptionNames(options: string[], definitions: OptionDe
     .filter((name): name is string => name !== null && !known.has(name)))).sort();
 }
 
+export function incompatibleDraftOptionNames(
+  savedOptions: string[],
+  draft: DraftConfig,
+  definitions: OptionDefinition[]
+) {
+  const structuredOptions = [
+    ...Object.entries(draft.flags)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name),
+    ...Object.entries(draft.values)
+      .filter(([, value]) => value.trim())
+      .map(([name, value]) => `${name}=${value.trim()}`)
+  ];
+  const rawArgs = draft.rawArgs.trim() ? [draft.rawArgs.trim()] : [];
+  return incompatibleOptionNames([...savedOptions, ...structuredOptions, ...rawArgs], definitions);
+}
+
 export function recordsEqual(left: Record<string, string>, right: Record<string, string>) {
   const cleanRight = cleanRecord(right);
   const leftEntries = Object.entries(left);

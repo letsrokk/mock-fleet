@@ -67,6 +67,8 @@ public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenera
             schema.put("pattern", MockIdValidator.pattern()).put("maxLength", MockIdValidator.maxLength());
         } else if ("limit".equals(argument.name())) {
             schema.put("minimum", 1).put("maximum", config.maxPageSize());
+        } else if ("list_option_definitions".equals(toolName) && "version".equals(argument.name())) {
+            schema.put("pattern", WireMockVersion.EXACT_PATTERN);
         } else if ("delete_mock_config".equals(toolName) && "applyMode".equals(argument.name())) {
             schema.put("enum", new JsonArray().add("futureOnly").add("restartActive"));
         }

@@ -26,10 +26,12 @@ class FleetMcpToolsConfigTest {
               "mockIds":["active-only","alpha","zeta"],
               "savedMockIds":["alpha","beta","zeta"],
               "mocks":[
-                {"mockId":"alpha","active":false,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}},"effective":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}}},
-                {"mockId":"zeta","active":true,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":[],"resources":{"requests":{},"limits":{}}},"effective":{"options":[],"resources":{"requests":{},"limits":{}}}}
+                {"mockId":"alpha","lifecycle":"STOPPED","baseline":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"user":{"version":"3.12.1","options":["--verbose"],"resources":{"requests":{},"limits":{}}},"effective":{"version":"3.12.1","options":["--verbose"],"resources":{"requests":{},"limits":{}}},"wireMockVersion":"3.12.1","runtimeVersion":null},
+                {"mockId":"zeta","lifecycle":"RUNNING","baseline":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"user":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"effective":{"version":"3.13.2","options":[],"resources":{"requests":{},"limits":{}}},"wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"}
               ],
-              "routing":{"mode":"PATH","host":"mock-fleet.localhost"}
+              "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+              "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+              "catalogResourceVersion":"7"
             }
             """;
 
@@ -94,7 +96,10 @@ class FleetMcpToolsConfigTest {
     @Test
     void listsAnEmptySavedConfigCollection() throws Exception {
         responseBody = """
-                {"resourceVersion":"42","mockIds":["active-only"],"savedMockIds":[],"mocks":[],"routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                {"resourceVersion":"42","mockIds":["active-only"],"savedMockIds":[],"mocks":[],
+                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+                 "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+                 "catalogResourceVersion":"7"}
                 """;
 
         var response = tools.listMockConfigs(null, null);
@@ -112,7 +117,9 @@ class FleetMcpToolsConfigTest {
     void preservesNullResourceVersionInConfigWrapper() {
         responseBody = """
                 {"resourceVersion":null,"mockIds":[],"savedMockIds":[],"mocks":[],
-                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+                 "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+                 "catalogResourceVersion":"7"}
                 """;
 
         var response = tools.listMockConfigs(null, null);

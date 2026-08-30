@@ -31,7 +31,6 @@ public final class WireMockAdminClient {
     private final ObjectMapper mapper;
     private final int maxPayloadBytes;
     private final JsonSanitizer sanitizer;
-    private final WireMockVersion configuredVersion;
     private final long maxCollectionScanBytes;
     private final int maxCollectionScanItems;
     private final RecorderCleanupPolicy recorderCleanupPolicy;
@@ -39,53 +38,40 @@ public final class WireMockAdminClient {
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders) {
-        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, null, null);
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, null);
     }
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
             Set<String> sensitiveHeaders, McpMetrics metrics) {
-        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, null);
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, 67_108_864L, 100_000);
     }
 
     public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
-            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion) {
-        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
-                67_108_864L, 100_000);
-    }
-
-    public WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
-            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
-            long maxCollectionScanBytes, int maxCollectionScanItems) {
-        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
+            Set<String> sensitiveHeaders, McpMetrics metrics, long maxCollectionScanBytes, int maxCollectionScanItems) {
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics,
                 maxCollectionScanBytes, maxCollectionScanItems, RecorderCleanupPolicy.production(),
                 BodyFileReadPolicy.production());
     }
 
     WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
-            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
-            long maxCollectionScanBytes, int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy) {
-        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics, configuredVersion,
+            Set<String> sensitiveHeaders, McpMetrics metrics, long maxCollectionScanBytes,
+            int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy) {
+        this(transport, mapper, maxPayloadBytes, sensitiveHeaders, metrics,
                 maxCollectionScanBytes, maxCollectionScanItems, recorderCleanupPolicy,
                 BodyFileReadPolicy.production());
     }
 
     WireMockAdminClient(FleetProxyTransport transport, ObjectMapper mapper, int maxPayloadBytes,
-            Set<String> sensitiveHeaders, McpMetrics metrics, WireMockVersion configuredVersion,
-            long maxCollectionScanBytes, int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy,
-            BodyFileReadPolicy bodyFileReadPolicy) {
+            Set<String> sensitiveHeaders, McpMetrics metrics, long maxCollectionScanBytes,
+            int maxCollectionScanItems, RecorderCleanupPolicy recorderCleanupPolicy, BodyFileReadPolicy bodyFileReadPolicy) {
         this.transport = transport;
         this.mapper = mapper;
         this.maxPayloadBytes = maxPayloadBytes;
         this.sanitizer = new JsonSanitizer(mapper, sensitiveHeaders, metrics);
-        this.configuredVersion = configuredVersion;
         this.maxCollectionScanBytes = maxCollectionScanBytes;
         this.maxCollectionScanItems = maxCollectionScanItems;
         this.recorderCleanupPolicy = recorderCleanupPolicy;
         this.bodyFileReadPolicy = bodyFileReadPolicy;
-    }
-
-    public WireMockVersion version(String mockId) {
-        return version(mockId, () -> configuredVersion);
     }
 
     public WireMockVersion version(String mockId, Supplier<WireMockVersion> runtimeFallback) {

@@ -73,11 +73,11 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 
 ## Configuration
 
-`list_option_definitions` accepts an optional exact WireMock 3.x `version`. When omitted, it resolves the configured image version. It forwards the Fleet API catalog unchanged as `{wireMockVersion,catalogStatus,options}`. The catalog contains only public options present in the selected version; hidden or sensitive options are rejected if submitted directly. `catalogStatus` is `supported` or `newer_unresearched`; it describes the catalog as a whole, not individual options.
+`list_option_definitions` accepts an optional exact WireMock 3.x `version`. When omitted, it resolves the catalog default version. It forwards the Fleet API catalog unchanged as `{wireMockVersion,catalogStatus,options}`. The catalog contains only public options present in the selected version; hidden or sensitive options are rejected if submitted directly. `catalogStatus` is `supported` or `newer_unresearched`; it describes the catalog as a whole, not individual options.
 
-MCP tool discovery uses the configured WireMock version. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls apply the same gates against the active mock's reported runtime version, so a configured/runtime mismatch fails with the tool name and required version.
+MCP always publishes the complete retained tool set. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls gate these tools against the target mock's active runtime version, so desired/runtime drift fails with the tool name, required version, and actual runtime version. Legacy WireMock 3.0.x targets resolve their runtime through Fleet API after the Admin version endpoint is absent; an unknown runtime fails closed.
 
-`update_mock_config` takes the complete mock-specific option override. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the configured WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
+`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit or set it to null to inherit the catalog default. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
 
 ```json
 {
@@ -85,11 +85,12 @@ MCP tool discovery uses the configured WireMock version. `get_body_file` require
   "resourceVersion": "42",
   "options": ["--verbose --filename-template '{{{method}}}-{{{url}}}.json'"],
   "resources": {"requests": {}, "limits": {}},
+  "wireMockVersion": "3.12.1",
   "applyMode": "restartActive"
 }
 ```
 
-Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. A restart is asynchronous, so `lifecycle` can be STARTING. Configuration rows use `lifecycle`, not `active`, and inherited `user.resources` is null.
+Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. A restart is asynchronous, so `lifecycle` can be STARTING. Configuration rows use `lifecycle`, not `active`, expose desired `wireMockVersion` and nullable `runtimeVersion`, and use null `user.resources` for inherited resources.
 
 ## Encoded bodies
 

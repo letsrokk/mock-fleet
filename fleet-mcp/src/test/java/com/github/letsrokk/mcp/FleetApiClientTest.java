@@ -110,6 +110,27 @@ class FleetApiClientTest {
     }
 
     @Test
+    void readsTheTargetRuntimeVersionFromTheCurrentFleetConfig() {
+        responseBody = """
+                {"mocks":[{"mockId":"orders","wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"}]}
+                """;
+
+        assertEquals(new WireMockVersion(3, 12, 1), client.runtimeVersion("orders"));
+    }
+
+    @Test
+    void failsClosedWhenTheTargetRuntimeVersionIsUnknown() {
+        responseBody = """
+                {"mocks":[{"mockId":"orders","wireMockVersion":"3.13.2","runtimeVersion":null}]}
+                """;
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.runtimeVersion("orders"));
+
+        assertEquals("WIREMOCK_VERSION_UNSUPPORTED", error.code());
+    }
+
+    @Test
     void translatesFleetApiErrorsWithoutDiscardingMutationState() {
         responseStatus = 503;
         responseBody = """

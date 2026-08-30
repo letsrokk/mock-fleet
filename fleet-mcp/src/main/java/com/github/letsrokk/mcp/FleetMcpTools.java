@@ -101,7 +101,7 @@ public final class FleetMcpTools {
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "list_option_definitions", description = "List the public option catalog for an optional exact WireMock 3.x version.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listOptionDefinitions(
-            @ToolArg(description = "Exact WireMock 3.x semantic version; omit to use the configured image version.", required = false) String version) {
+            @ToolArg(description = "Exact WireMock 3.x semantic version; omit to use the catalog default.", required = false) String version) {
         return fleet("list_option_definitions", () -> {
             JsonNode result = fleetApi.getOptionCatalog(version);
             return McpToolExecutor.ToolResult.of("Listed WireMock option definitions.", result);
@@ -116,7 +116,7 @@ public final class FleetMcpTools {
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
-            @ToolArg(description = "Exact selectable WireMock version; omit to inherit the catalog default", required = false) String wireMockVersion,
+            @ToolArg(description = "Exact selectable WireMock version, or the mock's current retained version; omit to inherit the catalog default", required = false) String wireMockVersion,
             @ToolArg(description = "Complete mock-specific WireMock CLI option override list") List<String> options,
             @ToolArg(description = "Kubernetes requests and limits override; omit to inherit baseline resources", required = false) MockResources resources,
             @ToolArg(description = "How to apply the saved configuration") String applyMode) {

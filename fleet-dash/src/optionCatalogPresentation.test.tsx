@@ -8,6 +8,7 @@ describe("option catalog presentation", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         mockIds: ["orders"],
+        defaultVersion: "3.14.0",
         options: [{ name: "--config-only", label: "Config-only option" }]
       }))
       .mockResolvedValueOnce(jsonResponse({

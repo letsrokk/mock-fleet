@@ -18,12 +18,12 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
     private JsonObject success(Class<?> marker) {
         return switch (marker.getSimpleName()) {
             case "ListMocks" -> strict(properties(
-                    "mocks", array(openObject()), "page", page()), "mocks", "page");
+                    "mocks", array(mockRow()), "page", page()), "mocks", "page");
             case "ListMockConfigs" -> strict(properties(
                     "resourceVersion", nullableString(), "mockIds", array(string()), "page", page()),
                     "resourceVersion", "mockIds", "page");
             case "GetMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", openObject(), "routing", openObject()),
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
                     "wireMockVersion", string(),
@@ -31,10 +31,10 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "options", array(optionDefinition())),
                     "wireMockVersion", "catalogStatus", "options");
             case "UpdateMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", openObject(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "apply", apply()),
                     "resourceVersion", "mock", "apply");
             case "DeleteMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", apply()),
                     "resourceVersion", "mockId", "deleted", "apply");
             case "StartMock" -> lifecycle();
             case "StopMock" -> stopLifecycle();
@@ -124,6 +124,72 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "encoding", string().put("enum", new JsonArray().add("utf8").add("base64")),
                 "data", string(),
                 "sizeBytes", integer()), "encoding", "data", "sizeBytes");
+    }
+
+    private JsonObject mockRow() {
+        return strict(properties(
+                "mockId", string(),
+                "podName", nullableString(),
+                "status", lifecycleStatus(),
+                "message", nullableString(),
+                "wireMockVersion", versionString(),
+                "runtimeVersion", nullableVersionString()),
+                "mockId", "podName", "status", "message", "wireMockVersion", "runtimeVersion");
+    }
+
+    private JsonObject mockConfig() {
+        return strict(properties(
+                "mockId", string(),
+                "lifecycle", lifecycleStatus(),
+                "baseline", configData(false),
+                "user", configData(true),
+                "effective", configData(false),
+                "wireMockVersion", versionString(),
+                "runtimeVersion", nullableVersionString()),
+                "mockId", "lifecycle", "baseline", "user", "effective", "wireMockVersion", "runtimeVersion");
+    }
+
+    private JsonObject configData(boolean nullableResources) {
+        JsonObject resourceSchema = resources();
+        if (nullableResources) {
+            resourceSchema.put("type", new JsonArray().add("object").add("null"));
+        }
+        return strict(properties(
+                "version", nullableVersionString(),
+                "options", array(string()),
+                "resources", resourceSchema),
+                "version", "options", "resources");
+    }
+
+    private JsonObject resources() {
+        JsonObject stringMap = new JsonObject().put("type", "object").put("additionalProperties", string());
+        return strict(properties("requests", stringMap.copy(), "limits", stringMap.copy()), "requests", "limits");
+    }
+
+    private JsonObject routing() {
+        return strict(properties(
+                "mode", string().put("enum", new JsonArray().add("HOST").add("PATH")),
+                "host", string()), "mode", "host");
+    }
+
+    private JsonObject apply() {
+        return strict(properties(
+                "mockId", string(),
+                "mode", string().put("enum", new JsonArray().add("futureOnly").add("restartActive")),
+                "lifecycle", lifecycleStatus()), "mockId", "mode", "lifecycle");
+    }
+
+    private JsonObject lifecycleStatus() {
+        return string().put("enum", new JsonArray()
+                .add("STOPPED").add("STARTING").add("RUNNING").add("FAILED"));
+    }
+
+    private JsonObject versionString() {
+        return string().put("pattern", WireMockVersion.EXACT_PATTERN);
+    }
+
+    private JsonObject nullableVersionString() {
+        return nullableString().put("pattern", WireMockVersion.EXACT_PATTERN);
     }
 
     private JsonObject page() {

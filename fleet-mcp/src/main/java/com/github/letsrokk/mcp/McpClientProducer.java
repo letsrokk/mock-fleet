@@ -14,7 +14,7 @@ public final class McpClientProducer {
     WireMockAdminClient wireMockAdminClient(FleetProxyClient proxyClient, ObjectMapper mapper, FleetMcpConfig config,
             McpMetrics metrics) {
         Set<String> sensitiveHeaders = config.sensitiveHeaders().stream().collect(Collectors.toUnmodifiableSet());
-        return new WireMockAdminClient(proxyClient, mapper, config.maxPayloadBytes(), sensitiveHeaders, metrics, null,
+        return new WireMockAdminClient(proxyClient, mapper, config.maxPayloadBytes(), sensitiveHeaders, metrics,
                 config.maxCollectionScanBytes(),
                 config.maxCollectionScanItems());
     }

@@ -38,7 +38,6 @@ class McpConfigContractTest {
         when(fleetApi.startMock(any())).thenReturn(mapper.createObjectNode()
                 .put("mockId", "catalog").put("status", "RUNNING").putNull("podName")
                 .putNull("message").putNull("retryAfterMs"));
-        when(wireMock.version(any())).thenReturn(new WireMockVersion(3, 13, 2));
         when(wireMock.version(any(), any())).thenReturn(new WireMockVersion(3, 13, 2));
         sessionId = given()
                 .contentType("application/json")
@@ -74,6 +73,8 @@ class McpConfigContractTest {
         JsonNode config = structured(callTool("get_mock_config", "{\"mockId\":\"catalog\"}"));
         assertEquals("42", config.path("resourceVersion").asText());
         assertEquals("catalog", config.path("mock").path("mockId").asText());
+        assertEquals("3.13.2", config.path("mock").path("wireMockVersion").asText());
+        assertEquals("3.12.1", config.path("mock").path("runtimeVersion").asText());
         assertTrue(config.path("mock").path("user").path("resources").isNull());
         assertTrue(config.has("routing"));
         assertFalse(config.has("optionDefinitions"));
@@ -279,15 +280,17 @@ class McpConfigContractTest {
 
     private JsonNode configView(boolean includeCatalog) throws Exception {
         String mocks = includeCatalog ? """
-                [{"mockId":"catalog","active":false,
-                  "baseline":{"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
-                  "user":{"options":[],"resources":null},
-                  "effective":{"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}}}]
+                [{"mockId":"catalog","lifecycle":"RUNNING",
+                  "baseline":{"version":null,"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
+                  "user":{"version":null,"options":[],"resources":null},
+                  "effective":{"version":"3.13.2","options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
+                  "wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"}]
                 """ : "[]";
         return mapper.readTree("""
                 {"resourceVersion":"42","mockIds":%s,"savedMockIds":%s,"mocks":%s,
-                 "wireMock":{"configuredImage":"wiremock/wiremock:3.13.2-2","version":"3.13.2","minimumSupportedVersion":"3.0.0","maximumResearchedVersion":"3.13.2","rangeStatus":"supported"},
-                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+                 "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+                 "catalogResourceVersion":"7"}
                 """.formatted(includeCatalog ? "[\"catalog\"]" : "[]",
                         includeCatalog ? "[\"catalog\"]" : "[]", mocks));
     }

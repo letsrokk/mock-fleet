@@ -330,7 +330,7 @@ For a full Minikube/SeaweedFS verification, use `bin/cluster-e2e.sh`. The live s
 
 ### MCP
 
-MCP is disabled by default. It uses Streamable HTTP and must run with one replica. When enabled, the chart requires `wiremock.containerImage` to contain a pinned, parseable WireMock 3.x tag. MCP verifies the runtime with `/__admin/version`; WireMock 3.0.x does not expose that endpoint, so MCP verifies the legacy Admin mapping response and uses the pinned configured image version for that release line.
+MCP is disabled by default. It uses Streamable HTTP and must run with one replica. MCP verifies each target mock runtime with `/__admin/version`. WireMock 3.0.x does not expose that endpoint, so MCP verifies the legacy Admin mapping response and resolves that mock's runtime version from Fleet API. If neither source reports a runtime version, version-gated tools fail closed.
 
 | Value | Default | Description |
 | --- | --- | --- |

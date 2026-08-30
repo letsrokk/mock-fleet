@@ -8,7 +8,7 @@ import {
   emptyDraft,
   groupOptions,
   hasOption,
-  incompatibleOptionNames,
+  incompatibleDraftOptionNames,
   numberInputAttributes,
   optionsFromDraft,
   resourceSummary,
@@ -17,7 +17,11 @@ import {
   type DraftConfig,
   type OptionDefinition
 } from "./configOptions";
-import { refreshConfigAndOptionCatalog } from "./configCatalog";
+import {
+  LatestConfigRequest,
+  loadConfigView,
+  loadEditorCatalog
+} from "./configCatalog";
 import { OptionCatalogPresentation } from "./optionCatalogPresentation";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 import {
@@ -127,13 +131,14 @@ export default function App() {
   const mountedRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
   const optionCollapseStateReadyRef = useRef(hasStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY));
-  const optionCatalogRequestRef = useRef(0);
+  const configRequestRef = useRef(new LatestConfigRequest());
 
   const selectedMock = useMemo(
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
     [configView, selectedMockId]
   );
   async function loadConfig(showSpinner: boolean) {
+    const request = configRequestRef.current.begin();
     if (showSpinner) {
       setLoadingConfig(true);
     } else {
@@ -141,19 +146,10 @@ export default function App() {
     }
 
     try {
-      const refresh = await refreshConfigAndOptionCatalog(
-        configCatalogState === null ? null : {
-          config: configCatalogState.configView,
-          optionCatalog: configCatalogState.optionCatalog
-        }
-      );
-      if (!refresh.ok) {
-        setError(refresh.error);
+      const data = normalizeConfigView(await loadConfigView() as ConfigView & { routing?: RoutingView });
+      if (!configRequestRef.current.isCurrent(request)) {
         return;
       }
-      const response = refresh.state;
-      const data = normalizeConfigView(response.config as ConfigView & { routing?: RoutingView });
-      const catalog = response.optionCatalog;
       const preserveDraft = configDirty && selectedMockId !== null;
       const nextData = preserveDraft && selectedMockId && !data.mockIds.includes(selectedMockId)
         ? withLocalMock(data, selectedMockId)
@@ -161,17 +157,32 @@ export default function App() {
       const nextSelected = selectedMockId && nextData.mockIds.includes(selectedMockId)
         ? selectedMockId
         : nextData.mockIds[0] ?? null;
+      const loaded = await loadEditorCatalog(
+        nextData,
+        nextSelected,
+        preserveDraft ? draftWireMockVersion : undefined
+      );
+      if (!configRequestRef.current.isCurrent(request)) {
+        return;
+      }
+      const { target, catalog } = loaded;
       setConfigCatalogState({ configView: nextData, optionCatalog: catalog });
       setSelectedMockId(nextSelected);
       if (nextSelected && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
         setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
-        setDraftWireMockVersion(mock?.user.version ?? null);
+        setDraftWireMockVersion(target.draftWireMockVersion);
+        setConfigDirty(false);
+      } else if (nextSelected === null) {
+        setDraft(emptyDraft());
+        setDraftWireMockVersion(null);
         setConfigDirty(false);
       }
       setError(null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load config.");
+      if (configRequestRef.current.isCurrent(request)) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to load config.");
+      }
     } finally {
       if (mountedRef.current) {
         setLoadingConfig(false);
@@ -180,22 +191,47 @@ export default function App() {
     }
   }
 
-  async function loadOptionCatalog(version: string) {
-    const request = ++optionCatalogRequestRef.current;
+  async function loadOptionCatalog(version: string | null) {
+    if (!configView || !selectedMockId) {
+      return;
+    }
+    const request = configRequestRef.current.begin();
     try {
-      const response = await fetch(`/__fleet/api/config/options?version=${encodeURIComponent(version)}`);
-      if (!response.ok) {
-        throw new Error(await errorMessage(response, "Unable to load WireMock option catalog."));
-      }
-      const catalog = (await response.json()) as OptionCatalogView;
-      if (request === optionCatalogRequestRef.current && catalog.wireMockVersion === version) {
+      const { catalog } = await loadEditorCatalog(configView, selectedMockId, version);
+      if (configRequestRef.current.isCurrent(request)) {
         setConfigCatalogState((current) => current ? { ...current, optionCatalog: catalog } : current);
         setError(null);
       }
     } catch (loadError) {
-      if (request === optionCatalogRequestRef.current) {
+      if (configRequestRef.current.isCurrent(request)) {
         setError(loadError instanceof Error ? loadError.message : "Unable to load WireMock option catalog.");
       }
+    }
+  }
+
+  async function applyConfigSelection(data: ConfigView, mockId: string | null, existingRequest?: number) {
+    const request = existingRequest ?? configRequestRef.current.begin();
+    if (!configRequestRef.current.isCurrent(request)) {
+      return false;
+    }
+    try {
+      const { target, catalog } = await loadEditorCatalog(data, mockId, undefined);
+      if (!configRequestRef.current.isCurrent(request)) {
+        return false;
+      }
+      setConfigCatalogState({ configView: data, optionCatalog: catalog });
+      setSelectedMockId(mockId);
+      const mock = mockId === null ? null : data.mocks.find((item) => item.mockId === mockId);
+      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
+      setDraftWireMockVersion(target?.draftWireMockVersion ?? null);
+      setConfigDirty(false);
+      setError(null);
+      return true;
+    } catch (loadError) {
+      if (configRequestRef.current.isCurrent(request)) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to load WireMock option catalog.");
+      }
+      return false;
     }
   }
 
@@ -289,6 +325,7 @@ export default function App() {
       return;
     }
 
+    const request = configRequestRef.current.begin();
     const nextOptions = optionsFromDraft(draft, optionCatalog?.options ?? [], selectedMock?.baseline ?? emptyConfig());
 
     setSaving(true);
@@ -310,14 +347,13 @@ export default function App() {
       }
       const mutation = configMutation((await response.json()) as ConfigMutationResult);
       const data = normalizeConfigView(mutation.config);
-      setConfigCatalogState((current) => current ? { ...current, configView: data } : current);
-      setSelectedMockId(selectedMockId);
-      const mock = data.mocks.find((item) => item.mockId === selectedMockId);
-      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
-      setConfigDirty(false);
-      showToast(configMutationToast("Saved config", selectedMockId, mutation.apply.lifecycle));
+      if (await applyConfigSelection(data, selectedMockId, request)) {
+        showToast(configMutationToast("Saved config", selectedMockId, mutation.apply.lifecycle));
+      }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Unable to save config.");
+      if (configRequestRef.current.isCurrent(request)) {
+        setError(saveError instanceof Error ? saveError.message : "Unable to save config.");
+      }
     } finally {
       setSaving(false);
     }
@@ -327,6 +363,7 @@ export default function App() {
     if (!selectedMockId || !configView) {
       return;
     }
+    const request = configRequestRef.current.begin();
     setSaving(true);
     setError(null);
     try {
@@ -340,15 +377,14 @@ export default function App() {
       }
       const mutation = configMutation((await response.json()) as ConfigMutationResult);
       const data = normalizeConfigView(mutation.config);
-      setConfigCatalogState((current) => current ? { ...current, configView: data } : current);
       const nextSelected = data.mockIds.includes(selectedMockId) ? selectedMockId : data.mockIds[0] ?? null;
-      setSelectedMockId(nextSelected);
-      const mock = data.mocks.find((item) => item.mockId === nextSelected);
-      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
-      setConfigDirty(false);
-      showToast(configMutationToast("Deleted override", selectedMockId, mutation.apply.lifecycle));
+      if (await applyConfigSelection(data, nextSelected, request)) {
+        showToast(configMutationToast("Deleted override", selectedMockId, mutation.apply.lifecycle));
+      }
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete override.");
+      if (configRequestRef.current.isCurrent(request)) {
+        setError(deleteError instanceof Error ? deleteError.message : "Unable to delete override.");
+      }
     } finally {
       setSaving(false);
     }
@@ -410,34 +446,23 @@ export default function App() {
     }
     setError(null);
     if (configView.mockIds.includes(mockId)) {
-      setSelectedMockId(mockId);
+      void applyConfigSelection(configView, mockId);
       setNewMockId("");
-      setConfigDirty(false);
       return;
     }
-    setConfigCatalogState((current) => current ? {
-      ...current,
-      configView: {
-        ...current.configView,
-        mockIds: [...current.configView.mockIds, mockId].sort(),
-        mocks: [
-          ...current.configView.mocks,
-          emptyMockConfigView(mockId)
-        ].sort((left, right) => left.mockId.localeCompare(right.mockId))
+    const data = withLocalMock(configView, mockId);
+    void applyConfigSelection(data, mockId).then((applied) => {
+      if (applied) {
+        setConfigDirty(true);
       }
-    } : current);
-    setSelectedMockId(mockId);
-    setDraft(emptyDraft());
-    setConfigDirty(true);
+    });
     setNewMockId("");
   }
 
   function selectMock(mockId: string) {
-    setSelectedMockId(mockId);
-    const mock = configView?.mocks.find((item) => item.mockId === mockId);
-    setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), optionCatalog?.options ?? []));
-    setDraftWireMockVersion(mock?.user.version ?? null);
-    setConfigDirty(false);
+    if (configView) {
+      void applyConfigSelection(configView, mockId);
+    }
   }
 
   function selectMappingsMock(mockId: string) {
@@ -462,9 +487,7 @@ export default function App() {
     if (!selectedMock || !configView) {
       return;
     }
-    setDraft(draftFromConfig(selectedMock.effective, optionCatalog?.options ?? []));
-    setDraftWireMockVersion(selectedMock.user.version ?? null);
-    setConfigDirty(false);
+    void applyConfigSelection(configView, selectedMock.mockId);
   }
 
   function requestKillMock(mockId: string) {
@@ -938,7 +961,11 @@ export default function App() {
 
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
     const incompatibleOptions = selectedMock
-      ? incompatibleOptionNames([...selectedMock.effective.options, ...selectedMock.baseline.options, ...splitRawArgs(draft.rawArgs)], catalog.options)
+      ? incompatibleDraftOptionNames(
+        [...selectedMock.baseline.options, ...selectedMock.user.options, ...selectedMock.effective.options],
+        draft,
+        catalog.options
+      )
       : [];
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
@@ -1021,7 +1048,7 @@ export default function App() {
                     const version = event.target.value || null;
                     setDraftWireMockVersion(version);
                     setConfigDirty(true);
-                    void loadOptionCatalog(version ?? configView.defaultVersion);
+                    void loadOptionCatalog(version);
                   }}>
                     <option value="">Inherit default ({configView.defaultVersion})</option>
                     {configView.versions.filter((version) => version.selectable || version.version === selectedMock.wireMockVersion)
@@ -1542,13 +1569,21 @@ function withLocalMock(configView: ConfigView, mockId: string): ConfigView {
     mockIds: [...configView.mockIds, mockId].sort(),
     mocks: [
       ...configView.mocks,
-      emptyMockConfigView(mockId)
+      emptyMockConfigView(mockId, configView.defaultVersion)
     ].sort((left, right) => left.mockId.localeCompare(right.mockId))
   };
 }
 
-function emptyMockConfigView(mockId: string): MockConfigView {
-  return { mockId, lifecycle: "STOPPED", baseline: emptyConfig(), user: emptyUserConfig(), effective: emptyConfig(), wireMockVersion: "", runtimeVersion: null };
+function emptyMockConfigView(mockId: string, defaultVersion: string): MockConfigView {
+  return {
+    mockId,
+    lifecycle: "STOPPED",
+    baseline: emptyConfig(),
+    user: emptyUserConfig(),
+    effective: { ...emptyConfig(), version: defaultVersion },
+    wireMockVersion: defaultVersion,
+    runtimeVersion: null
+  };
 }
 
 function normalizeConfigView(configView: ConfigView & { routing?: RoutingView }): ConfigView {
@@ -1567,10 +1602,6 @@ function normalizeMappingsView(mappingsView: MappingsView & { routing?: RoutingV
 
 function defaultRoutingView(): RoutingView {
   return { mode: "HOST", host: window.location.hostname };
-}
-
-function splitRawArgs(rawArgs: string) {
-  return rawArgs.trim() ? [rawArgs.trim()] : [];
 }
 
 function mockBaseUrl(mockId: string, routing: RoutingView) {

@@ -120,7 +120,14 @@ class McpRegistrationTest {
         JsonNode optionCatalog = tool(tools, "list_option_definitions");
         JsonNode version = optionCatalog.path("inputSchema").path("properties").path("version");
         assertEquals("string", version.path("type").asText());
+        assertEquals("^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", version.path("pattern").asText());
         assertFalse(textValues(optionCatalog.path("inputSchema").path("required")).contains("version"));
+        assertEquals("^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", updateConfig.path("properties")
+                .path("wireMockVersion").path("pattern").asText());
+        assertTrue(updateConfig.path("properties").path("wireMockVersion")
+                .path("description").asText().contains("current retained version"));
+        assertTrue(optionCatalog.path("inputSchema").path("properties").path("version")
+                .path("description").asText().contains("Exact WireMock 3.x semantic version"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -202,11 +209,48 @@ class McpRegistrationTest {
         assertEquals(List.of("utf8", "base64"), textValues(sendRequest.path("properties").path("response")
                 .path("properties").path("body").path("properties").path("encoding").path("enum")));
 
+        JsonNode mockRow = tool(tools, "list_mocks").path("outputSchema").path("oneOf").get(0)
+                .path("properties").path("mocks").path("items");
+        assertEquals(Set.of("mockId", "podName", "status", "message", "wireMockVersion", "runtimeVersion"),
+                Set.copyOf(textValues(mockRow.path("required"))));
+        assertFalse(mockRow.path("additionalProperties").asBoolean(true));
+
         for (String toolName : List.of(
                 "list_mock_configs", "get_mock_config", "update_mock_config", "delete_mock_config")) {
             JsonNode resourceVersion = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
                     .path("properties").path("resourceVersion");
             assertEquals(List.of("string", "null"), textValues(resourceVersion.path("type")), toolName);
+        }
+
+        for (String toolName : List.of("get_mock_config", "update_mock_config")) {
+            JsonNode mock = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("mock");
+            assertEquals(Set.of("mockId", "lifecycle", "baseline", "user", "effective",
+                            "wireMockVersion", "runtimeVersion"),
+                    Set.copyOf(textValues(mock.path("required"))), toolName);
+            assertFalse(mock.path("additionalProperties").asBoolean(true), toolName);
+            assertEquals(List.of("string", "null"), textValues(mock.path("properties")
+                    .path("runtimeVersion").path("type")), toolName);
+            assertEquals("^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+                    mock.path("properties").path("wireMockVersion").path("pattern").asText(), toolName);
+            for (String configField : List.of("baseline", "user", "effective")) {
+                JsonNode config = mock.path("properties").path(configField);
+                assertEquals(Set.of("version", "options", "resources"),
+                        Set.copyOf(textValues(config.path("required"))), toolName + "." + configField);
+                assertFalse(config.path("additionalProperties").asBoolean(true), toolName + "." + configField);
+            }
+        }
+
+        JsonNode routing = tool(tools, "get_mock_config").path("outputSchema").path("oneOf").get(0)
+                .path("properties").path("routing");
+        assertEquals(Set.of("mode", "host"), Set.copyOf(textValues(routing.path("required"))));
+        assertFalse(routing.path("additionalProperties").asBoolean(true));
+        for (String toolName : List.of("update_mock_config", "delete_mock_config")) {
+            JsonNode apply = tool(tools, toolName).path("outputSchema").path("oneOf").get(0)
+                    .path("properties").path("apply");
+            assertEquals(Set.of("mockId", "mode", "lifecycle"),
+                    Set.copyOf(textValues(apply.path("required"))), toolName);
+            assertFalse(apply.path("additionalProperties").asBoolean(true), toolName);
         }
 
         JsonNode stopMock = tool(tools, "stop_mock").path("outputSchema").path("oneOf").get(0);
@@ -453,6 +497,8 @@ class McpRegistrationTest {
                         {"mockId":"orders","resourceVersion":"1","options":[],
                         "resources":{"requests":{},"limits":{},"unexpected":true},"applyMode":"futureOnly"}
                         """),
+                Arguments.of("non-exact option catalog version", "list_option_definitions",
+                        "{\"version\":\"3.13.2+candidate\"}"),
                 Arguments.of("wrong nested header value", "send_request", """
                         {"mockId":"orders","method":"GET","path":"/orders",
                         "headers":{"X-Test":{"value":"bad"}}}
