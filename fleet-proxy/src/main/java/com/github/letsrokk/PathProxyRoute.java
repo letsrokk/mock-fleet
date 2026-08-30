@@ -48,7 +48,7 @@ public class PathProxyRoute {
             }
 
             if (fleetLocalRoute.isFleetDashboardEntry(host, requestPath)) {
-                FleetLocalRoute.respondForFleetDashboardEntry(routingContext);
+                FleetLocalRoute.respondForDashboardRedirect(routingContext);
                 return;
             }
 

@@ -39,25 +39,14 @@ public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenera
         String description = argument.description();
         String defaultValue = argument.defaultValue();
         String name = type.getTypeName();
-        JsonObject schema = new JsonObject();
-        if (name.equals("java.lang.String")) {
-            schema.put("type", "string");
-        } else if (name.equals("java.lang.Integer") || name.equals("int") || name.equals("long")
-                || name.equals("java.lang.Long")) {
-            schema.put("type", "integer");
-        } else if (name.equals("boolean") || name.equals("java.lang.Boolean")) {
-            schema.put("type", "boolean");
-        } else {
-            throw new IllegalArgumentException("Tool " + type + " requires a custom input schema generator");
-        }
+        JsonObject schema = new JsonObject().put("type", schemaType(type));
         if (description != null && !description.isBlank()) {
             schema.put("description", description);
         }
         if (defaultValue != null && !defaultValue.isBlank()) {
-            if (name.equals("boolean") || name.equals("java.lang.Boolean")) {
+            if (isBoolean(name)) {
                 schema.put("default", Boolean.parseBoolean(defaultValue));
-            } else if (name.equals("java.lang.Integer") || name.equals("int") || name.equals("long")
-                    || name.equals("java.lang.Long")) {
+            } else if (isInteger(name)) {
                 schema.put("default", Long.parseLong(defaultValue));
             } else {
                 schema.put("default", defaultValue);
@@ -73,6 +62,29 @@ public final class StrictInputSchemaGenerator implements GlobalInputSchemaGenera
             schema.put("enum", new JsonArray().add("futureOnly").add("restartActive"));
         }
         return schema;
+    }
+
+    private static String schemaType(Type type) {
+        String name = type.getTypeName();
+        if (name.equals("java.lang.String")) {
+            return "string";
+        }
+        if (isInteger(name)) {
+            return "integer";
+        }
+        if (isBoolean(name)) {
+            return "boolean";
+        }
+        throw new IllegalArgumentException("Tool " + type + " requires a custom input schema generator");
+    }
+
+    private static boolean isInteger(String typeName) {
+        return typeName.equals("java.lang.Integer") || typeName.equals("int")
+                || typeName.equals("long") || typeName.equals("java.lang.Long");
+    }
+
+    private static boolean isBoolean(String typeName) {
+        return typeName.equals("boolean") || typeName.equals("java.lang.Boolean");
     }
 
     private record StrictInputSchema(JsonObject schema) implements InputSchema {

@@ -46,7 +46,7 @@ public class HostProxyRoute {
         String host = routingContext.request().getHeader(HttpHeaders.HOST);
         String requestPath = FleetLocalRoute.requestPath(routingContext.request().uri());
         if (fleetLocalRoute.isFleetDashboardEntry(host, requestPath)) {
-            FleetLocalRoute.respondForFleetDashboardEntry(routingContext);
+            FleetLocalRoute.respondForDashboardRedirect(routingContext);
             return;
         }
 

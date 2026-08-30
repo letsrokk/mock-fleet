@@ -196,68 +196,69 @@
     },
     "ingress": { "type": "object" },
     "storage": { "type": "object" },
-    "wiremock": {
+    "mockOps": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "versionUpdater": {
+        "enabled": { "type": "boolean" },
+        "schedule": { "type": "string", "minLength": 1 },
+        "timeZone": { "type": "string", "minLength": 1 },
+        "defaultVersionConstraint": {
+          "type": "string",
+          "pattern": "^3\\.(x|(?:0|[1-9][0-9]*)\\.x)$"
+        },
+        "minorLines": { "type": "integer", "minimum": 1, "maximum": 50 },
+        "registry": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "schedule": { "type": "string", "minLength": 1 },
-            "timeZone": { "type": "string", "minLength": 1 },
-            "defaultVersionConstraint": {
+            "url": { "type": "string", "minLength": 1, "pattern": "^https?://" },
+            "repository": { "type": "string", "minLength": 1 },
+            "imageRepository": {
               "type": "string",
-              "pattern": "^3\\.(x|(?:0|[1-9][0-9]*)\\.x)$"
+              "pattern": "^$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[1-9][0-9]*)?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$"
             },
-            "minorLines": { "type": "integer", "minimum": 1, "maximum": 50 },
-            "registry": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "url": { "type": "string", "minLength": 1, "pattern": "^https?://" },
-                "repository": { "type": "string", "minLength": 1 },
-                "imageRepository": {
-                  "type": "string",
-                  "pattern": "^$|^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::[1-9][0-9]*)?/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$"
-                },
-                "credentialsSecretName": { "type": "string" }
-              },
-              "required": ["url", "repository", "imageRepository", "credentialsSecretName"]
-            },
-            "image": { "$ref": "#/definitions/image" },
-            "serviceAccount": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "create": { "type": "boolean" },
-                "name": { "type": "string" },
-                "annotations": { "type": "object" }
-              },
-              "required": ["create", "name", "annotations"]
-            },
-            "resources": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "requests": { "$ref": "#/definitions/resourcePair" },
-                "limits": { "$ref": "#/definitions/resourcePair" }
-              },
-              "required": ["requests", "limits"]
-            }
+            "credentialsSecretName": { "type": "string" }
           },
-          "required": [
-            "enabled",
-            "schedule",
-            "timeZone",
-            "defaultVersionConstraint",
-            "minorLines",
-            "registry",
-            "image",
-            "serviceAccount",
-            "resources"
-          ]
+          "required": ["url", "repository", "imageRepository", "credentialsSecretName"]
         },
+        "image": { "$ref": "#/definitions/image" },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string" },
+            "annotations": { "type": "object" }
+          },
+          "required": ["create", "name", "annotations"]
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requests": { "$ref": "#/definitions/resourcePair" },
+            "limits": { "$ref": "#/definitions/resourcePair" }
+          },
+          "required": ["requests", "limits"]
+        }
+      },
+      "required": [
+        "enabled",
+        "schedule",
+        "timeZone",
+        "defaultVersionConstraint",
+        "minorLines",
+        "registry",
+        "image",
+        "serviceAccount",
+        "resources"
+      ]
+    },
+    "wiremock": {
+      "type": "object",
+      "not": { "required": ["versionUpdater"] },
+      "properties": {
         "podNamePrefix": { "type": "string", "minLength": 1 },
         "containerName": { "type": "string", "minLength": 1 },
         "containerImage": { "type": "string", "minLength": 1 },
@@ -364,7 +365,6 @@
       },
       "required": [
         "podNamePrefix",
-        "versionUpdater",
         "containerName",
         "containerImage",
         "supportedImageTags",
@@ -409,7 +409,7 @@
       "required": ["clusterName", "port", "backupCount", "gracefulShutdownMaxWaitSeconds"]
     }
   },
-  "required": ["clusterDomain", "fleet", "ingress", "storage", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "resourceQuota", "hazelcast"],
+  "required": ["clusterDomain", "fleet", "ingress", "storage", "mockOps", "wiremock", "securityContext", "env", "serviceAccount", "rbac", "resourceQuota", "hazelcast"],
   "allOf": [
     {
       "if": {

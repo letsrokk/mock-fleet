@@ -54,19 +54,22 @@ export async function loadEditorCatalog(
   draftWireMockVersion: string | null | undefined,
   fetcher: typeof fetch = fetch
 ) {
-  const target = mockId === null
-    ? {
+  let target: EditorTarget;
+  if (mockId === null) {
+    target = {
       mockId: "",
       draftWireMockVersion: null,
       desiredVersion: config.defaultVersion
-    }
-    : draftWireMockVersion === undefined
-      ? editorTarget(config, mockId)
-      : {
-        mockId,
-        draftWireMockVersion,
-        desiredVersion: draftWireMockVersion ?? config.defaultVersion
-      };
+    };
+  } else if (draftWireMockVersion === undefined) {
+    target = editorTarget(config, mockId);
+  } else {
+    target = {
+      mockId,
+      draftWireMockVersion,
+      desiredVersion: draftWireMockVersion ?? config.defaultVersion
+    };
+  }
   return {
     target,
     catalog: await loadOptionCatalogForVersion(target.desiredVersion, fetcher)

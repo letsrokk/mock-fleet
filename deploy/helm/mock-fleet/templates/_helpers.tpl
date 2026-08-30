@@ -51,8 +51,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-mcp" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "mock-fleet.wiremockUpdaterFullname" -}}
-{{- printf "%s-wiremock-updater" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "mock-fleet.mockOpsFullname" -}}
+{{- printf "%s-mock-ops" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "mock-fleet.wiremockEgressNetworkPolicyName" -}}
@@ -148,9 +148,9 @@ app.kubernetes.io/component: dash
 app.kubernetes.io/component: mcp
 {{- end -}}
 
-{{- define "mock-fleet.wiremockUpdaterSelectorLabels" -}}
+{{- define "mock-fleet.mockOpsSelectorLabels" -}}
 {{ include "mock-fleet.selectorLabels" . }}
-app.kubernetes.io/component: wiremock-updater
+app.kubernetes.io/component: mock-ops
 {{- end -}}
 
 {{- define "mock-fleet.serviceAccountName" -}}
@@ -169,20 +169,20 @@ app.kubernetes.io/component: wiremock-updater
 {{- end -}}
 {{- end -}}
 
-{{- define "mock-fleet.wiremockUpdaterServiceAccountName" -}}
-{{- if .Values.wiremock.versionUpdater.serviceAccount.name -}}
-{{- .Values.wiremock.versionUpdater.serviceAccount.name -}}
-{{- else if .Values.wiremock.versionUpdater.serviceAccount.create -}}
-{{- include "mock-fleet.wiremockUpdaterFullname" . -}}
+{{- define "mock-fleet.mockOpsServiceAccountName" -}}
+{{- if .Values.mockOps.serviceAccount.name -}}
+{{- .Values.mockOps.serviceAccount.name -}}
+{{- else if .Values.mockOps.serviceAccount.create -}}
+{{- include "mock-fleet.mockOpsFullname" . -}}
 {{- end -}}
 {{- end -}}
 
-{{- define "mock-fleet.wiremockUpdaterRoleName" -}}
-{{- printf "%s-role" (include "mock-fleet.wiremockUpdaterFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "mock-fleet.mockOpsRoleName" -}}
+{{- printf "%s-role" (include "mock-fleet.mockOpsFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "mock-fleet.wiremockUpdaterRoleBindingName" -}}
-{{- printf "%s-role-binding" (include "mock-fleet.wiremockUpdaterFullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "mock-fleet.mockOpsRoleBindingName" -}}
+{{- printf "%s-role-binding" (include "mock-fleet.mockOpsFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{- define "mock-fleet.roleName" -}}

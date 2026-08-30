@@ -47,7 +47,7 @@ proxy_image=${MOCK_FLEET_E2E_PROXY_IMAGE:-ghcr.io/letsrokk/mock-fleet/proxy}
 api_image=${MOCK_FLEET_E2E_API_IMAGE:-ghcr.io/letsrokk/mock-fleet/api}
 mcp_image=${MOCK_FLEET_E2E_MCP_IMAGE:-ghcr.io/letsrokk/mock-fleet/mcp}
 dash_image=${MOCK_FLEET_E2E_DASH_IMAGE:-ghcr.io/letsrokk/mock-fleet/dash}
-updater_image=${MOCK_FLEET_E2E_UPDATER_IMAGE:-ghcr.io/letsrokk/mock-fleet/wiremock-updater}
+mock_ops_image=${MOCK_FLEET_E2E_MOCK_OPS_IMAGE:-ghcr.io/letsrokk/mock-fleet/mock-ops}
 work_dir=""
 mcp_pf_pid=""
 api_pf_pid=""
@@ -185,23 +185,23 @@ verify_api_rbac() {
     || fail "The API service account can patch an unrelated ConfigMap."
 }
 
-verify_updater_rbac() {
-  local updater_username="system:serviceaccount:${namespace}:${release}-wiremock-updater"
+verify_mock_ops_rbac() {
+  local mock_ops_username="system:serviceaccount:${namespace}:${release}-mock-ops"
   for config_map in "${release}-wiremock-config" "${release}-wiremock-user-config"; do
-    [[ $(kubectl auth can-i get "configmap/${config_map}" --namespace "${namespace}" --as="${updater_username}") == yes ]] \
-      || fail "The updater service account cannot read ${config_map}."
-    [[ $(kubectl auth can-i update "configmap/${config_map}" --namespace "${namespace}" --as="${updater_username}") == no ]] \
-      || fail "The updater service account can update read-only ConfigMap ${config_map}."
+    [[ $(kubectl auth can-i get "configmap/${config_map}" --namespace "${namespace}" --as="${mock_ops_username}") == yes ]] \
+      || fail "The Mock Ops service account cannot read ${config_map}."
+    [[ $(kubectl auth can-i update "configmap/${config_map}" --namespace "${namespace}" --as="${mock_ops_username}") == no ]] \
+      || fail "The Mock Ops service account can update read-only ConfigMap ${config_map}."
   done
   for verb in get update patch; do
     [[ $(kubectl auth can-i "${verb}" "configmap/${release}-wiremock-version-catalog" \
-        --namespace "${namespace}" --as="${updater_username}") == yes ]] \
-      || fail "The updater service account cannot ${verb} the version catalog."
+        --namespace "${namespace}" --as="${mock_ops_username}") == yes ]] \
+      || fail "The Mock Ops service account cannot ${verb} the version catalog."
   done
-  [[ $(kubectl auth can-i list configmaps --namespace "${namespace}" --as="${updater_username}") == no ]] \
-    || fail "The updater service account can list ConfigMaps."
-  [[ $(kubectl auth can-i get pods --namespace "${namespace}" --as="${updater_username}") == no ]] \
-    || fail "The updater service account can read Pods."
+  [[ $(kubectl auth can-i list configmaps --namespace "${namespace}" --as="${mock_ops_username}") == no ]] \
+    || fail "The Mock Ops service account can list ConfigMaps."
+  [[ $(kubectl auth can-i get pods --namespace "${namespace}" --as="${mock_ops_username}") == no ]] \
+    || fail "The Mock Ops service account can read Pods."
 }
 
 pods_have_no_general_api_token() {
@@ -482,9 +482,9 @@ catalog_has_reconciled_versions() {
   ' >/dev/null <<<"$1"
 }
 
-run_updater_reconciliation() {
+run_mock_ops_reconciliation() {
   local catalog_name="${release}-wiremock-version-catalog"
-  local job_name="${release}-wiremock-updater-e2e"
+  local job_name="${release}-mock-ops-e2e"
   local seed_patch catalog
   seed_patch=$(jq -cn --arg version "${wiremock_secondary_version}" \
     --arg image "${wiremock_secondary_image}" \
@@ -493,15 +493,15 @@ run_updater_reconciliation() {
   kubectl patch configmap "${catalog_name}" --namespace "${namespace}" --type=json -p "${seed_patch}" >/dev/null
   kubectl delete job "${job_name}" --namespace "${namespace}" --ignore-not-found --wait=true >/dev/null
   kubectl create job "${job_name}" --namespace "${namespace}" \
-    --from="cronjob/${release}-wiremock-updater" >/dev/null
+    --from="cronjob/${release}-mock-ops" >/dev/null
   if ! kubectl wait "job/${job_name}" --namespace "${namespace}" \
       --for=condition=complete --timeout="${timeout_seconds}s" >/dev/null; then
     kubectl logs "job/${job_name}" --namespace "${namespace}" >&2 || true
-    fail "WireMock updater reconciliation Job did not complete."
+    fail "Mock Ops reconciliation Job did not complete."
   fi
   catalog=$(kubectl get configmap "${catalog_name}" --namespace "${namespace}" -o json)
   catalog_has_reconciled_versions "${catalog}" \
-    || fail "WireMock updater did not restore the two-version catalog from Registry V2."
+    || fail "Mock Ops did not restore the two-version catalog from Registry V2."
 }
 
 helm_deploy() {
@@ -531,16 +531,16 @@ helm_deploy() {
     --set fleet.dash.image.repository="${dash_image}" \
     --set fleet.dash.image.tag="${image_tag}" \
     --set fleet.dash.image.pullPolicy=IfNotPresent \
-    --set wiremock.versionUpdater.enabled=true \
-    --set wiremock.versionUpdater.schedule='0 0 31 2 *' \
-    --set wiremock.versionUpdater.timeZone=Etc/UTC \
-    --set wiremock.versionUpdater.defaultVersionConstraint=3.x \
-    --set wiremock.versionUpdater.minorLines=2 \
-    --set wiremock.versionUpdater.registry.url="http://wiremock-registry.${namespace}.svc.cluster.local:8080" \
-    --set wiremock.versionUpdater.registry.repository="${wiremock_repository}" \
-    --set wiremock.versionUpdater.image.repository="${updater_image}" \
-    --set wiremock.versionUpdater.image.tag="${image_tag}" \
-    --set wiremock.versionUpdater.image.pullPolicy=IfNotPresent \
+    --set mockOps.enabled=true \
+    --set mockOps.schedule='0 0 31 2 *' \
+    --set mockOps.timeZone=Etc/UTC \
+    --set mockOps.defaultVersionConstraint=3.x \
+    --set mockOps.minorLines=2 \
+    --set mockOps.registry.url="http://wiremock-registry.${namespace}.svc.cluster.local:8080" \
+    --set mockOps.registry.repository="${wiremock_repository}" \
+    --set mockOps.image.repository="${mock_ops_image}" \
+    --set mockOps.image.tag="${image_tag}" \
+    --set mockOps.image.pullPolicy=IfNotPresent \
     --set wiremock.containerImage="${selected_wiremock_image}" \
     --set "wiremock.supportedImageTags[0]=${selected_wiremock_image##*:}" \
     --set "wiremock.supportedImageTags[1]=${wiremock_secondary_tag}" \
@@ -1203,16 +1203,16 @@ self_test() {
       || fail "Live S3 storage is missing its multi-writer mount option: ${mount_option}"
   done
   log "S3 multi-writer mount contract passed."
-  for updater_setting in \
-    'wiremock.versionUpdater.enabled=true' \
-    'wiremock.versionUpdater.registry.url=http://wiremock-registry.' \
-    'wiremock.versionUpdater.registry.repository=wiremock/wiremock' \
-    'wiremock.versionUpdater.minorLines=2' \
-    'wiremock.versionUpdater.image.repository=ghcr.io/letsrokk/mock-fleet/wiremock-updater'; do
-    grep -Fq -- "${updater_setting}" <<<"${helm_command}" \
-      || fail "Live Helm install omitted updater setting: ${updater_setting}"
+  for mock_ops_setting in \
+    'mockOps.enabled=true' \
+    'mockOps.registry.url=http://wiremock-registry.' \
+    'mockOps.registry.repository=wiremock/wiremock' \
+    'mockOps.minorLines=2' \
+    'mockOps.image.repository=ghcr.io/letsrokk/mock-fleet/mock-ops'; do
+    grep -Fq -- "${mock_ops_setting}" <<<"${helm_command}" \
+      || fail "Live Helm install omitted Mock Ops setting: ${mock_ops_setting}"
   done
-  log "Updater Helm install contract passed."
+  log "Mock Ops Helm install contract passed."
   local registry_manifest
   registry_manifest=$(
     kubectl() {
@@ -1234,10 +1234,10 @@ self_test() {
     || fail "Fake Registry V2 fixture does not expose two versions under restricted PSA."
   log "Fake Registry V2 fixture contract passed."
   if ! catalog_has_reconciled_versions '{"data":{"defaultVersion":"3.13.2","selectable.3.13.2":"wiremock/wiremock:3.13.2-2","selectable.3.12.1":"wiremock/wiremock:3.12.1-2"}}'; then
-    fail "Updater reconciliation rejected the expected two-version catalog."
+    fail "Mock Ops reconciliation rejected the expected two-version catalog."
   fi
   if catalog_has_reconciled_versions '{"data":{"defaultVersion":"3.13.2","selectable.3.13.2":"wiremock/wiremock:3.13.2-2"}}'; then
-    fail "Updater reconciliation accepted a catalog missing its second WireMock version."
+    fail "Mock Ops reconciliation accepted a catalog missing its second WireMock version."
   fi
   log "Two-version catalog reconciliation contract passed."
   if ! (
@@ -1398,11 +1398,11 @@ self_test() {
         *) return 1 ;;
       esac
     }
-    verify_updater_rbac
+    verify_mock_ops_rbac
   ); then
-    fail "Updater RBAC can-i contract rejected the minimized role."
+    fail "Mock Ops RBAC can-i contract rejected the minimized role."
   fi
-  log "Updater RBAC can-i contract passed."
+  log "Mock Ops RBAC can-i contract passed."
   local identity_pods
   identity_pods=$(jq -cn --arg service_account "${release}-wiremock" '{items:[{spec:{
     serviceAccountName:$service_account,
@@ -1677,10 +1677,10 @@ kubectl get deployment --namespace "${namespace}" -l 'app.kubernetes.io/componen
   -o jsonpath='{.items[0].status.readyReplicas}' | grep -qx '2' \
   || fail "Fleet API did not reach two ready replicas."
 verify_api_rbac
-verify_updater_rbac
+verify_mock_ops_rbac
 verify_admission_dry_runs
 verify_fixed_workloads_are_tokenless
-run_updater_reconciliation
+run_mock_ops_reconciliation
 
 kubectl port-forward --namespace "${namespace}" service/"${release}-mcp" "${mcp_port}:80" \
   >"${work_dir}/mcp-port-forward.log" 2>&1 &
