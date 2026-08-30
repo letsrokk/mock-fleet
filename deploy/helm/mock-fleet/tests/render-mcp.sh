@@ -428,6 +428,7 @@ for arguments in "${invalid_catalog_values[@]}"; do
 done
 
 invalid_config_keys=(
+  '--set wiremock.config.mockz=true'
   '--set wiremock.config.default.optionz=true'
   '--set-json wiremock.config.mocks=[{"id":"demo","versoin":"3.13.2"}]'
   '--set-json wiremock.config.mocks=[{"id":"demo","resources":{"requestz":{"cpu":"1"}}}]'

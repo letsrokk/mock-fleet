@@ -394,7 +394,7 @@ components:
       additionalProperties: false
       required: [wireMockVersion, catalogStatus, options]
       properties:
-        wireMockVersion: { type: string }
+        wireMockVersion: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         catalogStatus: { type: string, enum: [supported, newer_unresearched] }
         options:
           type: array

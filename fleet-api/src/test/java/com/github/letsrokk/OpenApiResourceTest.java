@@ -213,6 +213,8 @@ class OpenApiResourceTest {
         assertEquals("wireMockVersion", catalog.path("required").get(0).asText());
         assertEquals("catalogStatus", catalog.path("required").get(1).asText());
         assertEquals("options", catalog.path("required").get(2).asText());
+        assertEquals("^3\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+                catalog.path("properties").path("wireMockVersion").path("pattern").asText());
 
         JsonNode option = root.path("components").path("schemas").path("PublicOptionDefinition");
         Set<String> optionProperties = new HashSet<>();
