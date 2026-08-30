@@ -1,8 +1,0 @@
-{
-  "request": {"method": "GET", "urlPath": "/persistent"},
-  "response": {
-    "status": 200,
-    "headers": {"Content-Type": "text/plain"},
-    "body": "persisted-v1"
-  }
-}

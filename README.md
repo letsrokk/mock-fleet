@@ -88,7 +88,7 @@ The checked-in [OpenAPI contract](fleet-api/src/main/resources/META-INF/openapi.
 
 MCP publishes 31 schema-backed tools. `list_mocks` includes configured inactive and active mocks with desired/runtime version state and a saved-config flag. The tool set also includes `start_mock` and `get_recording_status`; the old `recording_status` name is absent. WireMock tools preflight the lifecycle and return retryable `MOCK_STARTING` while a cold pod starts. Successes use tool-specific structured objects. Failures use `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Native WireMock JSON stays native, while byte inputs and outputs use `{body:{encoding:utf8|base64,data,sizeBytes}}`.
 
-See the [MCP contract and examples](docs/mcp-contract.md) for tool names, lifecycle polling, config application, body encoding, recording candidates, matched/missed analysis, redaction, SSRF controls, Admin-path guards, and persistent mutation recovery. The [exploratory checklist](docs/exploratory-checklist.md) covers cluster verification.
+See the [MCP contract and examples](docs/mcp-contract.md) for tool names, lifecycle polling, config application, body encoding, recording candidates, matched/missed analysis, redaction, SSRF controls, Admin-path guards, and persistent mutation recovery.
 
 The existing Fleet Proxy still forwards direct `/__admin` requests from normal mock URLs without authentication. Enabling MCP does not add an authorization boundary to those routes. Protect the ingress at the platform layer when public Admin API access is not acceptable.
 
@@ -119,8 +119,6 @@ make local-destroy DELETE_NAMESPACE=true
 ```
 
 `DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
-
-The full Minikube/SeaweedFS contract suite is opt-in because it creates a namespace, cluster-scoped PV, WireMock pods, and S3 data. Run its static self-test anywhere with `bin/cluster-e2e.sh --self-test`. For a live run, provide the SeaweedFS endpoint and credentials plus the CSI driver and StorageClass described by `bin/cluster-e2e.sh --help`. The script adds a short per-execution suffix to each generated run-specific bucket name, proves the bucket does not exist, creates it, and verifies that it is empty. It then writes the full hidden ownership token to a marker and recursively empties or deletes the bucket only when that marker reads back with the exact token. Existing, forbidden, ambiguous, non-empty, or unowned buckets are never reused or deleted. The script cleans up through a trap and is safe to rerun. Set `MOCK_FLEET_E2E_RETAIN=true` to retain a successful populated deployment for inspection. GitHub Actions exposes the same suite only through the manual `Cluster E2E` workflow; it is not a push gate.
 
 ## License And Copyright
 
