@@ -4,10 +4,31 @@ import {
   errorMessage,
   isActiveLifecycle,
   lifecycleLabel,
+  wireMockVersionOptions,
   type ConfigMutationResult
 } from "./apiContracts";
 
 describe("Fleet API dashboard contracts", () => {
+  it("lists selectable WireMock versions newest first while preserving the selected retained version", () => {
+    const versions = [
+      { version: "3.10.0", image: "wiremock/wiremock:3.10.0-1", selectable: true },
+      { version: "3.11.0", image: "wiremock/wiremock:3.11.0-1", selectable: true },
+      { version: "3.12.1", image: "wiremock/wiremock:3.12.1-2", selectable: true },
+      { version: "3.13.2", image: "wiremock/wiremock:3.13.2-2", selectable: true },
+      { version: "3.9.2", image: "wiremock/wiremock:3.9.2-1", selectable: true },
+      { version: "3.8.0", image: "wiremock/wiremock:3.8.0-1", selectable: false }
+    ];
+
+    expect(wireMockVersionOptions(versions, "3.8.0").map(({ version }) => version)).toEqual([
+      "3.13.2",
+      "3.12.1",
+      "3.11.0",
+      "3.10.0",
+      "3.9.2",
+      "3.8.0"
+    ]);
+  });
+
   it.each([
     ["STARTING", true],
     ["RUNNING", true],
