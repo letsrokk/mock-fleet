@@ -18,6 +18,11 @@ fleet:
   api:
     replicas: 2
 
+mockOps:
+  enabled: true
+  image:
+    tag: latest
+
 wiremock:
   config:
     default:
