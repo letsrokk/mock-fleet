@@ -8,6 +8,9 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
 spec:
   failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
   matchConstraints:
     resourceRules:
       - apiGroups:
@@ -114,7 +117,7 @@ spec:
       message: Managed WireMock pods can contain only the WireMock container.
     - expression: >-
         variables.wiremock.name == {{ .Values.wiremock.containerName | quote }} &&
-        variables.wiremock.image == {{ .Values.wiremock.containerImage | quote }} &&
+        params.data.exists(key, (key.startsWith('selectable.') || key.startsWith('retained.')) && params.data[key] == variables.wiremock.image) &&
         variables.wiremock.imagePullPolicy == {{ .Values.wiremock.containerImagePullPolicy | quote }} &&
         (!has(variables.wiremock.command) || variables.wiremock.command.size() == 0) &&
         (!has(variables.wiremock.lifecycle)) &&
@@ -122,7 +125,7 @@ spec:
         (!has(variables.wiremock.volumeDevices) || variables.wiremock.volumeDevices.size() == 0) &&
         (!has(variables.wiremock.stdin) || variables.wiremock.stdin == false) &&
         (!has(variables.wiremock.tty) || variables.wiremock.tty == false)
-      message: Managed WireMock containers must use the configured image and generated execution shape.
+      message: Managed WireMock containers must use a catalog image and generated execution shape.
     - expression: >-
         has(variables.wiremock.securityContext) &&
         variables.wiremock.securityContext.runAsNonRoot == true &&

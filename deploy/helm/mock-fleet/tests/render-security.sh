@@ -304,6 +304,19 @@ fail() {
   exit 1
 }
 
+catalog_admits_image() {
+  local catalog_data=$1
+  local image=$2
+
+  jq -e --arg image "${image}" '
+    any(
+      to_entries[];
+      ((.key | startswith("selectable.")) or (.key | startswith("retained."))) and
+      .value == $image
+    )
+  ' >/dev/null <<<"${catalog_data}"
+}
+
 expect_render_failure() {
   local description="$1"
   local expected="$2"
@@ -331,6 +344,10 @@ admission_binding_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet \
   --show-only templates/wiremock-validatingadmissionpolicybinding.yaml)"
+admission_catalog_render="$(helm template unusual-release "${chart_dir}" \
+  --namespace testing \
+  --set fullnameOverride=custom-fleet \
+  --show-only templates/wiremock-version-catalog-configmap.yaml)"
 persistent_admission_render="$(helm template unusual-release "${chart_dir}" \
   --namespace testing \
   --set fullnameOverride=custom-fleet \
@@ -348,6 +365,9 @@ for fragment in \
   'kind: ValidatingAdmissionPolicy' \
   'name: unusual-release-testing-wiremock' \
   'failurePolicy: Fail' \
+  'paramKind:' \
+  'apiVersion: v1' \
+  'kind: ConfigMap' \
   'request.userInfo.username' \
   'system:serviceaccount:testing:custom-fleet-pod-manager' \
   'app.kubernetes.io/name' \
@@ -366,7 +386,7 @@ for fragment in \
   'variables.eksIdentityEnvNames' \
   'variables.irsaIdentityEnvNames' \
   'custom-fleet-wiremock' \
-  'wiremock/wiremock:3.13.2-2' \
+  "params.data.exists(key, (key.startsWith('selectable.') || key.startsWith('retained.')) && params.data[key] == variables.wiremock.image)" \
   'automountServiceAccountToken' \
   "!key.startsWith('container.apparmor.security.beta.kubernetes.io/')" \
   'appArmorProfile.type' \
@@ -391,6 +411,10 @@ for fragment in \
   'kind: ValidatingAdmissionPolicyBinding' \
   'name: unusual-release-testing-wiremock' \
   'policyName: unusual-release-testing-wiremock' \
+  'paramRef:' \
+  'name: custom-fleet-wiremock-version-catalog' \
+  'namespace: testing' \
+  'parameterNotFoundAction: Deny' \
   'validationActions:' \
   '- Deny' \
   'kubernetes.io/metadata.name: "testing"' \
@@ -400,6 +424,21 @@ for fragment in \
   '- pods'; do
   grep -Fq -- "${fragment}" <<<"${admission_binding_render}" \
     || fail "WireMock admission policy binding is missing: ${fragment}"
+done
+
+catalog_admission_data="$(yq -o=json '.data' <<<"${admission_catalog_render}")"
+catalog_admission_data="$(jq -c '. + {
+  "retained.3.11.0": "wiremock/wiremock:3.11.0-1",
+  "unrelated.3.8.0": "wiremock/wiremock:3.8.0-1"
+}' <<<"${catalog_admission_data}")"
+for image in wiremock/wiremock:3.12.1-2 wiremock/wiremock:3.11.0-1; do
+  catalog_admits_image "${catalog_admission_data}" "${image}" \
+    || fail "Catalog admission must accept selectable and retained image: ${image}"
+done
+for image in wiremock/wiremock:3.8.0-1 attacker.example/shell:latest; do
+  if catalog_admits_image "${catalog_admission_data}" "${image}"; then
+    fail "Catalog admission must reject images outside selectable and retained entries: ${image}"
+  fi
 done
 
 disabled_admission="$(helm template unusual-release "${chart_dir}" --namespace testing \
