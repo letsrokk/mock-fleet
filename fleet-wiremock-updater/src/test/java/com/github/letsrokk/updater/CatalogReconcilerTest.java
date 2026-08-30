@@ -186,6 +186,51 @@ class CatalogReconcilerTest {
         verify(fixture.namespaced, never()).resource(any());
     }
 
+    @Test
+    void malformedUnreferencedCatalogEntryFailsBeforeUpdate() {
+        assertInvalidCatalog(Map.of(
+                "defaultVersion", "3.13.2",
+                "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                "selectable.3.9.0", "example/wiremock:latest"), null);
+    }
+
+    @Test
+    void malformedReferencedCatalogImageFailsBeforeUpdate() {
+        assertInvalidCatalog(Map.of(
+                "defaultVersion", "3.13.2",
+                "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                "retained.3.12.1", "example/wiremock:3.11.0-1"), "3.12.1");
+    }
+
+    @Test
+    void unknownDuplicateAndNonSelectableDefaultCatalogEntriesFailBeforeUpdate() {
+        assertInvalidCatalog(Map.of(
+                "defaultVersion", "3.13.2",
+                "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                "metadata", "unexpected"), null);
+        assertInvalidCatalog(Map.of(
+                "defaultVersion", "3.13.2",
+                "selectable.3.13.2", "example/wiremock:3.13.2-2",
+                "selectable.3.12.1", "example/wiremock:3.12.1-2",
+                "retained.3.12.1", "example/wiremock:3.12.1-2"), null);
+        assertInvalidCatalog(Map.of(
+                "defaultVersion", "3.13.2",
+                "retained.3.13.2", "example/wiremock:3.13.2-2"), null);
+    }
+
+    private static void assertInvalidCatalog(Map<String, String> catalogData, String referencedVersion) {
+        KubernetesFixture fixture = fixture(configMap("catalog", "25", catalogData),
+                configDocument("baseline", referencedVersion == null ? null : "demo", referencedVersion),
+                configDocument("user", null, null));
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1);
+
+        assertThrows(IllegalStateException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                selection, "3.x"));
+
+        verify(fixture.namespaced, never()).resource(any());
+    }
+
     private static ObjectMapper yaml() {
         return new ObjectMapper(new YAMLFactory());
     }

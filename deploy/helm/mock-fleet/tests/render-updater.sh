@@ -50,6 +50,7 @@ for fragment in \
   'schedule: "15 */6 * * *"' \
   'timeZone: "Europe/Belgrade"' \
   'concurrencyPolicy: Forbid' \
+  'backoffLimit: 0' \
   'app.kubernetes.io/component: wiremock-updater' \
   'image: example.test/mock-fleet/updater:test-tag' \
   'imagePullPolicy: Never' \

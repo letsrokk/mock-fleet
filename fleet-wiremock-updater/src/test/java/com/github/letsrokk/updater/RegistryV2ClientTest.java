@@ -10,12 +10,20 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpHeaders;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class RegistryV2ClientTest {
     private final List<HttpServer> servers = new CopyOnWriteArrayList<>();
@@ -142,6 +150,62 @@ class RegistryV2ClientTest {
         assertEquals(0, attackerRequests.get());
     }
 
+    @Test void rejectsOffOriginHttpBearerRealmBeforeSendingCredentials() throws Exception {
+        HttpServer registry = server();
+        HttpServer attacker = server();
+        AtomicInteger attackerRequests = new AtomicInteger();
+        attacker.createContext("/token", exchange -> {
+            attackerRequests.incrementAndGet();
+            json(exchange, 200, "{\"token\":\"stolen\"}");
+        });
+        registry.createContext("/v2/acme/image/tags/list", exchange -> {
+            exchange.getResponseHeaders().add("WWW-Authenticate",
+                    "Bearer realm=\"" + base(attacker) + "/token\",service=\"registry.test\"");
+            json(exchange, 401, "{}");
+        });
+        attacker.start();
+        registry.start();
+
+        assertThrows(IllegalStateException.class, () -> client(new RegistryV2Client.Credentials("user", "pass"))
+                .tags(base(registry), "acme/image", 10));
+        assertEquals(0, attackerRequests.get());
+    }
+
+    @Test void rejectsHttpsDowngradeAndRealmUserInfoBeforeTokenRequest() throws Exception {
+        assertRejectedBearerRealm(URI.create("https://registry.example"),
+                "http://auth.example/token", new RegistryV2Client.Credentials("user", "pass"));
+        assertRejectedBearerRealm(URI.create("https://registry.example"),
+                "http://auth.example/token", null);
+        assertRejectedBearerRealm(URI.create("https://registry.example"),
+                "https://user@auth.example/token", null);
+        assertRejectedBearerRealm(URI.create("http://registry.example"),
+                "http://auth.example/token", null);
+    }
+
+    @Test void permitsCrossOriginHttpsBearerRealmAndSendsConfiguredCredentialsSecurely() throws Exception {
+        HttpClient http = mock(HttpClient.class);
+        List<HttpRequest> requests = new ArrayList<>();
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(invocation -> {
+            HttpRequest request = invocation.getArgument(0);
+            requests.add(request);
+            if (request.uri().getHost().equals("registry.example") && requests.size() == 1) {
+                return response(401, Map.of("WWW-Authenticate", List.of(
+                        "Bearer realm=\"https://auth.docker.io/token\",service=\"registry.example\"")), "{}");
+            }
+            if (request.uri().getHost().equals("auth.docker.io")) {
+                return response(200, Map.of(), "{\"token\":\"secure-token\"}");
+            }
+            return response(200, Map.of(), "{\"tags\":[\"3.13.2-2\"]}");
+        });
+
+        assertEquals(List.of("3.13.2-2"), new RegistryV2Client(http, new ObjectMapper(),
+                new RegistryV2Client.Credentials("user", "pass"))
+                .tags(URI.create("https://registry.example"), "acme/image", 10));
+        assertEquals("https://auth.docker.io/token?service=registry.example&scope=repository%3Aacme%2Fimage%3Apull",
+                requests.get(1).uri().toString());
+        assertEquals("Basic dXNlcjpwYXNz", requests.get(1).headers().firstValue("Authorization").orElseThrow());
+    }
+
     @Test void boundsTagBodyBytesBeforeJsonParsing() throws Exception {
         HttpServer server = server();
         server.createContext("/v2/acme/image/tags/list", exchange -> json(exchange, 200, "{\"tags\":[\"3.123456789.0\"]}"));
@@ -220,6 +284,35 @@ class RegistryV2ClientTest {
 
     private RegistryV2Client client(RegistryV2Client.Credentials credentials) {
         return client(credentials, RegistryV2Client.Limits.defaults());
+    }
+
+    private void assertRejectedBearerRealm(URI registry, String realm,
+                                           RegistryV2Client.Credentials credentials) throws Exception {
+        HttpClient http = mock(HttpClient.class);
+        AtomicInteger requests = new AtomicInteger();
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(invocation -> {
+            int request = requests.incrementAndGet();
+            if (request == 1) {
+                return response(401, Map.of("WWW-Authenticate", List.of(
+                        "Bearer realm=\"" + realm + "\",service=\"registry.example\"")), "{}");
+            }
+            return response(200, Map.of(), request == 2
+                    ? "{\"token\":\"unsafe-token\"}" : "{\"tags\":[]}");
+        });
+
+        assertThrows(IllegalStateException.class, () -> new RegistryV2Client(http, new ObjectMapper(), credentials)
+                .tags(registry, "acme/image", 10));
+        assertEquals(1, requests.get());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static HttpResponse<java.io.InputStream> response(int status, Map<String, List<String>> headers,
+                                                               String body) {
+        HttpResponse<java.io.InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(status);
+        when(response.headers()).thenReturn(HttpHeaders.of(headers, (name, value) -> true));
+        when(response.body()).thenReturn(new java.io.ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)));
+        return response;
     }
 
     private void assertRejectedLink(String link, String message) throws Exception {

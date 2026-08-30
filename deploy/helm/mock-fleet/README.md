@@ -406,7 +406,7 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing dedica
 | Value | Default | Description |
 | --- | --- | --- |
 | `wiremock.versionUpdater.enabled` | `false` | Deploy the catalog updater CronJob, ServiceAccount, and least-privilege RBAC. |
-| `wiremock.versionUpdater.schedule` | `"0 2 * * *"` | Cron schedule. Jobs use `Forbid` concurrency. |
+| `wiremock.versionUpdater.schedule` | `"0 2 * * *"` | Cron schedule. Jobs use `Forbid` concurrency and make one attempt with no same-Job retry. |
 | `wiremock.versionUpdater.timeZone` | `Etc/UTC` | Kubernetes CronJob time zone. |
 | `wiremock.versionUpdater.defaultVersionConstraint` | `"3.x"` | Default-advance constraint. Accepts only `3.x` or an exact minor line such as `3.13.x`. |
 | `wiremock.versionUpdater.minorLines` | `5` | Number of latest stable 3.x minor lines kept selectable, from 1 through 50. |
@@ -424,11 +424,11 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing dedica
 | `wiremock.versionUpdater.resources.limits.cpu` | `"0.5"` | Updater CPU limit. |
 | `wiremock.versionUpdater.resources.limits.memory` | `512Mi` | Updater memory limit. |
 
-The updater implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges. If credentials are configured, the Secret must contain both exact keys. Keep the registry URL on HTTPS unless the endpoint is a controlled local test registry; credentials sent to an HTTP origin are plaintext on the network.
+The updater implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges. If credentials are configured, the Secret must contain both exact keys. An HTTPS registry accepts only HTTPS Bearer realms, including legitimate cross-origin services such as `auth.docker.io`. An HTTP registry accepts only a same-origin HTTP realm and is intended for a controlled local test registry. Realm userinfo is always rejected, and configured credentials are never sent cross-origin over HTTP.
 
 Each run reads the named baseline, user, and catalog ConfigMaps exactly once. It ignores unstable tags and selects the newest image revision for the latest patch in each of the newest `minorLines` stable 3.x lines. The default advances only to a newer candidate that matches `defaultVersionConstraint`; it never downgrades. If the constrained default is outside that latest-minor window, it is also kept selectable. Versions no longer selectable remain as `retained.*` only while an exact baseline or user pin references them. The updater does not mutate configuration and has no Pod permissions, so it cannot restart active mocks or resolve desired/runtime drift.
 
-Reconciliation validates the complete registry result, both configuration documents, every referenced version, and the current catalog before it performs one catalog update. A malformed response or document, missing reference, invalid constraint, or other precondition failure leaves the catalog unchanged. The update carries the ConfigMap's observed `resourceVersion`; a concurrent write produces a Kubernetes conflict and the Job fails without retrying or overwriting the newer catalog. The next scheduled Job reconciles from a fresh snapshot.
+Reconciliation validates the complete registry result, both configuration documents, every referenced version, and every current catalog entry before it performs one catalog update. The catalog may contain only `defaultVersion`, `selectable.<exact-version>`, and `retained.<exact-version>` keys; every image must be exact and match its key, a version cannot occur in both sections, and the default must be selectable. A malformed response, document, or catalog entry, missing reference, invalid constraint, or other precondition failure leaves the catalog unchanged. The update carries the ConfigMap's observed `resourceVersion`; a concurrent write produces a Kubernetes conflict and the Job fails without overwriting the newer catalog. `backoffLimit: 0` gives each scheduled Job one attempt and no same-Job retry. The next scheduled Job reconciles from a fresh snapshot.
 
 ### Dashboard
 
@@ -516,7 +516,7 @@ Reconciliation validates the complete registry result, both configuration docume
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
 | `hazelcast.gracefulShutdownMaxWaitSeconds` | `30` | Maximum wait for graceful member shutdown. |
 
-The chart creates `<fullname>-wiremock-user-config` for a new release and marks it `helm.sh/resource-policy: keep`. The API persists UI changes with named `get`, `watch`, `update`, and `patch` operations; it does not create, list, or delete ConfigMaps. A connected upgrade retains a pre-existing object instead of adopting it. For ArgoCD or another offline render/apply workflow, configure reconciliation so it does not overwrite UI-saved data. If `rbac.create=false`, grant the API service account those four named operations on this ConfigMap and pod `get`, `list`, `create`, and `delete`; do not restore namespace-wide ConfigMap or Deployment authority.
+The chart creates `<fullname>-wiremock-user-config` for a new release and marks it `helm.sh/resource-policy: keep`. The API persists UI changes with named `get`, `watch`, `update`, and `patch` operations; it does not create, list, or delete ConfigMaps. A connected upgrade retains a pre-existing object instead of adopting it. For ArgoCD or another offline render/apply workflow, configure reconciliation so it does not overwrite UI-saved data. If `rbac.create=false`, grant the API service account those four named operations on this ConfigMap and pod `get`, `list`, `create`, and `delete`. When the updater is enabled, grant its service account named `get` on `<fullname>-wiremock-config` and `<fullname>-wiremock-user-config`, plus named `get`, `update`, and `patch` on `<fullname>-wiremock-version-catalog`. Do not restore namespace-wide ConfigMap or Deployment authority.
 
 ## Local Minikube Values
 

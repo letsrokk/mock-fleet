@@ -47,12 +47,48 @@ final class CatalogReconciler {
         referencedVersions.addAll(referencedVersions(user, configKey));
 
         Map<String, String> currentData = requireData(catalog, catalogName);
-        String currentDefault = requireStableVersion(currentData.get(DEFAULT_VERSION), "catalog defaultVersion");
+        String currentDefault = validateCatalog(currentData);
         Map<String, String> nextData = buildCatalog(
                 currentData, referencedVersions, repository, selection, defaultConstraint, currentDefault);
 
         ConfigMap update = new ConfigMapBuilder(catalog).withData(nextData).build();
         configMaps.resource(update).update();
+    }
+
+    private String validateCatalog(Map<String, String> catalog) {
+        String defaultVersion = requireStableVersion(catalog.get(DEFAULT_VERSION), "catalog defaultVersion");
+        Set<String> selectable = new TreeSet<>();
+        Set<String> retained = new TreeSet<>();
+        for (Map.Entry<String, String> entry : catalog.entrySet()) {
+            String key = entry.getKey();
+            if (DEFAULT_VERSION.equals(key)) {
+                continue;
+            }
+            Set<String> destination;
+            String version;
+            if (key.startsWith(SELECTABLE_PREFIX)) {
+                destination = selectable;
+                version = key.substring(SELECTABLE_PREFIX.length());
+            } else if (key.startsWith(RETAINED_PREFIX)) {
+                destination = retained;
+                version = key.substring(RETAINED_PREFIX.length());
+            } else {
+                throw new IllegalStateException("Unknown WireMock version catalog key: " + key);
+            }
+            version = requireStableVersion(version, "catalog key " + key);
+            tagFromImage(entry.getValue(), version);
+            destination.add(version);
+        }
+        Set<String> duplicateVersions = new TreeSet<>(selectable);
+        duplicateVersions.retainAll(retained);
+        if (!duplicateVersions.isEmpty()) {
+            throw new IllegalStateException(
+                    "WireMock catalog versions cannot be both selectable and retained: " + duplicateVersions);
+        }
+        if (!selectable.contains(defaultVersion)) {
+            throw new IllegalStateException("Catalog defaultVersion must have a selectable entry: " + defaultVersion);
+        }
+        return defaultVersion;
     }
 
     private Map<String, String> buildCatalog(Map<String, String> currentData,
@@ -138,8 +174,14 @@ final class CatalogReconciler {
     }
 
     private WireMockTag tagFromImage(String image, String expectedVersion) {
+        if (image == null || image.isBlank() || image.indexOf('@') >= 0
+                || image.chars().anyMatch(Character::isWhitespace)) {
+            throw new IllegalStateException("Catalog image is not an exact full image for version "
+                    + expectedVersion + ": " + image);
+        }
         int separator = image.lastIndexOf(':');
-        WireMockTag tag = separator < 0 ? null : WireMockTag.parse(image.substring(separator + 1)).orElse(null);
+        WireMockTag tag = separator < 1 || separator == image.length() - 1
+                ? null : WireMockTag.parse(image.substring(separator + 1)).orElse(null);
         if (tag == null || !tag.version().equals(expectedVersion)) {
             throw new IllegalStateException("Catalog image does not match version " + expectedVersion + ": " + image);
         }
@@ -147,7 +189,8 @@ final class CatalogReconciler {
     }
 
     private String requireStableVersion(String version, String source) {
-        if (WireMockTag.parse(version).isEmpty()) {
+        WireMockTag tag = WireMockTag.parse(version).orElse(null);
+        if (tag == null || !tag.imageTag().equals(tag.version())) {
             throw invalidVersion(source, version);
         }
         return version;

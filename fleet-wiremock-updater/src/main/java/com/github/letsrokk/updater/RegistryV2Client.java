@@ -74,7 +74,7 @@ final class RegistryV2Client {
             HttpResponse<InputStream> response = sendRegistry(next, bearer);
             if (response.statusCode() == 401 && bearer == null) {
                 close(response.body());
-                bearer = token(response, repository);
+                bearer = token(response, repository, origin);
                 response = sendRegistry(next, bearer);
             }
             if (response.statusCode() != 200) {
@@ -121,7 +121,7 @@ final class RegistryV2Client {
         return send(request.build(), "Registry request failed.");
     }
 
-    private String token(HttpResponse<InputStream> challengeResponse, String repository) {
+    private String token(HttpResponse<InputStream> challengeResponse, String repository, URI registryOrigin) {
         String header = challengeResponse.headers().firstValue("WWW-Authenticate")
                 .orElseThrow(() -> new IllegalStateException("Registry did not provide a Bearer challenge."));
         if (!header.regionMatches(true, 0, "Bearer ", 0, 7)) {
@@ -135,7 +135,7 @@ final class RegistryV2Client {
         URI endpoint;
         try {
             URI parsedRealm = URI.create(realm);
-            if (!isHttp(parsedRealm) || parsedRealm.getHost() == null || parsedRealm.getUserInfo() != null || parsedRealm.getFragment() != null) {
+            if (!validBearerRealm(registryOrigin, parsedRealm)) {
                 throw new IllegalArgumentException();
             }
             endpoint = appendQuery(parsedRealm, "service=" + encode(service) + "&scope=" + encode(scope));
@@ -167,6 +167,21 @@ final class RegistryV2Client {
         } catch (IOException exception) {
             throw new IllegalStateException("Invalid registry token response.", exception);
         }
+    }
+
+    private boolean validBearerRealm(URI registryOrigin, URI realm) {
+        if (!isHttp(realm) || realm.getHost() == null || realm.getUserInfo() != null || realm.getFragment() != null) {
+            return false;
+        }
+        boolean sameOrigin = sameOrigin(registryOrigin, realm);
+        if ("https".equalsIgnoreCase(registryOrigin.getScheme())) {
+            if (!"https".equalsIgnoreCase(realm.getScheme())) {
+                return false;
+            }
+        } else if (!"http".equalsIgnoreCase(realm.getScheme()) || !sameOrigin) {
+            return false;
+        }
+        return credentials.isEmpty() || sameOrigin || "https".equalsIgnoreCase(realm.getScheme());
     }
 
     private HttpResponse<InputStream> send(HttpRequest request, String failure) {
@@ -330,12 +345,16 @@ final class RegistryV2Client {
     }
 
     private static void requireSameOrigin(URI origin, URI candidate) {
-        if (!isHttp(candidate) || candidate.getHost() == null
-                || !origin.getScheme().equalsIgnoreCase(candidate.getScheme())
-                || !origin.getHost().equalsIgnoreCase(candidate.getHost())
-                || effectivePort(origin) != effectivePort(candidate)) {
+        if (!sameOrigin(origin, candidate)) {
             throw new IllegalStateException("Registry pagination next target must remain on the registry origin.");
         }
+    }
+
+    private static boolean sameOrigin(URI origin, URI candidate) {
+        return isHttp(candidate) && candidate.getHost() != null
+                && origin.getScheme().equalsIgnoreCase(candidate.getScheme())
+                && origin.getHost().equalsIgnoreCase(candidate.getHost())
+                && effectivePort(origin) == effectivePort(candidate);
     }
 
     private static boolean isHttp(URI value) {
