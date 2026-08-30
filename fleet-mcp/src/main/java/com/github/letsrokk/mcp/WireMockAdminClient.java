@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 public final class WireMockAdminClient {
 
@@ -84,25 +85,29 @@ public final class WireMockAdminClient {
     }
 
     public WireMockVersion version(String mockId) {
-        return version(mockId, configuredVersion);
+        return version(mockId, () -> configuredVersion);
     }
 
-    public WireMockVersion version(String mockId, WireMockVersion runtimeFallback) {
+    public WireMockVersion version(String mockId, Supplier<WireMockVersion> runtimeFallback) {
         try {
             JsonNode response = getJson(mockId, "/__admin/version");
             String version = response.path("version").asText(response.asText());
             return WireMockVersion.parse(version);
         } catch (McpOperationException e) {
-            if (!isMissingVersionEndpoint(e) || runtimeFallback == null || runtimeFallback.minor() != 0) {
+            if (!isMissingVersionEndpoint(e)) {
+                throw e;
+            }
+            WireMockVersion fallback = runtimeFallback.get();
+            if (fallback == null || fallback.minor() != 0) {
                 throw e;
             }
             JsonNode probe = getJson(mockId, "/__admin/mappings?limit=1&offset=0");
             if (!probe.path("mappings").isArray()) {
                 throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
                         "Legacy WireMock runtime probe returned an unexpected response", false,
-                        Map.of("runtimeVersion", runtimeFallback.toString()));
+                        Map.of("runtimeVersion", fallback.toString()));
             }
-            return runtimeFallback;
+            return fallback;
         }
     }
 

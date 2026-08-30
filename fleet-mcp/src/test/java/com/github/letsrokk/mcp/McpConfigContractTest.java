@@ -39,6 +39,7 @@ class McpConfigContractTest {
                 .put("mockId", "catalog").put("status", "RUNNING").putNull("podName")
                 .putNull("message").putNull("retryAfterMs"));
         when(wireMock.version(any())).thenReturn(new WireMockVersion(3, 13, 2));
+        when(wireMock.version(any(), any())).thenReturn(new WireMockVersion(3, 13, 2));
         sessionId = given()
                 .contentType("application/json")
                 .accept("application/json, text/event-stream")

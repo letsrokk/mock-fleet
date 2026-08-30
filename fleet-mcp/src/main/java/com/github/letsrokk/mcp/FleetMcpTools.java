@@ -535,7 +535,7 @@ public final class FleetMcpTools {
         return executor.execute(toolName, () -> {
             MockIdValidator.requireValid(mockId);
             requireRunning(mockId);
-            WireMockVersion runtimeVersion = wireMock.version(mockId);
+            WireMockVersion runtimeVersion = wireMock.version(mockId, () -> fleetApi.runtimeVersion(mockId));
             if (!ToolCapabilityRegistry.supports(toolName, runtimeVersion)) {
                 throw new McpOperationException("WIREMOCK_VERSION_UNSUPPORTED",
                         toolName + " requires WireMock " + ToolCapabilityRegistry.minimumVersion(toolName) + "+", false,

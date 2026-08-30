@@ -75,6 +75,21 @@ public final class FleetApiClient {
         return json(HttpMethod.GET, "/__fleet/api/config", null);
     }
 
+    public WireMockVersion runtimeVersion(String mockId) {
+        JsonNode mocks = getConfig().path("mocks");
+        if (!mocks.isArray()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Fleet API config is missing mocks", false,
+                    Map.of());
+        }
+        for (JsonNode mock : mocks) {
+            if (mockId.equals(mock.path("mockId").asText()) && mock.path("runtimeVersion").isTextual()) {
+                return WireMockVersion.parse(mock.path("runtimeVersion").asText());
+            }
+        }
+        throw new McpOperationException("WIREMOCK_VERSION_UNSUPPORTED",
+                "Mock " + mockId + " does not report a runtime WireMock version", false, Map.of("mockId", mockId));
+    }
+
     public JsonNode getOptionCatalog(String version) {
         String path = "/__fleet/api/config/options";
         if (version != null) {
