@@ -2,6 +2,7 @@ package com.github.letsrokk.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -16,6 +17,8 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -57,31 +60,15 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_mocks", description = "List active Mock Fleet mocks without starting any mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMocks.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_mocks", description = "List configured and active Mock Fleet mocks without starting any mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMocks.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listMocks(
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
         JsonNode scope = scope(null, null);
-        return fleet("list_mocks", () -> McpToolExecutor.ToolResult.of("Listed active mocks.",
-                collectionResult(null, page("list_mocks", scope, fleetApi.listMocks(), "mocks", limit, cursor),
+        return fleet("list_mocks", () -> McpToolExecutor.ToolResult.of("Listed mocks.",
+                collectionResult(null, page("list_mocks", scope, mockInventory(fleetApi.getConfig()),
+                                "mocks", limit, cursor),
                         "mocks", "mocks", "list_mocks", scope)));
-    }
-
-    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMockConfigs.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public ToolResponse listMockConfigs(
-            @ToolArg(description = "Page size", required = false) Integer limit,
-            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
-        JsonNode scope = scope(null, null);
-        return fleet("list_mock_configs", () -> {
-            JsonNode view = fleetApi.getConfig();
-            ObjectNode result = mapper.createObjectNode();
-            result.set("resourceVersion", view.path("resourceVersion"));
-            result.set("mockIds", view.path("savedMockIds"));
-            return McpToolExecutor.ToolResult.of("Listed saved mock configurations.",
-                    collectionResult(null, page("list_mock_configs", scope, result, "mockIds", limit, cursor),
-                            "mockIds", "mockIds", "list_mock_configs", scope));
-        });
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
@@ -776,6 +763,54 @@ public final class FleetMcpTools {
             page.putNull("nextCursor");
         }
         return result;
+    }
+
+    private ObjectNode mockInventory(JsonNode configView) {
+        JsonNode mocks = configView.path("mocks");
+        JsonNode savedMockIds = configView.path("savedMockIds");
+        if (!mocks.isArray() || !savedMockIds.isArray()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "Fleet API config is missing mock inventory fields", false, Map.of());
+        }
+
+        Set<String> saved = new HashSet<>();
+        savedMockIds.forEach(mockId -> {
+            if (mockId.isTextual()) {
+                saved.add(mockId.asText());
+            }
+        });
+        List<ObjectNode> rows = new ArrayList<>();
+        for (JsonNode mock : mocks) {
+            String mockId = requiredInventoryText(mock, "mockId");
+            ObjectNode row = mapper.createObjectNode();
+            row.put("mockId", mockId);
+            row.put("lifecycle", requiredInventoryText(mock, "lifecycle"));
+            row.put("wireMockVersion", requiredInventoryText(mock, "wireMockVersion"));
+            JsonNode runtimeVersion = mock.get("runtimeVersion");
+            if (runtimeVersion == null || (!runtimeVersion.isNull() && !runtimeVersion.isTextual())) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config mock runtimeVersion must be a string or null", false,
+                        Map.of("mockId", mockId));
+            }
+            row.set("runtimeVersion", runtimeVersion);
+            row.put("hasSavedConfig", saved.contains(mockId));
+            rows.add(row);
+        }
+        rows.sort(Comparator.comparing(row -> row.path("mockId").asText()));
+        ArrayNode sorted = mapper.createArrayNode();
+        rows.forEach(sorted::add);
+        ObjectNode result = mapper.createObjectNode();
+        result.set("mocks", sorted);
+        return result;
+    }
+
+    private String requiredInventoryText(JsonNode mock, String field) {
+        JsonNode value = mock.get(field);
+        if (value == null || !value.isTextual()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "Fleet API config mock " + field + " must be a string", false, Map.of("field", field));
+        }
+        return value.asText();
     }
 
     private ObjectNode recordingCandidates(String mockId, JsonNode response) {

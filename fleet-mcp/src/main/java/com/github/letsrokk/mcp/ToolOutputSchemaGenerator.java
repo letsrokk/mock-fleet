@@ -19,9 +19,6 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
         return switch (marker.getSimpleName()) {
             case "ListMocks" -> strict(properties(
                     "mocks", array(mockRow()), "page", page()), "mocks", "page");
-            case "ListMockConfigs" -> strict(properties(
-                    "resourceVersion", nullableString(), "mockIds", array(string()), "page", page()),
-                    "resourceVersion", "mockIds", "page");
             case "GetMockConfig" -> strict(properties(
                     "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()),
                     "resourceVersion", "mock", "routing");
@@ -129,12 +126,11 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
     private JsonObject mockRow() {
         return strict(properties(
                 "mockId", string(),
-                "podName", nullableString(),
-                "status", lifecycleStatus(),
-                "message", nullableString(),
+                "lifecycle", lifecycleStatus(),
                 "wireMockVersion", versionString(),
-                "runtimeVersion", nullableVersionString()),
-                "mockId", "podName", "status", "message", "wireMockVersion", "runtimeVersion");
+                "runtimeVersion", nullableVersionString(),
+                "hasSavedConfig", bool()),
+                "mockId", "lifecycle", "wireMockVersion", "runtimeVersion", "hasSavedConfig");
     }
 
     private JsonObject mockConfig() {

@@ -62,7 +62,6 @@ class FleetApiClientTest {
 
     @Test
     void usesOnlyThePublishedFleetApiRoutes() throws Exception {
-        client.listMocks();
         client.startMock("orders");
         client.stopMock("orders");
         client.getConfig();
@@ -74,7 +73,6 @@ class FleetApiClientTest {
         assertTrue(client.storageEnabled());
 
         assertEquals(List.of(
-                "GET /__fleet/api/mocks",
                 "POST /__fleet/api/mocks/orders/start",
                 "DELETE /__fleet/api/mocks/orders",
                 "GET /__fleet/api/config",

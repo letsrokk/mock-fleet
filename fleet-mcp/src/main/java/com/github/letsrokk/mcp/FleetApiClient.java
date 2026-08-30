@@ -58,10 +58,6 @@ public final class FleetApiClient {
                 .setIdleTimeoutUnit(TimeUnit.SECONDS));
     }
 
-    public JsonNode listMocks() {
-        return json(HttpMethod.GET, "/__fleet/api/mocks", null);
-    }
-
     public JsonNode startMock(String mockId) {
         return json(HttpMethod.POST, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId) + "/start", null);
     }

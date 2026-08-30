@@ -2,20 +2,20 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 32 tools:
+The server publishes 31 tools:
 
 ```text
-list_mocks                 list_mock_configs          get_mock_config
-list_option_definitions    update_mock_config         delete_mock_config
-start_mock                 stop_mock                  list_stubs
-list_unmatched_stubs       get_stub                   create_stub
-update_stub                delete_stub                persist_stub
-unpersist_stub             send_request               find_requests
-count_requests             list_unmatched_requests    get_near_misses
-reset_request_journal      start_recording            get_recording_status
-stop_recording             snapshot_requests          list_body_files
-get_body_file              put_body_file              delete_body_file
-list_scenarios             reset_scenarios
+list_mocks                 get_mock_config             list_option_definitions
+update_mock_config         delete_mock_config          start_mock
+stop_mock                  list_stubs                  list_unmatched_stubs
+get_stub                   create_stub                 update_stub
+delete_stub                persist_stub                unpersist_stub
+send_request               find_requests               count_requests
+list_unmatched_requests    get_near_misses             reset_request_journal
+start_recording            get_recording_status        stop_recording
+snapshot_requests          list_body_files             get_body_file
+put_body_file              delete_body_file            list_scenarios
+reset_scenarios
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -40,7 +40,7 @@ Every closed tool-input object rejects unknown properties. Native WireMock mappi
 
 ## Collection pagination
 
-`list_mocks`, `list_mock_configs`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
+`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
 
 Every collection returns `page` with the same metadata:
 
@@ -54,6 +54,8 @@ Every collection returns `page` with the same metadata:
 ```
 
 `nextCursor` is a string only when `hasMore` is true and is otherwise null. Continue with that cursor until `hasMore` is false. WireMock collections do not provide snapshot isolation, so concurrent mutations between calls can cause duplicates or omissions. The MCP server streams large upstream collections, keeps only the requested page plus one item, and returns `RESULT_TOO_LARGE` if a configured byte or item scan budget is exhausted. `get_near_misses` returns `{mockId,nearMisses,page}`.
+
+`list_mocks` reads one Fleet configuration snapshot and returns every configured inactive, configured active, and runtime-only mock, sorted by `mockId` before pagination. Each row is exactly `{mockId,lifecycle,wireMockVersion,runtimeVersion,hasSavedConfig}`. `wireMockVersion` is the desired version, `runtimeVersion` is null while no runtime is present, and `hasSavedConfig` reports membership in the snapshot's saved configuration IDs.
 
 ## Lifecycle
 

@@ -889,10 +889,10 @@ run_contracts() {
   local cleanup_mock="stop-${run_id:0:16}"
   local failed_mock="fail-${run_id:0:16}"
 
-  log "Checking 32-tool discovery and renamed recorder status."
+  log "Checking 31-tool discovery and renamed recorder status."
   result=$(mcp_post '{"jsonrpc":"2.0","id":3,"method":"tools/list"}')
   local expected_tools actual_tools sorted_expected_tools
-  expected_tools='["list_mocks","list_mock_configs","get_mock_config","list_option_definitions","update_mock_config","delete_mock_config","start_mock","stop_mock","list_stubs","list_unmatched_stubs","get_stub","create_stub","update_stub","delete_stub","persist_stub","unpersist_stub","send_request","find_requests","count_requests","list_unmatched_requests","get_near_misses","reset_request_journal","start_recording","get_recording_status","stop_recording","snapshot_requests","list_body_files","get_body_file","put_body_file","delete_body_file","list_scenarios","reset_scenarios"]'
+  expected_tools='["list_mocks","get_mock_config","list_option_definitions","update_mock_config","delete_mock_config","start_mock","stop_mock","list_stubs","list_unmatched_stubs","get_stub","create_stub","update_stub","delete_stub","persist_stub","unpersist_stub","send_request","find_requests","count_requests","list_unmatched_requests","get_near_misses","reset_request_journal","start_recording","get_recording_status","stop_recording","snapshot_requests","list_body_files","get_body_file","put_body_file","delete_body_file","list_scenarios","reset_scenarios"]'
   actual_tools=$(jq -c '[.result.tools[].name] | sort' <<<"${result}")
   sorted_expected_tools=$(jq -c 'sort' <<<"${expected_tools}")
   [[ "${actual_tools}" == "${sorted_expected_tools}" ]] \
@@ -923,8 +923,9 @@ run_contracts() {
     '{mockId:$id,resourceVersion:$rv,options:[],applyMode:"futureOnly"}')")
   rv=$(jq -r '.resourceVersion' <<<"${result}")
   mcp_success get_mock_config "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
-  result=$(mcp_success list_mock_configs '{"limit":200}')
-  assert_jq "${result}" ".mockIds | index(\"${config_mock}\") != null" "Saved MCP config was not listed"
+  result=$(mcp_success list_mocks '{"limit":200}')
+  assert_jq "${result}" ".mocks | any(.mockId == \"${config_mock}\" and .hasSavedConfig == true)" \
+    "Saved MCP config was not listed"
   mcp_success start_mock "$(jq -cn --arg id "${config_mock}" '{mockId:$id}')" >/dev/null
   poll_mcp_success list_stubs "$(jq -cn --arg id "${config_mock}" '{mockId:$id,limit:1}')" >/dev/null
   verify_wiremock_workload_identity "${config_mock}"
