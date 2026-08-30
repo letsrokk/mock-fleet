@@ -105,7 +105,11 @@ export async function errorMessage(response: Response, fallback: string) {
 }
 
 function containsExactDetail(message: string, value: unknown) {
-  const escapedValue = formatDetail(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const formattedValue = formatDetail(value);
+  if (!formattedValue) {
+    return false;
+  }
+  const escapedValue = formattedValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(^|[^\\w-])${escapedValue}(?=$|[^\\w-])`).test(message);
 }
 

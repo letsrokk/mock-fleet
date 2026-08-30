@@ -119,6 +119,20 @@ describe("Fleet API dashboard contracts", () => {
     }
   });
 
+  it("keeps an empty detail that is not present in the message", async () => {
+    const response = new Response(JSON.stringify({
+      code: "MAPPING_FOLDER_NOT_FOUND",
+      message: "Mappings folder not found.",
+      retryable: false,
+      stateMayHaveChanged: false,
+      details: { path: "" }
+    }), { status: 404, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to load mappings.")).resolves.toBe(
+      "Mappings folder not found. [MAPPING_FOLDER_NOT_FOUND] path="
+    );
+  });
+
   it("keeps a non-JSON server message instead of replacing it with a client rule", async () => {
     const response = new Response("Mappings storage is unavailable.", { status: 503 });
 
