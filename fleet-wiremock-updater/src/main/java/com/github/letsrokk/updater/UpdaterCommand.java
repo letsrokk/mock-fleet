@@ -17,8 +17,9 @@ import java.util.regex.Pattern;
 public final class UpdaterCommand implements QuarkusApplication {
     private static final String REPOSITORY_COMPONENT =
             "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
+    private static final String DNS_LABEL = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
     private static final Pattern IMAGE_REPOSITORY = Pattern.compile(
-            "^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]*)?/)?"
+            "^(?:" + DNS_LABEL + "(?:\\." + DNS_LABEL + ")*(?::[1-9][0-9]*)?/)?"
                     + REPOSITORY_COMPONENT + "(?:/" + REPOSITORY_COMPONENT + ")*$");
 
     @Inject
@@ -54,7 +55,12 @@ public final class UpdaterCommand implements QuarkusApplication {
     }
 
     static String imageRepository(URI registry, String repository, Optional<String> configured) {
-        String result = configured.filter(value -> !value.isBlank()).orElseGet(() -> {
+        Optional<String> override = configured.filter(value -> !value.isBlank());
+        if (override.isEmpty() && registry.getRawAuthority() != null
+                && registry.getRawAuthority().startsWith("[")) {
+            throw unsupportedIpv6ImageRepository();
+        }
+        String result = override.orElseGet(() -> {
             if ("https".equalsIgnoreCase(registry.getScheme())
                     && "registry-1.docker.io".equalsIgnoreCase(registry.getHost())
                     && registry.getPort() == -1) {
@@ -67,10 +73,17 @@ public final class UpdaterCommand implements QuarkusApplication {
             }
             return registry.getRawAuthority().toLowerCase(Locale.ROOT) + "/" + repository;
         });
+        if (result.startsWith("[")) {
+            throw unsupportedIpv6ImageRepository();
+        }
         if (!IMAGE_REPOSITORY.matcher(result).matches()) {
             throw new IllegalArgumentException("imageRepository must be a pullable image repository without a tag.");
         }
         return result;
+    }
+
+    private static IllegalArgumentException unsupportedIpv6ImageRepository() {
+        return new IllegalArgumentException("Bracketed IPv6 imageRepository authorities are not supported.");
     }
 
     private RegistryV2Client.Credentials registryCredentials() {

@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -67,6 +68,47 @@ class UpdaterCommandTest {
             assertThrows(IllegalArgumentException.class,
                     () -> UpdaterCommand.imageRepository(registry, "wiremock/wiremock", Optional.of(invalid)));
         }
+    }
+
+    @Test
+    void acceptsRepeatedHyphensInRegistryAuthorityAndDerivedImageRepository() {
+        URI registry = URI.create("https://registry--prod.example:5000");
+
+        assertEquals("registry--prod.example:5000/team/image",
+                UpdaterCommand.imageRepository(registry, "team/image", Optional.empty()));
+        assertEquals("registry--prod.example:5000/team/image",
+                UpdaterCommand.imageRepository(URI.create("https://registry.example"), "team/image",
+                        Optional.of("registry--prod.example:5000/team/image")));
+    }
+
+    @Test
+    void rejectsMalformedAndBracketedIpv6RegistryAuthorities() {
+        URI dockerHub = URI.create("https://registry-1.docker.io");
+        for (String invalid : List.of(
+                "-registry.example/team/image",
+                "registry-.example/team/image",
+                "registry.example:port/team/image",
+                "registry.example:/team/image")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> UpdaterCommand.imageRepository(dockerHub, "team/image", Optional.of(invalid)));
+        }
+        for (String invalidRegistry : List.of(
+                "https://-registry.example:5000",
+                "https://registry-.example:5000",
+                "https://registry.example:port")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> UpdaterCommand.imageRepository(URI.create(invalidRegistry),
+                            "team/image", Optional.empty()));
+        }
+
+        IllegalArgumentException derivedIpv6 = assertThrows(IllegalArgumentException.class,
+                () -> UpdaterCommand.imageRepository(URI.create("http://[::1]:5000"),
+                        "team/image", Optional.empty()));
+        assertTrue(derivedIpv6.getMessage().contains("IPv6"));
+        IllegalArgumentException configuredIpv6 = assertThrows(IllegalArgumentException.class,
+                () -> UpdaterCommand.imageRepository(dockerHub, "team/image",
+                        Optional.of("[::1]:5000/team/image")));
+        assertTrue(configuredIpv6.getMessage().contains("IPv6"));
     }
 
     @Test
