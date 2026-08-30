@@ -116,8 +116,11 @@ final class RegistryV2Client {
 
     private HttpResponse<InputStream> sendRegistry(URI uri, String bearer) {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri).timeout(REQUEST_TIMEOUT).GET();
-        if (bearer != null) request.header("Authorization", "Bearer " + bearer);
-        else credentials.ifPresent(value -> request.header("Authorization", value.basic()));
+        if (bearer != null) {
+            request.header("Authorization", "Bearer " + bearer);
+        } else {
+            credentials.ifPresent(value -> request.header("Authorization", value.basic()));
+        }
         return send(request.build(), "Registry request failed.");
     }
 
@@ -157,7 +160,9 @@ final class RegistryV2Client {
                 throw new IllegalStateException("Invalid registry token response.");
             }
             String value = textual(root, "token");
-            if (value == null || value.isBlank()) value = textual(root, "access_token");
+            if (value == null || value.isBlank()) {
+                value = textual(root, "access_token");
+            }
             if (value == null || value.isBlank()) {
                 throw new IllegalStateException("Registry token response lacks token or access_token.");
             }
@@ -198,7 +203,9 @@ final class RegistryV2Client {
     private static byte[] readBounded(InputStream stream, int maximum, String failure) {
         try (stream) {
             byte[] bytes = stream.readNBytes(maximum + 1);
-            if (bytes.length > maximum) throw new IllegalStateException(failure);
+            if (bytes.length > maximum) {
+                throw new IllegalStateException(failure);
+            }
             return bytes;
         } catch (IOException exception) {
             throw new IllegalStateException("Registry response body could not be read.", exception);
@@ -206,13 +213,17 @@ final class RegistryV2Client {
     }
 
     private static URI next(List<String> headers, URI current, URI origin) {
-        if (headers.isEmpty()) return null;
+        if (headers.isEmpty()) {
+            return null;
+        }
         URI result = null;
         for (String header : headers) {
             for (String value : splitLinks(header)) {
                 Link link = parseLink(value);
                 if (link.next()) {
-                    if (result != null) throw new IllegalStateException("Registry Link header has multiple next relations.");
+                    if (result != null) {
+                        throw new IllegalStateException("Registry Link header has multiple next relations.");
+                    }
                     try {
                         result = current.resolve(link.target());
                     } catch (IllegalArgumentException exception) {
@@ -221,7 +232,9 @@ final class RegistryV2Client {
                 }
             }
         }
-        if (result == null) return null;
+        if (result == null) {
+            return null;
+        }
         requireSameOrigin(origin, result);
         if (result.getUserInfo() != null || result.getFragment() != null) {
             throw new IllegalStateException("Registry Link next target is malformed.");
@@ -251,35 +264,47 @@ final class RegistryV2Client {
                 start = index + 1;
             }
         }
-        if (quoted || angled || escaped) throw new IllegalStateException("Malformed Registry Link header.");
+        if (quoted || angled || escaped) {
+            throw malformedLink();
+        }
         links.add(header.substring(start));
         return links;
     }
 
     private static Link parseLink(String value) {
         String trimmed = value.trim();
-        if (!trimmed.startsWith("<")) throw new IllegalStateException("Malformed Registry Link header.");
+        if (!trimmed.startsWith("<")) {
+            throw malformedLink();
+        }
         int close = trimmed.indexOf('>');
-        if (close < 2) throw new IllegalStateException("Malformed Registry Link header.");
+        if (close < 2) {
+            throw malformedLink();
+        }
         String target = trimmed.substring(1, close);
         String remainder = trimmed.substring(close + 1).trim();
         boolean next = false;
         if (!remainder.isEmpty()) {
             for (String rawAttribute : splitAttributes(remainder)) {
                 String attribute = rawAttribute.trim();
-                if (attribute.isEmpty()) continue;
+                if (attribute.isEmpty()) {
+                    continue;
+                }
                 int equals = attribute.indexOf('=');
-                if (equals < 1) throw new IllegalStateException("Malformed Registry Link header.");
+                if (equals < 1) {
+                    throw malformedLink();
+                }
                 String name = attribute.substring(0, equals).trim();
                 String content = attribute.substring(equals + 1).trim();
                 if (content.startsWith("\"") || content.endsWith("\"")) {
                     if (content.length() < 2 || !content.startsWith("\"") || !content.endsWith("\"")) {
-                        throw new IllegalStateException("Malformed Registry Link header.");
+                        throw malformedLink();
                     }
                     content = content.substring(1, content.length() - 1);
                 }
                 if (name.equalsIgnoreCase("rel")) {
-                    for (String relation : content.split("\\s+")) next |= relation.equalsIgnoreCase("next");
+                    for (String relation : content.split("\\s+")) {
+                        next |= relation.equalsIgnoreCase("next");
+                    }
                 }
             }
         }
@@ -301,7 +326,9 @@ final class RegistryV2Client {
                 start = index + 1;
             }
         }
-        if (quoted || escaped) throw new IllegalStateException("Malformed Registry Link header.");
+        if (quoted || escaped) {
+            throw malformedLink();
+        }
         attributes.add(value.substring(start));
         return attributes;
     }
@@ -372,8 +399,14 @@ final class RegistryV2Client {
 
     private static String required(Map<String, String> parameters, String name, String failure) {
         String value = parameters.get(name);
-        if (value == null || value.isBlank()) throw new IllegalStateException(failure);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(failure);
+        }
         return value;
+    }
+
+    private static IllegalStateException malformedLink() {
+        return new IllegalStateException("Malformed Registry Link header.");
     }
 
     private static String textual(JsonNode root, String field) {

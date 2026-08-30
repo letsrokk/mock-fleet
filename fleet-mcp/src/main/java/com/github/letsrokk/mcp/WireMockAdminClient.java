@@ -80,7 +80,7 @@ public final class WireMockAdminClient {
             String version = response.path("version").asText(response.asText());
             return WireMockVersion.parse(version);
         } catch (McpOperationException e) {
-            if (!isMissingVersionEndpoint(e)) {
+            if (!isNotFound(e)) {
                 throw e;
             }
             WireMockVersion fallback = runtimeFallback.get();
@@ -413,34 +413,16 @@ public final class WireMockAdminClient {
     }
 
     private JsonNode sendJson(String mockId, HttpMethod method, String endpoint, JsonNode payload) {
-        byte[] body;
-        try {
-            body = mapper.writeValueAsBytes(payload);
-        } catch (JsonProcessingException e) {
-            throw new McpOperationException("INVALID_JSON", "Unable to serialize WireMock request JSON", false, Map.of());
-        }
-        return parseJson(send(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body)));
+        return parseJson(send(mockId, jsonRequest(method, endpoint, payload)));
     }
 
     private JsonNode sendMutationJson(String mockId, HttpMethod method, String endpoint, JsonNode payload) {
-        byte[] body;
-        try {
-            body = mapper.writeValueAsBytes(payload);
-        } catch (JsonProcessingException e) {
-            throw new McpOperationException("INVALID_JSON", "Unable to serialize WireMock request JSON", false,
-                    Map.of());
-        }
-        TransportResponse response = sendMutation(mockId, new TransportRequest(method, endpoint, JSON_HEADERS, body));
+        TransportResponse response = sendMutation(mockId, jsonRequest(method, endpoint, payload));
         try {
             return parseJson(response, true);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
-    }
-
-    private JsonNode sendWithoutBodyJson(String mockId, HttpMethod method, String endpoint) {
-        return parseJson(send(mockId, new TransportRequest(method, endpoint,
-                Map.of("accept", List.of("application/json")), new byte[0])));
     }
 
     private JsonNode sendMutationWithoutBodyJson(String mockId, HttpMethod method, String endpoint) {
@@ -450,6 +432,15 @@ public final class WireMockAdminClient {
             return parseJson(response, true);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
+        }
+    }
+
+    private TransportRequest jsonRequest(HttpMethod method, String endpoint, JsonNode payload) {
+        try {
+            return new TransportRequest(method, endpoint, JSON_HEADERS, mapper.writeValueAsBytes(payload));
+        } catch (JsonProcessingException e) {
+            throw new McpOperationException("INVALID_JSON", "Unable to serialize WireMock request JSON", false,
+                    Map.of());
         }
     }
 
@@ -799,36 +790,43 @@ public final class WireMockAdminClient {
     }
 
     private TransportResponse exchange(String mockId, TransportRequest request) {
-        MockIdValidator.requireValid(mockId);
-        if (request.body().length > maxPayloadBytes) {
-            throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
-                    Map.of("limitBytes", maxPayloadBytes));
-        }
+        validateRequest(mockId, request);
         TransportResponse response = transport.execute(mockId, request);
-        if (response.body().length > maxPayloadBytes) {
-            throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
-                    Map.of("limitBytes", maxPayloadBytes));
-        }
+        validateResponse(response, false, mockId);
         return response;
     }
 
     private TransportResponse exchangeStateChanging(String mockId, TransportRequest request) {
-        MockIdValidator.requireValid(mockId);
-        if (request.body().length > maxPayloadBytes) {
-            throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
-                    Map.of("limitBytes", maxPayloadBytes));
-        }
+        validateRequest(mockId, request);
         TransportResponse response;
         try {
             response = transport.execute(mockId, request);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
-        if (response.body().length > maxPayloadBytes) {
-            throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
-                    true, Map.of("mockId", mockId, "limitBytes", maxPayloadBytes));
-        }
+        validateResponse(response, true, mockId);
         return response;
+    }
+
+    private void validateRequest(String mockId, TransportRequest request) {
+        MockIdValidator.requireValid(mockId);
+        if (request.body().length > maxPayloadBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
+                    Map.of("limitBytes", maxPayloadBytes));
+        }
+    }
+
+    private void validateResponse(TransportResponse response, boolean stateMayHaveChanged, String mockId) {
+        if (response.body().length <= maxPayloadBytes) {
+            return;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        if (stateMayHaveChanged) {
+            details.put("mockId", mockId);
+        }
+        details.put("limitBytes", maxPayloadBytes);
+        throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
+                stateMayHaveChanged, details);
     }
 
     private static McpOperationException mutationFailure(String mockId, RuntimeException failure) {
@@ -1203,10 +1201,6 @@ public final class WireMockAdminClient {
         if (source.hasNonNull(field)) {
             target.set(field, source.get(field));
         }
-    }
-
-    private static boolean isMissingVersionEndpoint(McpOperationException error) {
-        return "WIREMOCK_ADMIN_ERROR".equals(error.code()) && Integer.valueOf(404).equals(error.details().get("status"));
     }
 
     private static boolean isNotFound(McpOperationException error) {

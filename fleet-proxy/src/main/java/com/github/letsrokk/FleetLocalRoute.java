@@ -37,12 +37,12 @@ public class FleetLocalRoute {
         String requestPath = requestPath(routingContext.request().uri());
 
         if (isFleetRootRequest(host, requestPath)) {
-            respondForFleetRoot(routingContext);
+            respondForDashboardRedirect(routingContext);
             return;
         }
 
         if (isFleetDashboardEntry(host, requestPath)) {
-            respondForFleetDashboardEntry(routingContext);
+            respondForDashboardRedirect(routingContext);
             return;
         }
 
@@ -78,23 +78,7 @@ public class FleetLocalRoute {
                 || !requestRoutingResolver.isFleetSubdomain(host);
     }
 
-    private void respondForFleetRoot(RoutingContext routingContext) {
-        HttpMethod method = routingContext.request().method();
-        if (method == HttpMethod.GET || method == HttpMethod.HEAD) {
-            routingContext.response()
-                    .setStatusCode(302)
-                    .putHeader(HttpHeaders.LOCATION, "/__fleet/")
-                    .end();
-            return;
-        }
-
-        routingContext.response()
-                .setStatusCode(405)
-                .putHeader(HttpHeaders.ALLOW, "GET, HEAD")
-                .end();
-    }
-
-    static void respondForFleetDashboardEntry(RoutingContext routingContext) {
+    static void respondForDashboardRedirect(RoutingContext routingContext) {
         HttpMethod method = routingContext.request().method();
         if (method == HttpMethod.GET || method == HttpMethod.HEAD) {
             routingContext.response()

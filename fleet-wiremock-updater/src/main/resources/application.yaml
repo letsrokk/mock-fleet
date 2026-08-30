@@ -1,8 +1,6 @@
 quarkus:
   banner:
     enabled: false
-  main:
-    class: com.github.letsrokk.updater.UpdaterCommand
 mock-fleet:
   wiremock-updater:
     namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}

@@ -95,14 +95,8 @@ public class WireMockOptions {
                                                     WireMockConfigDocument user,
                                                     WireMockVersionCatalog catalog) {
         WireMockConfigDocument effective = baseline.merge(user);
-        WireMockPodConfig effectiveMock = effective.mockConfigs().get(mockId);
-        WireMockVersion version = effectiveMock == null || effectiveMock.version() == null
-                ? catalog.defaultVersion()
-                : parseDesiredVersion(effectiveMock.version());
+        WireMockVersion version = desiredVersionFor(mockId, effective, catalog);
         WireMockVersionCatalog.VersionEntry entry = catalog.versions().get(version);
-        if (entry == null) {
-            throw unsupportedVersion(version.toString());
-        }
 
         List<String> effectiveOptions = effective.optionsFor(mockId);
         rejectVersionConflicts(effectiveOptions, version);

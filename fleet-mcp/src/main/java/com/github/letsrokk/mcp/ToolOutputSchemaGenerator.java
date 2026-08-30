@@ -18,59 +18,48 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
     private JsonObject success(Class<?> marker) {
         return switch (marker.getSimpleName()) {
             case "ListMocks" -> strict(properties(
-                    "mocks", array(mockRow()), "page", page()), "mocks", "page");
+                    "mocks", array(mockRow()), "page", page()));
             case "GetMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()),
-                    "resourceVersion", "mock", "routing");
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()));
             case "ListOptionDefinitions" -> strict(properties(
                     "wireMockVersion", versionString(),
                     "catalogStatus", string().put("enum", new JsonArray().add("supported").add("newer_unresearched")),
-                    "options", array(optionDefinition())),
-                    "wireMockVersion", "catalogStatus", "options");
+                    "options", array(optionDefinition())));
             case "UpdateMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", mockConfig(), "apply", apply()),
-                    "resourceVersion", "mock", "apply");
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "apply", apply()));
             case "DeleteMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", apply()),
-                    "resourceVersion", "mockId", "deleted", "apply");
+                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", apply()));
             case "StartMock" -> lifecycle();
             case "StopMock" -> stopLifecycle();
             case "StubPage" -> strict(properties(
-                    "mockId", string(), "stubs", array(openObject()), "page", page()),
-                    "mockId", "stubs", "page");
-            case "Stub" -> strict(properties("mockId", string(), "stub", openObject()), "mockId", "stub");
+                    "mockId", string(), "stubs", array(openObject()), "page", page()));
+            case "Stub" -> strict(properties("mockId", string(), "stub", openObject()));
             case "DeleteStub" -> strict(properties(
-                    "mockId", string(), "stubId", string(), "deleted", bool()), "mockId", "stubId", "deleted");
+                    "mockId", string(), "stubId", string(), "deleted", bool()));
             case "SendRequest" -> strict(properties(
-                    "mockId", string(), "response", response()), "mockId", "response");
+                    "mockId", string(), "response", response()));
             case "RequestPage" -> strict(properties(
-                    "mockId", string(), "requests", array(openObject()), "page", page()),
-                    "mockId", "requests", "page");
+                    "mockId", string(), "requests", array(openObject()), "page", page()));
             case "CountRequests" -> strict(properties(
-                    "mockId", string(), "count", integer()), "mockId", "count");
+                    "mockId", string(), "count", integer()));
             case "NearMisses" -> strict(properties(
-                    "mockId", string(), "nearMisses", array(openObject()), "page", page()),
-                    "mockId", "nearMisses", "page");
-            case "Reset" -> strict(properties("mockId", string(), "reset", bool()), "mockId", "reset");
+                    "mockId", string(), "nearMisses", array(openObject()), "page", page()));
+            case "Reset" -> strict(properties("mockId", string(), "reset", bool()));
             case "RecordingStatus" -> strict(properties(
-                    "mockId", string(), "status", openObject()), "mockId", "status");
+                    "mockId", string(), "status", openObject()));
             case "RecordingCandidates" -> strict(properties(
                     "mockId", string(), "candidateIds", array(string()), "candidateCount", integer(),
-                    "matchedRequests", bool()), "mockId", "candidateIds", "candidateCount", "matchedRequests");
+                    "matchedRequests", bool()));
             case "BodyFilePage" -> strict(properties(
-                    "mockId", string(), "files", array(string()), "page", page()), "mockId", "files", "page");
+                    "mockId", string(), "files", array(string()), "page", page()));
             case "GetBodyFile" -> strict(properties(
-                    "mockId", string(), "fileName", string(), "body", body()),
-                    "mockId", "fileName", "body");
+                    "mockId", string(), "fileName", string(), "body", body()));
             case "PutBodyFile" -> strict(properties(
-                    "mockId", string(), "fileName", string(), "sizeBytes", integer()),
-                    "mockId", "fileName", "sizeBytes");
+                    "mockId", string(), "fileName", string(), "sizeBytes", integer()));
             case "DeleteBodyFile" -> strict(properties(
-                    "mockId", string(), "fileName", string(), "deleted", bool(), "forced", bool()),
-                    "mockId", "fileName", "deleted", "forced");
+                    "mockId", string(), "fileName", string(), "deleted", bool(), "forced", bool()));
             case "ScenarioPage" -> strict(properties(
-                    "mockId", string(), "scenarios", array(openObject()), "page", page()),
-                    "mockId", "scenarios", "page");
+                    "mockId", string(), "scenarios", array(openObject()), "page", page()));
             default -> throw new IllegalArgumentException("Unknown MCP output schema marker: " + marker.getName());
         };
     }
@@ -81,9 +70,8 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "message", string(),
                 "retryable", bool(),
                 "stateMayHaveChanged", bool(),
-                "details", openObject()),
-                "code", "message", "retryable", "stateMayHaveChanged", "details");
-        return strict(properties("error", error), "error");
+                "details", openObject()));
+        return strict(properties("error", error));
     }
 
     private JsonObject lifecycle() {
@@ -92,8 +80,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "status", string().put("enum", new JsonArray().add("RUNNING").add("STARTING")),
                 "podName", nullableString(),
                 "message", nullableString(),
-                "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))),
-                "mockId", "status", "podName", "message", "retryAfterMs");
+                "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))));
     }
 
     private JsonObject stopLifecycle() {
@@ -103,8 +90,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "podName", nullableString(),
                 "message", nullableString(),
                 "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))
-                        .put("minimum", 0)),
-                "mockId", "status", "podName", "message", "retryAfterMs");
+                        .put("minimum", 0)));
     }
 
     private JsonObject response() {
@@ -113,14 +99,14 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "headers", new JsonObject().put("type", "object")
                         .put("additionalProperties", array(string())),
                 "contentType", string(),
-                "body", body()), "status", "headers", "contentType", "body");
+                "body", body()));
     }
 
     private JsonObject body() {
         return strict(properties(
                 "encoding", string().put("enum", new JsonArray().add("utf8").add("base64")),
                 "data", string(),
-                "sizeBytes", integer()), "encoding", "data", "sizeBytes");
+                "sizeBytes", integer()));
     }
 
     private JsonObject mockRow() {
@@ -129,8 +115,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "lifecycle", lifecycleStatus(),
                 "wireMockVersion", versionString(),
                 "runtimeVersion", nullableVersionString(),
-                "hasSavedConfig", bool()),
-                "mockId", "lifecycle", "wireMockVersion", "runtimeVersion", "hasSavedConfig");
+                "hasSavedConfig", bool()));
     }
 
     private JsonObject mockConfig() {
@@ -141,8 +126,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "user", configData(true, true),
                 "effective", configData(false, false),
                 "wireMockVersion", versionString(),
-                "runtimeVersion", nullableVersionString()),
-                "mockId", "lifecycle", "baseline", "user", "effective", "wireMockVersion", "runtimeVersion");
+                "runtimeVersion", nullableVersionString()));
     }
 
     private JsonObject configData(boolean nullableVersion, boolean nullableResources) {
@@ -153,26 +137,25 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
         return strict(properties(
                 "version", nullableVersion ? nullableVersionString() : versionString(),
                 "options", array(string()),
-                "resources", resourceSchema),
-                "version", "options", "resources");
+                "resources", resourceSchema));
     }
 
     private JsonObject resources() {
         JsonObject stringMap = new JsonObject().put("type", "object").put("additionalProperties", string());
-        return strict(properties("requests", stringMap.copy(), "limits", stringMap.copy()), "requests", "limits");
+        return strict(properties("requests", stringMap.copy(), "limits", stringMap.copy()));
     }
 
     private JsonObject routing() {
         return strict(properties(
                 "mode", string().put("enum", new JsonArray().add("HOST").add("PATH")),
-                "host", string()), "mode", "host");
+                "host", string()));
     }
 
     private JsonObject apply() {
         return strict(properties(
                 "mockId", string(),
                 "mode", string().put("enum", new JsonArray().add("futureOnly").add("restartActive")),
-                "lifecycle", lifecycleStatus()), "mockId", "mode", "lifecycle");
+                "lifecycle", lifecycleStatus()));
     }
 
     private JsonObject lifecycleStatus() {
@@ -190,7 +173,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
 
     private JsonObject page() {
         return strict(properties("limit", integer(), "returned", integer(), "hasMore", bool(),
-                "nextCursor", nullableString()), "limit", "returned", "hasMore", "nextCursor");
+                "nextCursor", nullableString()));
     }
 
     private JsonObject optionDefinition() {
@@ -203,15 +186,12 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "description", string(),
                 "values", array(string()),
                 "minimum", nullableInteger(),
-                "maximum", nullableInteger()),
-                "name", "label", "kind", "group", "description", "values", "minimum", "maximum");
+                "maximum", nullableInteger()));
     }
 
-    private JsonObject strict(JsonObject properties, String... required) {
+    private JsonObject strict(JsonObject properties) {
         JsonArray requiredArray = new JsonArray();
-        for (String name : required) {
-            requiredArray.add(name);
-        }
+        properties.fieldNames().forEach(requiredArray::add);
         return new JsonObject().put("type", "object").put("properties", properties)
                 .put("required", requiredArray).put("additionalProperties", false);
     }
