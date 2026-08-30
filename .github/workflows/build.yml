@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       maven_version:
-        description: Maven project version to use for packaged API/proxy/MCP/updater artifacts.
+        description: Maven project version to use for packaged API/proxy/MCP/Mock Ops artifacts.
         required: false
         default: ""
         type: string
@@ -54,11 +54,11 @@ jobs:
       - name: Test security boundary rendering
         run: deploy/helm/mock-fleet/tests/render-security.sh
 
-      - name: Test WireMock updater rendering
-        run: deploy/helm/mock-fleet/tests/render-updater.sh
+      - name: Test Mock Ops rendering
+        run: deploy/helm/mock-fleet/tests/render-mock-ops.sh
 
-      - name: Verify WireMock updater workflow contracts
-        run: ruby tests/workflow-updater-contract.rb
+      - name: Verify Mock Ops workflow contracts
+        run: ruby tests/workflow-mock-ops-contract.rb
 
       - name: Test local rebuild selection
         run: bin/local/tests/deploy-rebuild.sh
@@ -160,8 +160,8 @@ jobs:
           path: fleet-mcp/target/quarkus-app
           if-no-files-found: error
 
-  fleet-wiremock-updater:
-    name: Build fleet-wiremock-updater
+  fleet-mock-ops:
+    name: Build fleet-mock-ops
     runs-on: ubuntu-latest
 
     steps:
@@ -175,20 +175,20 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Set updater version
+      - name: Set Mock Ops version
         if: ${{ inputs.maven_version != '' }}
-        working-directory: fleet-wiremock-updater
+        working-directory: fleet-mock-ops
         run: ./mvnw -B versions:set -DnewVersion="${{ inputs.maven_version }}" -DgenerateBackupPoms=false
 
-      - name: Build updater
-        working-directory: fleet-wiremock-updater
+      - name: Build Mock Ops
+        working-directory: fleet-mock-ops
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
-      - name: Upload updater package
+      - name: Upload Mock Ops package
         uses: actions/upload-artifact@v4
         with:
-          name: fleet-wiremock-updater-package
-          path: fleet-wiremock-updater/target/quarkus-app
+          name: fleet-mock-ops-package
+          path: fleet-mock-ops/target/quarkus-app
           if-no-files-found: error
 
   fleet-dash:
