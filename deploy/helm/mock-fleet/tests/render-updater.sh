@@ -127,7 +127,15 @@ for invalid_setting in \
   fi
 done
 
-for invalid_image_repository in https://registry.testing/wiremock wiremock:3; do
+for valid_image_repository in team/mock--image registry.testing:5000/team/mock__image; do
+  helm template unusual-release "${chart_dir}" \
+    --set wiremock.versionUpdater.enabled=true \
+    --set-string wiremock.versionUpdater.registry.imageRepository="${valid_image_repository}" \
+    >/dev/null
+done
+
+for invalid_image_repository in \
+  https://registry.testing/wiremock wiremock:3 team/-mock team/mock_ team/mock:::image team//mock; do
   if helm template unusual-release "${chart_dir}" \
       --set wiremock.versionUpdater.enabled=true \
       --set-string wiremock.versionUpdater.registry.imageRepository="${invalid_image_repository}" \

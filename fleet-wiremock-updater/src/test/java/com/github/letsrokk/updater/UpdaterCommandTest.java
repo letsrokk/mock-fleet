@@ -54,6 +54,22 @@ class UpdaterCommandTest {
     }
 
     @Test
+    void acceptsDockerRepositorySeparatorsAndRejectsMalformedComponents() {
+        URI registry = URI.create("https://registry-1.docker.io");
+        assertEquals("team/mock--image",
+                UpdaterCommand.imageRepository(registry, "wiremock/wiremock",
+                        Optional.of("team/mock--image")));
+        assertEquals("registry.example:5000/team/mock__image",
+                UpdaterCommand.imageRepository(registry, "wiremock/wiremock",
+                        Optional.of("registry.example:5000/team/mock__image")));
+
+        for (String invalid : List.of("team/-mock", "team/mock_", "team/mock:::image", "team//mock")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> UpdaterCommand.imageRepository(registry, "wiremock/wiremock", Optional.of(invalid)));
+        }
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void privateRegistryRunWritesPullableImagesWithRegistryHost() throws Exception {
         HttpServer registry = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

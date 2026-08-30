@@ -15,9 +15,11 @@ import java.util.regex.Pattern;
 
 @QuarkusMain
 public final class UpdaterCommand implements QuarkusApplication {
+    private static final String REPOSITORY_COMPONENT =
+            "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
     private static final Pattern IMAGE_REPOSITORY = Pattern.compile(
             "^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]*)?/)?"
-                    + "[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$");
+                    + REPOSITORY_COMPONENT + "(?:/" + REPOSITORY_COMPONENT + ")*$");
 
     @Inject
     UpdaterConfig config;
