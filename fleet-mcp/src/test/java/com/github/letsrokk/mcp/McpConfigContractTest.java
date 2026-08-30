@@ -3,6 +3,7 @@ package com.github.letsrokk.mcp;
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -260,13 +261,15 @@ class McpConfigContractTest {
 
     @Test
     void exposesArtifactVersionAndFullBuildProvenance() {
+        String expectedVersion = System.getProperty("expected.application.version");
+        assertNotNull(expectedVersion);
         String buildTime = given()
         .when()
                 .get("/__fleet/mcp/version")
         .then()
                 .statusCode(200)
                 .body("component", org.hamcrest.Matchers.equalTo("mcp"))
-                .body("version", org.hamcrest.Matchers.equalTo("1.5.1"))
+                .body("version", org.hamcrest.Matchers.equalTo(expectedVersion))
                 .body("revision", org.hamcrest.Matchers.matchesPattern("[0-9a-fA-F]{40}"))
                 .extract().path("buildTime");
 
