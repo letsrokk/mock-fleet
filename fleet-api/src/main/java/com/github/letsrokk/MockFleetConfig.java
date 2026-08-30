@@ -1,6 +1,7 @@
 package com.github.letsrokk;
 
 import io.smallrye.config.ConfigMapping;
+import io.smallrye.config.WithName;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -35,6 +36,9 @@ public interface MockFleetConfig {
     Optional<String> wiremockConfigPath();
 
     Optional<String> wiremockUserConfigMapName();
+
+    @WithName("wiremock-version-catalog-config-map-name")
+    Optional<String> wiremockVersionCatalogConfigMapName();
 
     String wiremockConfigKey();
 

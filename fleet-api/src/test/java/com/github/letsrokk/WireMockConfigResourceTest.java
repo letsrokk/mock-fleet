@@ -10,9 +10,11 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -38,14 +40,67 @@ class WireMockConfigResourceTest {
                 .body("mocks[0].active", nullValue())
                 .body("mocks[0].user.resources", nullValue())
                 .body("mocks[0].effective.options[0]", is("--verbose"))
-                .body("options[0].name", is("--verbose"))
-                .body("wireMock.configuredImage", is("wiremock/wiremock:3.13.2-2"))
-                .body("wireMock.version", is("3.13.2"))
-                .body("wireMock.minimumSupportedVersion", is("3.0.0"))
-                .body("wireMock.maximumResearchedVersion", is("3.13.2"))
-                .body("wireMock.rangeStatus", is("supported"));
+                .body("wireMock", nullValue())
+                .body("defaultVersion", is("3.13.2"))
+                .body("versions[0].version", is("3.13.2"))
+                .body("catalogResourceVersion", is("7"));
 
         verify(configService).view();
+    }
+
+    @Test
+    void getsVersionedPublicOptionCatalog() {
+        when(configService.optionCatalog("3.7.0")).thenReturn(optionCatalog("3.7.0", "supported"));
+
+        given()
+                .queryParam("version", "3.7.0")
+        .when()
+                .get("/__fleet/api/config/options")
+        .then()
+                .statusCode(200)
+                .body("size()", is(3))
+                .body("wireMockVersion", is("3.7.0"))
+                .body("catalogStatus", is("supported"))
+                .body("options[0].name", is("--verbose"))
+                .body("options[0].available", nullValue())
+                .body("options[0].compatibility", nullValue())
+                .body("options[0].versionRanges", nullValue());
+
+        verify(configService).optionCatalog("3.7.0");
+    }
+
+    @Test
+    void getsDefaultOptionCatalogForAnOmittedVersion() {
+        when(configService.optionCatalog(isNull())).thenReturn(optionCatalog("3.13.2", "supported"));
+
+        given()
+        .when()
+                .get("/__fleet/api/config/options")
+        .then()
+                .statusCode(200)
+                .body("wireMockVersion", is("3.13.2"));
+
+        verify(configService).optionCatalog(isNull());
+    }
+
+    @Test
+    void rejectsInvalidCatalogVersionsWithoutInvokingConfigurationMutation() {
+        doThrow(ApiException.badRequest("INVALID_WIREMOCK_VERSION",
+                "WireMock version must be an exact WireMock 3.x semantic version.", Map.of("version", "4.0.0")))
+                .when(configService).optionCatalog("4.0.0");
+
+        given()
+                .queryParam("version", "4.0.0")
+        .when()
+                .get("/__fleet/api/config/options")
+        .then()
+                .statusCode(400)
+                .body("code", is("INVALID_WIREMOCK_VERSION"))
+                .body("retryable", is(false))
+                .body("stateMayHaveChanged", is(false));
+
+        verify(configService).optionCatalog("4.0.0");
+        verifyNoMoreInteractions(configService);
     }
 
     @Test
@@ -178,22 +233,23 @@ class WireMockConfigResourceTest {
                 empty,
                 user,
                 effective);
-        WireMockOptionCatalog.OptionDefinition option = new WireMockOptionCatalog.OptionDefinition(
-                "--verbose",
-                "Verbose logging",
-                "flag",
-                "Logging",
-                "Log more detail to the console.",
-                List.of());
         return new WireMockConfigService.ConfigView(
                 "42",
                 List.of("demo"),
                 List.of("demo"),
                 List.of(mock),
-                new WireMockConfigService.WireMockVersionView(
-                        "wiremock/wiremock:3.13.2-2", "3.13.2", "3.0.0", "3.13.2", "supported"),
-                List.of(option),
-                new WireMockConfigService.RoutingView("HOST", "mock-fleet.localhost"));
+                new WireMockConfigService.RoutingView("HOST", "mock-fleet.localhost"),
+                "3.13.2",
+                List.of(new WireMockConfigService.VersionView(
+                        "3.13.2", "wiremock/wiremock:3.13.2-2", true)),
+                "7");
+    }
+
+    private WireMockConfigService.OptionCatalogView optionCatalog(String version, String status) {
+        return new WireMockConfigService.OptionCatalogView(version, status, List.of(
+                new WireMockConfigService.PublicOptionDefinition(
+                        "--verbose", "Verbose logging", "flag", "Logging", "Log more detail to stdout.",
+                        List.of(), null, null)));
     }
 
     private WireMockConfigService.ConfigMutationResult mutation(String mode, MockLifecycleStatus lifecycle) {

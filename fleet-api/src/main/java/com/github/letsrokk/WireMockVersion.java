@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 public record WireMockVersion(int major, int minor, int patch) implements Comparable<WireMockVersion> {
 
     private static final Pattern IMAGE_TAG = Pattern.compile(
-            ":(3)\\.(\\d+)\\.(\\d+)(?:-\\d+)?(?:@sha256:[a-fA-F0-9]{64})?$");
+            "^[^\\s@]*[^\\s:@]:(3)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-\\d+)?$");
 
     public WireMockVersion {
         if (major != 3 || minor < 0 || patch < 0) {
@@ -15,7 +15,7 @@ public record WireMockVersion(int major, int minor, int patch) implements Compar
     }
 
     public static WireMockVersion parse(String value) {
-        if (value == null || !value.matches("3\\.\\d+\\.\\d+")) {
+        if (value == null || !value.matches("3\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)")) {
             throw new IllegalArgumentException("Mock Fleet requires an exact WireMock 3.x version.");
         }
         String[] components = value.split("\\.");
@@ -23,7 +23,7 @@ public record WireMockVersion(int major, int minor, int patch) implements Compar
     }
 
     public static WireMockVersion parseImage(String image) {
-        Matcher matcher = IMAGE_TAG.matcher(image == null ? "" : image.trim());
+        Matcher matcher = IMAGE_TAG.matcher(image == null ? "" : image);
         if (!matcher.find()) {
             throw new IllegalArgumentException("Mock Fleet requires an exact WireMock 3.x image tag.");
         }

@@ -47,8 +47,6 @@ spec:
               value: {{ include "mock-fleet.mcpRoutingMode" . | quote }}
             - name: FLEET_MCP_FLEET_HOST
               value: {{ include "mock-fleet.mcpFleetHost" . | quote }}
-            - name: FLEET_MCP_WIREMOCK_IMAGE
-              value: {{ .Values.wiremock.containerImage | quote }}
             - name: FLEET_MCP_STORAGE_ENABLED
               value: {{ .Values.storage.persistent | quote }}
             - name: FLEET_MCP_ALLOWED_ORIGINS

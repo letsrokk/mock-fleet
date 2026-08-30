@@ -8,6 +8,7 @@ import jakarta.inject.Singleton;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Singleton
 public final class StrictToolInputGuardrail implements ToolInputGuardrail {
@@ -52,6 +53,14 @@ public final class StrictToolInputGuardrail implements ToolInputGuardrail {
         if (minimum != null && value instanceof Number number
                 && Double.compare(number.doubleValue(), minimum.doubleValue()) < 0) {
             failures.add(path + " must be at least " + minimum);
+        }
+        String pattern = schema.getString("pattern");
+        if (pattern != null && value instanceof String text && !Pattern.matches(pattern, text)) {
+            failures.add(path + " does not match the required format");
+        }
+        Integer maxLength = schema.getInteger("maxLength");
+        if (maxLength != null && value instanceof String text && text.length() > maxLength) {
+            failures.add(path + " must contain at most " + maxLength + " characters");
         }
 
         if (value instanceof Map<?, ?> rawObject && "object".equals(type)) {

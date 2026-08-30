@@ -37,16 +37,13 @@ describe("Fleet API dashboard contracts", () => {
           lifecycle: "STARTING",
           baseline: { options: [], resources: { requests: {}, limits: {} } },
           user: { options: ["--verbose"], resources: null },
-          effective: { options: ["--verbose"], resources: { requests: {}, limits: {} } }
+          effective: { options: ["--verbose"], resources: { requests: {}, limits: {} } },
+          wireMockVersion: "3.13.2",
+          runtimeVersion: "3.12.1"
         }],
-        wireMock: {
-          configuredImage: "wiremock/wiremock:3.13.2-2",
-          version: "3.13.2",
-          minimumSupportedVersion: "3.0.0",
-          maximumResearchedVersion: "3.13.2",
-          rangeStatus: "supported"
-        },
-        options: [],
+        defaultVersion: "3.13.2",
+        versions: [{ version: "3.13.2", image: "wiremock/wiremock:3.13.2-2", selectable: true }],
+        catalogResourceVersion: "7",
         routing: { mode: "PATH", host: "mock-fleet.test" }
       },
       apply: { mockId: "orders", mode: "restartActive", lifecycle: "STARTING" }

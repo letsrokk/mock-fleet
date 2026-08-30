@@ -93,6 +93,8 @@ spec:
               value: /etc/mock-fleet/wiremock-options.yaml
             - name: MOCK_FLEET_WIREMOCK_USER_CONFIG_MAP_NAME
               value: {{ include "mock-fleet.wiremockUserConfigMapName" . | quote }}
+            - name: MOCK_FLEET_WIREMOCK_VERSION_CATALOG_CONFIG_MAP_NAME
+              value: {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_KEY
               value: wiremock-options.yaml
             - name: MOCK_FLEET_WIREMOCK_RESOURCE_REQUEST_FLOOR_CPU

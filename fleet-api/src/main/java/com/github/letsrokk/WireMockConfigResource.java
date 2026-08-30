@@ -8,6 +8,7 @@ import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 @Path("/__fleet/api/config")
@@ -21,6 +22,12 @@ public class WireMockConfigResource {
     @GET
     public WireMockConfigService.ConfigView getConfig() {
         return configService.view();
+    }
+
+    @GET
+    @Path("/options")
+    public WireMockConfigService.OptionCatalogView getOptionCatalog(@QueryParam("version") String version) {
+        return configService.optionCatalog(version);
     }
 
     @PUT

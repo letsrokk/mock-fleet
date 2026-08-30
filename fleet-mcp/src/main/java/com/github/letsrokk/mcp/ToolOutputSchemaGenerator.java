@@ -18,21 +18,20 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
     private JsonObject success(Class<?> marker) {
         return switch (marker.getSimpleName()) {
             case "ListMocks" -> strict(properties(
-                    "mocks", array(openObject()), "page", page()), "mocks", "page");
-            case "ListMockConfigs" -> strict(properties(
-                    "resourceVersion", nullableString(), "mockIds", array(string()), "page", page()),
-                    "resourceVersion", "mockIds", "page");
+                    "mocks", array(mockRow()), "page", page()), "mocks", "page");
             case "GetMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", openObject(), "routing", openObject()),
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()),
                     "resourceVersion", "mock", "routing");
             case "ListOptionDefinitions" -> strict(properties(
-                    "wireMock", openObject(), "optionDefinitions", array(openObject())),
-                    "wireMock", "optionDefinitions");
+                    "wireMockVersion", versionString(),
+                    "catalogStatus", string().put("enum", new JsonArray().add("supported").add("newer_unresearched")),
+                    "options", array(optionDefinition())),
+                    "wireMockVersion", "catalogStatus", "options");
             case "UpdateMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mock", openObject(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mock", mockConfig(), "apply", apply()),
                     "resourceVersion", "mock", "apply");
             case "DeleteMockConfig" -> strict(properties(
-                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", openObject()),
+                    "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", apply()),
                     "resourceVersion", "mockId", "deleted", "apply");
             case "StartMock" -> lifecycle();
             case "StopMock" -> stopLifecycle();
@@ -124,9 +123,88 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "sizeBytes", integer()), "encoding", "data", "sizeBytes");
     }
 
+    private JsonObject mockRow() {
+        return strict(properties(
+                "mockId", string(),
+                "lifecycle", lifecycleStatus(),
+                "wireMockVersion", versionString(),
+                "runtimeVersion", nullableVersionString(),
+                "hasSavedConfig", bool()),
+                "mockId", "lifecycle", "wireMockVersion", "runtimeVersion", "hasSavedConfig");
+    }
+
+    private JsonObject mockConfig() {
+        return strict(properties(
+                "mockId", string(),
+                "lifecycle", lifecycleStatus(),
+                "baseline", configData(true, false),
+                "user", configData(true, true),
+                "effective", configData(false, false),
+                "wireMockVersion", versionString(),
+                "runtimeVersion", nullableVersionString()),
+                "mockId", "lifecycle", "baseline", "user", "effective", "wireMockVersion", "runtimeVersion");
+    }
+
+    private JsonObject configData(boolean nullableVersion, boolean nullableResources) {
+        JsonObject resourceSchema = resources();
+        if (nullableResources) {
+            resourceSchema.put("type", new JsonArray().add("object").add("null"));
+        }
+        return strict(properties(
+                "version", nullableVersion ? nullableVersionString() : versionString(),
+                "options", array(string()),
+                "resources", resourceSchema),
+                "version", "options", "resources");
+    }
+
+    private JsonObject resources() {
+        JsonObject stringMap = new JsonObject().put("type", "object").put("additionalProperties", string());
+        return strict(properties("requests", stringMap.copy(), "limits", stringMap.copy()), "requests", "limits");
+    }
+
+    private JsonObject routing() {
+        return strict(properties(
+                "mode", string().put("enum", new JsonArray().add("HOST").add("PATH")),
+                "host", string()), "mode", "host");
+    }
+
+    private JsonObject apply() {
+        return strict(properties(
+                "mockId", string(),
+                "mode", string().put("enum", new JsonArray().add("futureOnly").add("restartActive")),
+                "lifecycle", lifecycleStatus()), "mockId", "mode", "lifecycle");
+    }
+
+    private JsonObject lifecycleStatus() {
+        return string().put("enum", new JsonArray()
+                .add("STOPPED").add("STARTING").add("RUNNING").add("FAILED"));
+    }
+
+    private JsonObject versionString() {
+        return string().put("pattern", WireMockVersion.EXACT_PATTERN);
+    }
+
+    private JsonObject nullableVersionString() {
+        return nullableString().put("pattern", WireMockVersion.EXACT_PATTERN);
+    }
+
     private JsonObject page() {
         return strict(properties("limit", integer(), "returned", integer(), "hasMore", bool(),
                 "nextCursor", nullableString()), "limit", "returned", "hasMore", "nextCursor");
+    }
+
+    private JsonObject optionDefinition() {
+        return strict(properties(
+                "name", string(),
+                "label", string(),
+                "kind", string().put("enum", new JsonArray().add("flag").add("input").add("number")
+                        .add("select").add("optional_number").add("optional_input")),
+                "group", string(),
+                "description", string(),
+                "values", array(string()),
+                "minimum", nullableInteger(),
+                "maximum", nullableInteger()),
+                "name", "label", "kind", "group", "description", "values", "minimum", "maximum");
     }
 
     private JsonObject strict(JsonObject properties, String... required) {
@@ -160,6 +238,10 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
 
     private JsonObject integer() {
         return new JsonObject().put("type", "integer");
+    }
+
+    private JsonObject nullableInteger() {
+        return new JsonObject().put("type", new JsonArray().add("integer").add("null"));
     }
 
     private JsonObject array(JsonObject items) {

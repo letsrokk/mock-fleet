@@ -1,0 +1,19 @@
+{{- include "mock-fleet.validateWireMockImage" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+data:
+  {{- $defaultVersion := include "mock-fleet.wiremockDefaultVersion" . }}
+  defaultVersion: {{ $defaultVersion }}
+  selectable.{{ $defaultVersion }}: {{ .Values.wiremock.containerImage }}
+  {{- $repository := include "mock-fleet.wiremockImageRepository" . }}
+  {{- range $tag := .Values.wiremock.supportedImageTags }}
+  {{- $version := regexFind "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)" $tag }}
+  {{- if ne $version $defaultVersion }}
+  selectable.{{ $version }}: {{ printf "%s:%s" $repository $tag }}
+  {{- end }}
+  {{- end }}

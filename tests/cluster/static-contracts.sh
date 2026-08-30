@@ -27,6 +27,8 @@ workflow="${repo_root}/.github/workflows/cluster-e2e.yml"
 readme="${repo_root}/README.md"
 harness="${repo_root}/bin/cluster-e2e.sh"
 local_deploy="${repo_root}/bin/local/deploy.sh"
+admission_policy="${repo_root}/deploy/helm/mock-fleet/templates/wiremock-validatingadmissionpolicy.yaml"
+admission_binding="${repo_root}/deploy/helm/mock-fleet/templates/wiremock-validatingadmissionpolicybinding.yaml"
 
 assert_contains "${workflow}" 'runs-on: [self-hosted, linux, mock-fleet-e2e]'
 assert_absent "${workflow}" 'runner_labels'
@@ -39,6 +41,16 @@ assert_absent "${harness}" 'cilium'
 assert_absent "${harness}" 'calico'
 [[ -s "${repo_root}/tests/cluster/fixtures/persistent-stub-deleted.json" ]] \
   || fail 'The persistent-deletion fixture is missing.'
+
+assert_contains "${admission_policy}" 'failurePolicy: Fail'
+assert_contains "${admission_policy}" 'paramKind:'
+assert_contains "${admission_policy}" 'apiVersion: v1'
+assert_contains "${admission_policy}" 'kind: ConfigMap'
+assert_contains "${admission_policy}" "key.startsWith('selectable.')"
+assert_contains "${admission_policy}" "key.startsWith('retained.')"
+assert_contains "${admission_policy}" 'params.data[key] == variables.wiremock.image'
+assert_contains "${admission_binding}" 'paramRef:'
+assert_contains "${admission_binding}" 'parameterNotFoundAction: Deny'
 
 self_test_output=$("${harness}" --self-test)
 grep -Fq 'MOCK_STARTING error contract passed.' <<<"${self_test_output}" \

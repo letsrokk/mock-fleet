@@ -61,6 +61,7 @@ jobs:
           ./fleet-api/mvnw -B -f fleet-api/pom.xml package -DskipTests -Dquarkus.container-image.build=false
           ./fleet-proxy/mvnw -B -f fleet-proxy/pom.xml package -DskipTests -Dquarkus.container-image.build=false
           ./fleet-api/mvnw -B -f fleet-mcp/pom.xml package -DskipTests -Dquarkus.container-image.build=false
+          ./fleet-wiremock-updater/mvnw -B -f fleet-wiremock-updater/pom.xml package -DskipTests -Dquarkus.container-image.build=false
 
       - name: Build dashboard
         working-directory: fleet-dash
@@ -73,6 +74,7 @@ jobs:
           minikube image build -f fleet-api/src/main/docker/Dockerfile.jvm -t "ghcr.io/letsrokk/mock-fleet/api:${MOCK_FLEET_E2E_IMAGE_TAG}" fleet-api
           minikube image build -f fleet-proxy/src/main/docker/Dockerfile.jvm -t "ghcr.io/letsrokk/mock-fleet/proxy:${MOCK_FLEET_E2E_IMAGE_TAG}" fleet-proxy
           minikube image build -f fleet-mcp/src/main/docker/Dockerfile.jvm -t "ghcr.io/letsrokk/mock-fleet/mcp:${MOCK_FLEET_E2E_IMAGE_TAG}" fleet-mcp
+          minikube image build -f fleet-wiremock-updater/src/main/docker/Dockerfile.jvm -t "ghcr.io/letsrokk/mock-fleet/wiremock-updater:${MOCK_FLEET_E2E_IMAGE_TAG}" fleet-wiremock-updater
           minikube image build -t "ghcr.io/letsrokk/mock-fleet/dash:${MOCK_FLEET_E2E_IMAGE_TAG}" fleet-dash
 
       - name: Run live cluster suite

@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -20,18 +21,169 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class WireMockConfigServiceTest {
+
+    @Test
+    void viewReportsCatalogAndDesiredRuntimeDrift() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        installCatalog(service, versionCatalog());
+        when(service.podManager.listMocks()).thenReturn(List.of(new PodManager.MockPodStatus(
+                "demo", "mock-fleet-demo-1", MockLifecycleStatus.RUNNING, null, "3.12.1")));
+
+        WireMockConfigService.ConfigView view = service.view();
+
+        assertEquals("3.13.2", view.defaultVersion());
+        assertEquals("catalog-17", view.catalogResourceVersion());
+        assertEquals(List.of(
+                new WireMockConfigService.VersionView("3.13.2", "wiremock/wiremock:3.13.2-7", true),
+                new WireMockConfigService.VersionView("3.12.1", "wiremock/wiremock:3.12.1-2", false)),
+                view.versions());
+        assertEquals("3.13.2", view.mocks().getFirst().wireMockVersion());
+        assertEquals("3.12.1", view.mocks().getFirst().runtimeVersion());
+    }
+
+    @Test
+    void viewDerivesEveryMockFieldFromOneCapturedSnapshot() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        WireMockOptions options = mock(WireMockOptions.class);
+        WireMockConfigDocument baseline = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: [--verbose]
+                  mocks:
+                    - id: demo
+                      version: 3.12.1
+                """);
+        WireMockConfigDocument user = WireMockConfigDocument.empty();
+        WireMockConfigDocument effective = baseline.merge(user);
+        WireMockVersionCatalog catalog = versionCatalog();
+        when(options.setUserConfigAndSnapshot(any())).thenReturn(
+                new WireMockOptions.ConfigSnapshot(baseline, user, effective, catalog));
+        when(options.explicitVersion(baseline, "demo")).thenReturn("3.12.1");
+        when(options.desiredVersionFor("demo", effective, catalog)).thenReturn(WireMockVersion.parse("3.12.1"));
+        service.wireMockOptions = options;
+
+        WireMockConfigService.ConfigView view = service.view();
+
+        assertEquals("3.12.1", view.mocks().getFirst().baseline().version());
+        assertEquals(List.of("--verbose"), view.mocks().getFirst().effective().options());
+        assertEquals("3.12.1", view.mocks().getFirst().wireMockVersion());
+        verify(options, never()).baselineConfig();
+        verify(options, never()).effectiveConfig();
+        verify(options, never()).catalog();
+    }
+
+    @Test
+    void rejectsRetainedVersionAsANewSelection() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        installCatalog(service, versionCatalog());
+
+        ApiException exception = assertThrows(ApiException.class, () -> service.upsertMockConfig("demo",
+                new WireMockConfigService.ConfigUpdateRequest(
+                        "42", "3.12.1", List.of(), null, "futureOnly")));
+
+        assertEquals("UNSUPPORTED_WIREMOCK_VERSION", ((ApiError) exception.getResponse().getEntity()).code());
+    }
+
+    @Test
+    void allowsRetainedVersionOnlyWhenAlreadyReferencedForTheMock() {
+        WireMockConfigService service = service(mock(KubernetesClient.class), config());
+        WireMockVersionCatalog catalog = versionCatalog();
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: baseline-pinned
+                      version: 3.12.1
+                      options: []
+                """.getBytes(StandardCharsets.UTF_8)));
+        WireMockConfigDocument currentUser = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: user-pinned
+                      version: 3.12.1
+                      options: []
+                """);
+
+        assertDoesNotThrow(() -> service.validateVersionSelection(
+                "baseline-pinned", "3.12.1", currentUser, catalog));
+        assertDoesNotThrow(() -> service.validateVersionSelection(
+                "user-pinned", "3.12.1", currentUser, catalog));
+        ApiException exception = assertThrows(ApiException.class, () -> service.validateVersionSelection(
+                "new-pin", "3.12.1", currentUser, catalog));
+        assertEquals("UNSUPPORTED_WIREMOCK_VERSION", ((ApiError) exception.getResponse().getEntity()).code());
+    }
+
+    @Test
+    void optionCatalogUsesTheConfiguredVersionForBlankRequestsAndExcludesCredentials() {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        WireMockConfigService service = service(kubernetesClient, config());
+
+        WireMockConfigService.OptionCatalogView catalog = service.optionCatalog(" ");
+
+        assertEquals("3.13.2", catalog.wireMockVersion());
+        assertEquals("supported", catalog.catalogStatus());
+        assertTrue(catalog.options().stream().anyMatch(option -> "--verbose".equals(option.name())));
+        assertTrue(catalog.options().stream().noneMatch(option -> Set.of(
+                "--admin-api-basic-auth",
+                "--ca-keystore-password",
+                "--keystore-password",
+                "--key-manager-password",
+                "--truststore-password").contains(option.name())));
+        assertTrue(catalog.options().stream().allMatch(option -> option.name() != null
+                && option.label() != null
+                && option.kind() != null
+                && option.group() != null
+                && option.description() != null
+                && option.values() != null));
+        verifyNoInteractions(kubernetesClient);
+    }
+
+    @Test
+    void optionCatalogPreservesNewerThanResearchedFallbackAndRejectsInvalidVersions() {
+        WireMockConfigService service = service(mock(KubernetesClient.class), config());
+
+        assertEquals("newer_unresearched", service.optionCatalog("3.14.0").catalogStatus());
+        for (String version : List.of("3.14", "3.01.0", "2.13.2", "4.0.0")) {
+            ApiException exception = assertThrows(ApiException.class, () -> service.optionCatalog(version));
+            assertEquals(400, exception.getResponse().getStatus());
+            assertEquals("INVALID_WIREMOCK_VERSION", ((ApiError) exception.getResponse().getEntity()).code());
+        }
+    }
 
     @Test
     void viewPreservesInheritedUserResourcesAsNull() {
@@ -269,8 +421,105 @@ class WireMockConfigServiceTest {
 
         verify(namespacedConfigMaps, never()).resource(any());
         verify(namespacedConfigMaps, org.mockito.Mockito.times(2)).withName("user-config");
-        verify(configMapResource).watch(any());
+        verify(configMapResource).watch(resourceVersion("42"), any(Watcher.class));
         assertEquals(List.of("--verbose"), service.wireMockOptions.optionsFor("demo"));
+    }
+
+    @Test
+    void resyncsAnUpdateWrittenBetweenInitialLoadAndUserConfigWatchStartup() {
+        ConfigMap initial = configMap("user-config", "41", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        ConfigMap updated = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: [--verbose]
+                """);
+        UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, updated);
+
+        fixture.service.loadUserConfig();
+
+        assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
+        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+    }
+
+    @Test
+    void resyncsAnUpdateWrittenDuringUserConfigWatchDowntimeBeforeRestarting() {
+        ConfigMap initial = configMap("user-config", "41", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        ConfigMap updated = configMap("user-config", "42", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: [--verbose]
+                """);
+        UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, updated);
+        fixture.service.loadUserConfig();
+
+        fixture.service.startUserConfigWatch();
+
+        assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
+        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+    }
+
+    @Test
+    void restartResyncKeepsLastValidUserConfigWhenCurrentConfigIsMissingInvalidOrUnreadable() {
+        ConfigMap initial = configMap("user-config", "41", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: [--verbose]
+                """);
+        ConfigMap invalid = configMap("user-config", "42", "wiremock: [");
+        UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, null, invalid)
+                .thenThrow(new KubernetesClientException("read failed"));
+        fixture.service.loadUserConfig();
+
+        fixture.service.startUserConfigWatch();
+        fixture.service.startUserConfigWatch();
+        fixture.service.startUserConfigWatch();
+
+        assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
+        verify(fixture.resource, times(4)).watch(resourceVersion("41"), any(Watcher.class));
+    }
+
+    @Test
+    void deletedWatchEventKeepsLastValidUserConfigAndResourceVersion() {
+        ConfigMap initial = configMap("user-config", "41", """
+                wiremock:
+                  default:
+                    options: []
+                  mocks:
+                    - id: demo
+                      options: [--verbose]
+                """);
+        UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
+        when(fixture.resource.get()).thenReturn(initial, initial, null);
+        fixture.service.loadUserConfig();
+
+        fixture.service.handleUserConfigWatchEvent(Watcher.Action.DELETED,
+                configMap("user-config", "42", ""));
+        fixture.service.startUserConfigWatch();
+
+        assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
+        verify(fixture.resource, times(2)).watch(resourceVersion("41"), any(Watcher.class));
     }
 
     @Test
@@ -350,6 +599,15 @@ class WireMockConfigServiceTest {
         when(configMapResource.get()).thenReturn(existing);
         when(namespacedConfigMaps.resource(any())).thenReturn(updatedConfigMap);
         WireMockConfigService service = service(kubernetesClient, config());
+        service.wireMockOptions.load(new ByteArrayInputStream("""
+                wiremock:
+                  default:
+                    options: [--disable-banner]
+                    resources:
+                      requests: {cpu: "0.5", memory: 512Mi}
+                      limits: {cpu: "1", memory: 1Gi}
+                  mocks: []
+                """.getBytes(StandardCharsets.UTF_8)));
 
         service.upsertMockConfig("beta", new WireMockConfigService.ConfigUpdateRequest(
                 "42",
@@ -360,7 +618,10 @@ class WireMockConfigServiceTest {
         ArgumentCaptor<ConfigMap> persistedConfig = ArgumentCaptor.forClass(ConfigMap.class);
         verify(namespacedConfigMaps).resource(persistedConfig.capture());
         String yaml = persistedConfig.getValue().getData().get("wiremock-options.yaml");
-        assertEquals(List.of("alpha", "beta"), WireMockConfigDocument.load(yaml).mockConfigs().keySet().stream().toList());
+        WireMockConfigDocument saved = WireMockConfigDocument.load(yaml);
+        assertEquals(List.of("alpha", "beta"), saved.mockConfigs().keySet().stream().toList());
+        assertEquals(List.of(), saved.mockConfigs().get("beta").options(),
+                "effective baseline options must not be copied into the user override");
         verify(updatedConfigMap).update();
     }
 
@@ -662,6 +923,60 @@ class WireMockConfigServiceTest {
         when(service.podManager.status(any())).thenAnswer(invocation -> new PodManager.MockPodStatus(
                 invocation.getArgument(0), null, MockLifecycleStatus.STOPPED, null));
         return service;
+    }
+
+    private WireMockConfigService serviceWithUserConfig(String yaml) {
+        KubernetesClient kubernetesClient = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced = mock(NonNamespaceOperation.class);
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> resource = mock(Resource.class);
+        when(kubernetesClient.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("mock-fleet")).thenReturn(namespaced);
+        when(namespaced.withName("user-config")).thenReturn(resource);
+        when(resource.get()).thenReturn(configMap("user-config", "42", yaml));
+        return service(kubernetesClient, config());
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private UserConfigWatchFixture userConfigWatchFixture(ConfigMap configMap) {
+        KubernetesClient client = mock(KubernetesClient.class);
+        MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+        NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced =
+                mock(NonNamespaceOperation.class);
+        Resource<ConfigMap> resource = mock(Resource.class);
+        when(client.getNamespace()).thenReturn("test");
+        when(client.configMaps()).thenReturn(configMaps);
+        when(configMaps.inNamespace("test")).thenReturn(namespaced);
+        when(namespaced.withName("user-config")).thenReturn(resource);
+        when(resource.get()).thenReturn(configMap);
+        return new UserConfigWatchFixture(service(client, config()), resource);
+    }
+
+    private ListOptions resourceVersion(String resourceVersion) {
+        return argThat(options -> resourceVersion.equals(options.getResourceVersion()));
+    }
+
+    private record UserConfigWatchFixture(WireMockConfigService service, Resource<ConfigMap> resource) {
+    }
+
+    private void installCatalog(WireMockConfigService service, WireMockVersionCatalog catalog) {
+        WireMockVersionCatalogService catalogService = mock(WireMockVersionCatalogService.class);
+        when(catalogService.catalog()).thenReturn(catalog);
+        service.wireMockOptions.catalogService = catalogService;
+    }
+
+    private WireMockVersionCatalog versionCatalog() {
+        WireMockVersion current = WireMockVersion.parse("3.13.2");
+        WireMockVersion retained = WireMockVersion.parse("3.12.1");
+        Map<WireMockVersion, WireMockVersionCatalog.VersionEntry> versions = new java.util.LinkedHashMap<>();
+        versions.put(current, new WireMockVersionCatalog.VersionEntry(
+                current, "wiremock/wiremock:3.13.2-7", true));
+        versions.put(retained, new WireMockVersionCatalog.VersionEntry(
+                retained, "wiremock/wiremock:3.12.1-2", false));
+        return new WireMockVersionCatalog(current, versions, "catalog-17");
     }
 
     private WireMockConfigService.ConfigView configViewForUserYaml(String userYaml) {

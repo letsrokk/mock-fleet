@@ -13,6 +13,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
@@ -111,6 +112,7 @@ class OpenApiResourceTest {
 
         assertTrue(schema.path("required").isMissingNode() || schema.path("required").isEmpty());
         assertTrue(schema.path("properties").has("resourceVersion"));
+        assertTrue(schema.path("properties").has("wireMockVersion"));
         assertTrue(schema.path("properties").has("options"));
         assertTrue(schema.path("properties").has("resources"));
         assertTrue(schema.path("properties").has("applyMode"));
@@ -136,7 +138,7 @@ class OpenApiResourceTest {
     }
 
     @Test
-    void documentsWireMockVersionAndOptionCompatibilityMetadata() throws Exception {
+    void documentsClosedPerMockVersionContractsWithoutLegacyGlobalVersionView() throws Exception {
         String document = given()
                 .queryParam("format", "json")
         .when()
@@ -147,16 +149,85 @@ class OpenApiResourceTest {
         JsonNode schemas = new ObjectMapper().readTree(document).path("components").path("schemas");
 
         JsonNode config = schemas.path("ConfigView");
-        assertTrue(config.path("required").toString().contains("wireMock"));
-        assertEquals("#/components/schemas/WireMockVersionView",
-                config.path("properties").path("wireMock").path("$ref").asText());
+        assertClosedObject(config, Set.of("resourceVersion", "mockIds", "savedMockIds", "mocks", "routing",
+                "defaultVersion", "versions", "catalogResourceVersion"));
+        assertFalse(schemas.has("WireMockVersionView"));
 
-        JsonNode option = schemas.path("OptionDefinition");
-        assertTrue(option.path("required").toString().contains("available"));
-        assertTrue(option.path("required").toString().contains("compatibility"));
-        assertEquals("optional_number", option.path("properties").path("kind").path("enum").get(4).asText());
-        assertEquals("unknown", option.path("properties").path("compatibility").path("enum").get(3).asText());
-        assertTrue(option.path("properties").has("versionRanges"));
+        JsonNode mock = schemas.path("MockConfigView");
+        assertClosedObject(mock, Set.of("mockId", "lifecycle", "baseline", "user", "effective",
+                "wireMockVersion", "runtimeVersion"));
+        assertClosedObject(schemas.path("MockRow"), Set.of("mockId", "podName", "status", "message",
+                "wireMockVersion", "runtimeVersion"));
+        assertClosedObject(schemas.path("MockLifecycleResponse"),
+                Set.of("mockId", "status", "podName", "message", "retryAfterMs"));
+        assertClosedObject(schemas.path("ResolvedConfigData"), Set.of("version", "options", "resources"));
+        assertClosedObject(schemas.path("UserConfigData"), Set.of("version", "options", "resources"));
+        assertClosedObject(schemas.path("RoutingView"), Set.of("mode", "host"));
+        assertClosedObject(schemas.path("ConfigMutationResult"), Set.of("config", "apply"));
+        assertClosedObject(schemas.path("ApplyResult"), Set.of("mockId", "mode", "lifecycle"));
+        assertClosedObject(schemas.path("ResourceData"), Set.of("requests", "limits"), Set.of());
+        assertClosedObject(schemas.path("ConfigUpdateRequest"),
+                Set.of("resourceVersion", "wireMockVersion", "options", "resources", "applyMode"), Set.of());
+        assertClosedObject(schemas.path("ConfigDeleteRequest"), Set.of("resourceVersion", "applyMode"), Set.of());
+        assertEquals("^3\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+                mock.path("properties").path("wireMockVersion").path("pattern").asText());
+    }
+
+    private void assertClosedObject(JsonNode schema, Set<String> expectedProperties) {
+        assertClosedObject(schema, expectedProperties, expectedProperties);
+    }
+
+    private void assertClosedObject(JsonNode schema, Set<String> expectedProperties, Set<String> expectedRequired) {
+        Set<String> properties = new HashSet<>();
+        schema.path("properties").fieldNames().forEachRemaining(properties::add);
+        Set<String> required = new HashSet<>();
+        schema.path("required").forEach(node -> required.add(node.asText()));
+        assertEquals(expectedProperties, properties);
+        assertEquals(expectedRequired, required);
+        assertFalse(schema.path("additionalProperties").asBoolean());
+    }
+
+    @Test
+    void documentsTheVersionedPublicOptionCatalog() throws Exception {
+        JsonNode root = new ObjectMapper().readTree(given()
+                .queryParam("format", "json")
+        .when()
+                .get("/__fleet/api/openapi")
+        .then()
+                .statusCode(200)
+                .extract().asString());
+
+        JsonNode operation = root.path("paths").path("/__fleet/api/config/options").path("get");
+        assertEquals("getWireMockOptionCatalog", operation.path("operationId").asText());
+        assertEquals("version", operation.path("parameters").get(0).path("name").asText());
+        assertEquals("#/components/schemas/OptionCatalogView", operation.path("responses").path("200")
+                .path("content").path("application/json").path("schema").path("$ref").asText());
+        assertEquals("#/components/responses/ApiError", operation.path("responses").path("400")
+                .path("$ref").asText());
+
+        JsonNode config = root.path("components").path("schemas").path("ConfigView");
+        assertFalse(config.path("required").toString().contains("options"));
+        assertFalse(config.path("properties").has("options"));
+
+        JsonNode catalog = root.path("components").path("schemas").path("OptionCatalogView");
+        assertEquals("wireMockVersion", catalog.path("required").get(0).asText());
+        assertEquals("catalogStatus", catalog.path("required").get(1).asText());
+        assertEquals("options", catalog.path("required").get(2).asText());
+        assertEquals("^3\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+                catalog.path("properties").path("wireMockVersion").path("pattern").asText());
+
+        JsonNode option = root.path("components").path("schemas").path("PublicOptionDefinition");
+        Set<String> optionProperties = new HashSet<>();
+        option.path("properties").fieldNames().forEachRemaining(optionProperties::add);
+        assertEquals(Set.of("name", "label", "kind", "group", "description", "values", "minimum", "maximum"),
+                optionProperties);
+        assertTrue(option.has("additionalProperties"));
+        assertFalse(option.path("additionalProperties").asBoolean());
+        assertFalse(option.path("properties").has("available"));
+        assertFalse(option.path("properties").has("compatibility"));
+        assertFalse(option.path("properties").has("versionRanges"));
+        assertTrue(option.path("properties").has("minimum"));
+        assertTrue(option.path("properties").has("maximum"));
     }
 
     private void assertApiError(JsonNode root, String path, String operation, String... statuses) {

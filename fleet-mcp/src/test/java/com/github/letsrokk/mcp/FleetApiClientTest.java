@@ -62,30 +62,46 @@ class FleetApiClientTest {
 
     @Test
     void usesOnlyThePublishedFleetApiRoutes() throws Exception {
-        client.listMocks();
         client.startMock("orders");
         client.stopMock("orders");
         client.getConfig();
+        client.getOptionCatalog(null);
+        client.getOptionCatalog("3.13.2+candidate");
         client.updateConfig("orders", "42", List.of("--verbose"),
                 new MockResources(Map.of(), Map.of()), ConfigApplyMode.futureOnly);
         client.deleteConfig("orders", "43", ConfigApplyMode.restartActive);
         assertTrue(client.storageEnabled());
 
         assertEquals(List.of(
-                "GET /__fleet/api/mocks",
                 "POST /__fleet/api/mocks/orders/start",
                 "DELETE /__fleet/api/mocks/orders",
                 "GET /__fleet/api/config",
+                "GET /__fleet/api/config/options",
+                "GET /__fleet/api/config/options?version=3.13.2%2Bcandidate",
                 "PUT /__fleet/api/config/orders",
                 "DELETE /__fleet/api/config/orders",
                 "GET /__fleet/api/mappings"), requests.stream().map(CapturedRequest::summary).toList());
         assertFalse(requests.stream().anyMatch(request -> request.uri().contains("/internal/mocks/")));
 
-        var update = mapper.readTree(requests.get(4).body());
+        var update = mapper.readTree(requests.stream()
+                .filter(request -> request.summary().equals("PUT /__fleet/api/config/orders"))
+                .findFirst().orElseThrow().body());
         assertEquals("42", update.path("resourceVersion").asText());
         assertEquals("futureOnly", update.path("applyMode").asText());
         assertEquals(List.of("--verbose"), mapper.convertValue(update.path("options"), List.class));
         assertEquals(Map.of(), mapper.convertValue(update.path("resources").path("requests"), Map.class));
+    }
+
+    @Test
+    void serializesExplicitWireMockVersionInConfigUpdate() throws Exception {
+        client.updateConfig("orders", "42", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly);
+
+        var update = mapper.readTree(requests.getFirst().body());
+        assertEquals(mapper.readTree("""
+                {"resourceVersion":"42","options":["--verbose"],"resources":null,
+                 "wireMockVersion":"3.12.1","applyMode":"futureOnly"}
+                """), update);
     }
 
     @Test
@@ -101,6 +117,27 @@ class FleetApiClientTest {
         assertEquals(1000, result.path("retryAfterMs").asInt());
         assertEquals(List.of("POST /__fleet/api/mocks/orders/start"),
                 requests.stream().map(CapturedRequest::summary).toList());
+    }
+
+    @Test
+    void readsTheTargetRuntimeVersionFromTheCurrentFleetConfig() {
+        responseBody = """
+                {"mocks":[{"mockId":"orders","wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"}]}
+                """;
+
+        assertEquals(new WireMockVersion(3, 12, 1), client.runtimeVersion("orders"));
+    }
+
+    @Test
+    void failsClosedWhenTheTargetRuntimeVersionIsUnknown() {
+        responseBody = """
+                {"mocks":[{"mockId":"orders","wireMockVersion":"3.13.2","runtimeVersion":null}]}
+                """;
+
+        McpOperationException error = assertThrows(McpOperationException.class,
+                () -> client.runtimeVersion("orders"));
+
+        assertEquals("WIREMOCK_VERSION_UNSUPPORTED", error.code());
     }
 
     @Test

@@ -8,7 +8,11 @@ export type MockConfigView = {
   baseline: ConfigData;
   user: UserConfigData;
   effective: ConfigData;
+  wireMockVersion: string;
+  runtimeVersion: string | null;
 };
+
+export type VersionView = { version: string; image: string; selectable: boolean };
 
 export type RoutingView = {
   mode: "HOST" | "PATH";
@@ -20,15 +24,16 @@ export type ConfigView = {
   mockIds: string[];
   savedMockIds: string[];
   mocks: MockConfigView[];
-  wireMock: {
-    configuredImage: string;
-    version: string;
-    minimumSupportedVersion: string;
-    maximumResearchedVersion: string;
-    rangeStatus: "supported" | "newer_unresearched";
-  };
-  options: OptionDefinition[];
+  defaultVersion: string;
+  versions: VersionView[];
+  catalogResourceVersion: string | null;
   routing: RoutingView;
+};
+
+export type OptionCatalogView = {
+  wireMockVersion: string;
+  catalogStatus: "supported" | "newer_unresearched";
+  options: OptionDefinition[];
 };
 
 export type ApplyMode = "futureOnly" | "restartActive";

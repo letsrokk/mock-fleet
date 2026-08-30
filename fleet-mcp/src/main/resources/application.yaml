@@ -37,7 +37,6 @@ mock-fleet:
     proxy-base-url: ${FLEET_MCP_PROXY_BASE_URL:http://localhost:8082}
     routing-mode: ${FLEET_MCP_ROUTING_MODE:PATH}
     fleet-host: ${FLEET_MCP_FLEET_HOST:mock-fleet.localhost}
-    wiremock-image: ${FLEET_MCP_WIREMOCK_IMAGE:wiremock/wiremock:3.13.2-2}
     storage-enabled: ${FLEET_MCP_STORAGE_ENABLED:false}
     timeout: ${FLEET_MCP_TIMEOUT:10S}
     lifecycle-timeout: ${FLEET_MCP_LIFECYCLE_TIMEOUT:70S}

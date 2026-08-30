@@ -137,7 +137,7 @@ class WireMockResourcePolicyTest {
                 .map(Arrays::asList)
                 .toList();
 
-        assertEquals(List.of(List.of(String.class, String.class, List.class, ResourceRequirements.class)),
+        assertEquals(List.of(List.of(String.class, String.class, WireMockResolvedConfig.class)),
                 publicConstructionPaths);
     }
 

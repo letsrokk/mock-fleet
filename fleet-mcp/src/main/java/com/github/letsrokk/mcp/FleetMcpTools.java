@@ -2,6 +2,7 @@ package com.github.letsrokk.mcp;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
@@ -16,6 +17,8 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -57,31 +60,15 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_mocks", description = "List active Mock Fleet mocks without starting any mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMocks.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_mocks", description = "List configured and active Mock Fleet mocks without starting any mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMocks.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listMocks(
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
         JsonNode scope = scope(null, null);
-        return fleet("list_mocks", () -> McpToolExecutor.ToolResult.of("Listed active mocks.",
-                collectionResult(null, page("list_mocks", scope, fleetApi.listMocks(), "mocks", limit, cursor),
+        return fleet("list_mocks", () -> McpToolExecutor.ToolResult.of("Listed mocks.",
+                collectionResult(null, page("list_mocks", scope, mockInventory(fleetApi.getConfig()),
+                                "mocks", limit, cursor),
                         "mocks", "mocks", "list_mocks", scope)));
-    }
-
-    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_mock_configs", description = "List mock IDs with user-saved configuration overrides.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListMockConfigs.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public ToolResponse listMockConfigs(
-            @ToolArg(description = "Page size", required = false) Integer limit,
-            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
-        JsonNode scope = scope(null, null);
-        return fleet("list_mock_configs", () -> {
-            JsonNode view = fleetApi.getConfig();
-            ObjectNode result = mapper.createObjectNode();
-            result.set("resourceVersion", view.path("resourceVersion"));
-            result.set("mockIds", view.path("savedMockIds"));
-            return McpToolExecutor.ToolResult.of("Listed saved mock configurations.",
-                    collectionResult(null, page("list_mock_configs", scope, result, "mockIds", limit, cursor),
-                            "mockIds", "mockIds", "list_mock_configs", scope));
-        });
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
@@ -99,13 +86,11 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_option_definitions", description = "List options available for the configured WireMock version with compatibility and availability metadata.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
-    public ToolResponse listOptionDefinitions() {
+    @Tool(name = "list_option_definitions", description = "List the public option catalog for an optional exact WireMock 3.x version.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse listOptionDefinitions(
+            @ToolArg(description = "Exact WireMock 3.x semantic version; omit to use the catalog default.", required = false) String version) {
         return fleet("list_option_definitions", () -> {
-            JsonNode view = fleetApi.getConfig();
-            ObjectNode result = mapper.createObjectNode();
-            result.set("wireMock", view.path("wireMock"));
-            result.set("optionDefinitions", view.path("options"));
+            JsonNode result = fleetApi.getOptionCatalog(version);
             return McpToolExecutor.ToolResult.of("Listed WireMock option definitions.", result);
         });
     }
@@ -118,6 +103,7 @@ public final class FleetMcpTools {
     public ToolResponse updateMockConfig(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
+            @ToolArg(description = "Exact selectable WireMock version, or the mock's current retained version; omit to inherit the catalog default", required = false) String wireMockVersion,
             @ToolArg(description = "Complete mock-specific WireMock CLI option override list") List<String> options,
             @ToolArg(description = "Kubernetes requests and limits override; omit to inherit baseline resources", required = false) MockResources resources,
             @ToolArg(description = "How to apply the saved configuration") String applyMode) {
@@ -129,7 +115,9 @@ public final class FleetMcpTools {
                 throw new IllegalArgumentException("resources.limits is required when resources are provided");
             }
             ConfigApplyMode parsedApplyMode = parseApplyMode(applyMode);
-            JsonNode view = fleetApi.updateConfig(mockId, resourceVersion, options, resources, parsedApplyMode);
+            JsonNode view = wireMockVersion == null
+                    ? fleetApi.updateConfig(mockId, resourceVersion, options, resources, parsedApplyMode)
+                    : fleetApi.updateConfig(mockId, resourceVersion, options, resources, wireMockVersion, parsedApplyMode);
             JsonNode configView = requireMutationEnvelope(view, mockId);
             ObjectNode result = mapper.createObjectNode();
             result.set("resourceVersion", configView.path("resourceVersion"));
@@ -534,7 +522,7 @@ public final class FleetMcpTools {
         return executor.execute(toolName, () -> {
             MockIdValidator.requireValid(mockId);
             requireRunning(mockId);
-            WireMockVersion runtimeVersion = wireMock.version(mockId);
+            WireMockVersion runtimeVersion = wireMock.version(mockId, () -> fleetApi.runtimeVersion(mockId));
             if (!ToolCapabilityRegistry.supports(toolName, runtimeVersion)) {
                 throw new McpOperationException("WIREMOCK_VERSION_UNSUPPORTED",
                         toolName + " requires WireMock " + ToolCapabilityRegistry.minimumVersion(toolName) + "+", false,
@@ -544,6 +532,7 @@ public final class FleetMcpTools {
             return action.get();
         });
     }
+
 
     private ObjectNode requireLifecycleResponse(String mockId) {
         return requireLifecycleResponse(mockId, "start", Set.of("RUNNING", "STARTING"),
@@ -774,6 +763,61 @@ public final class FleetMcpTools {
             page.putNull("nextCursor");
         }
         return result;
+    }
+
+    private ObjectNode mockInventory(JsonNode configView) {
+        JsonNode mocks = configView.path("mocks");
+        JsonNode savedMockIds = configView.path("savedMockIds");
+        if (!mocks.isArray() || !savedMockIds.isArray()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "Fleet API config is missing mock inventory fields", false, Map.of());
+        }
+
+        Set<String> saved = new HashSet<>();
+        for (JsonNode mockId : savedMockIds) {
+            if (!mockId.isTextual()) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config savedMockIds must contain only strings", false, Map.of());
+            }
+            saved.add(mockId.asText());
+        }
+        List<ObjectNode> rows = new ArrayList<>();
+        Set<String> seenMockIds = new HashSet<>();
+        for (JsonNode mock : mocks) {
+            String mockId = requiredInventoryText(mock, "mockId");
+            if (!seenMockIds.add(mockId)) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config contains duplicate mock rows", false, Map.of("mockId", mockId));
+            }
+            ObjectNode row = mapper.createObjectNode();
+            row.put("mockId", mockId);
+            row.put("lifecycle", requiredInventoryText(mock, "lifecycle"));
+            row.put("wireMockVersion", requiredInventoryText(mock, "wireMockVersion"));
+            JsonNode runtimeVersion = mock.get("runtimeVersion");
+            if (runtimeVersion == null || (!runtimeVersion.isNull() && !runtimeVersion.isTextual())) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config mock runtimeVersion must be a string or null", false,
+                        Map.of("mockId", mockId));
+            }
+            row.set("runtimeVersion", runtimeVersion);
+            row.put("hasSavedConfig", saved.contains(mockId));
+            rows.add(row);
+        }
+        rows.sort(Comparator.comparing(row -> row.path("mockId").asText()));
+        ArrayNode sorted = mapper.createArrayNode();
+        rows.forEach(sorted::add);
+        ObjectNode result = mapper.createObjectNode();
+        result.set("mocks", sorted);
+        return result;
+    }
+
+    private String requiredInventoryText(JsonNode mock, String field) {
+        JsonNode value = mock.get(field);
+        if (value == null || !value.isTextual()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                    "Fleet API config mock " + field + " must be a string", false, Map.of("field", field));
+        }
+        return value.asText();
     }
 
     private ObjectNode recordingCandidates(String mockId, JsonNode response) {

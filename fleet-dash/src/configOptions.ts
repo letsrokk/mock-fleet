@@ -7,11 +7,6 @@ export type OptionDefinition = {
   values: string[];
   minimum: number | null;
   maximum: number | null;
-  available: boolean;
-  unavailableReason: "SECRET_STORAGE_REQUIRED" | null;
-  compatibility: "supported" | "unsupported" | "known_broken" | "unknown";
-  compatibilityMessage: string | null;
-  versionRanges: Array<{ minimumVersion: string; maximumVersion: string | null }>;
 };
 
 export type ResourceData = {
@@ -20,11 +15,13 @@ export type ResourceData = {
 };
 
 export type ConfigData = {
+  version?: string | null;
   options: string[];
   resources: ResourceData;
 };
 
 export type UserConfigData = {
+  version?: string | null;
   options: string[];
   resources: ResourceData | null;
 };
@@ -149,6 +146,30 @@ export function hasOption(options: string[], name: string) {
   return parseOptionEntries(options).some((entry) => entry.name === name);
 }
 
+export function incompatibleOptionNames(options: string[], definitions: OptionDefinition[]) {
+  const known = new Set(definitions.map((definition) => definition.name));
+  return Array.from(new Set(parseOptionEntries(options)
+    .map((entry) => entry.name)
+    .filter((name): name is string => name !== null && !known.has(name)))).sort();
+}
+
+export function incompatibleDraftOptionNames(
+  savedOptions: string[],
+  draft: DraftConfig,
+  definitions: OptionDefinition[]
+) {
+  const structuredOptions = [
+    ...Object.entries(draft.flags)
+      .filter(([, enabled]) => enabled)
+      .map(([name]) => name),
+    ...Object.entries(draft.values)
+      .filter(([, value]) => value.trim())
+      .map(([name, value]) => `${name}=${value.trim()}`)
+  ];
+  const rawArgs = draft.rawArgs.trim() ? [draft.rawArgs.trim()] : [];
+  return incompatibleOptionNames([...savedOptions, ...structuredOptions, ...rawArgs], definitions);
+}
+
 export function recordsEqual(left: Record<string, string>, right: Record<string, string>) {
   const cleanRight = cleanRecord(right);
   const leftEntries = Object.entries(left);
@@ -171,14 +192,6 @@ export function numberInputAttributes(option: OptionDefinition) {
     return {};
   }
   return { min: option.minimum, max: option.maximum, step: 1 };
-}
-
-export function optionCompatibilityWarning(option: OptionDefinition) {
-  return option.compatibility === "supported" ? null : option.compatibilityMessage;
-}
-
-export function optionIsDisabled(option: OptionDefinition) {
-  return !option.available;
 }
 
 function cleanRecord(values: Record<string, string>) {

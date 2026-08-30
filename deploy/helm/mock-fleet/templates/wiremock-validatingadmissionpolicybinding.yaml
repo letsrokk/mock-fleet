@@ -7,6 +7,10 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
 spec:
   policyName: {{ include "mock-fleet.wiremockAdmissionPolicyName" . }}
+  paramRef:
+    name: {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
+    namespace: {{ include "mock-fleet.namespace" . }}
+    parameterNotFoundAction: Deny
   validationActions:
     - Deny
   matchResources:

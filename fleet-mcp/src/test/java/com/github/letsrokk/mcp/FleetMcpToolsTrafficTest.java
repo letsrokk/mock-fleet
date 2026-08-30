@@ -36,8 +36,7 @@ class FleetMcpToolsTrafficTest {
         var transport = new BlockingRecorderTransport();
         var registry = new SimpleMeterRegistry();
         var metrics = new McpMetrics(registry);
-        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
-                new WireMockVersion(3, 13, 2));
+        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics);
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, running());
             fleet.respond(200, running());
@@ -69,8 +68,7 @@ class FleetMcpToolsTrafficTest {
         transport.respond(status, "upstream-body");
         var registry = new SimpleMeterRegistry();
         var metrics = new McpMetrics(registry);
-        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
-                new WireMockVersion(3, 13, 2));
+        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics);
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, running());
             var tools = new FleetMcpTools(fleet.client(), wireMock, config(false), mapper, null, null,
@@ -332,6 +330,63 @@ class FleetMcpToolsTrafficTest {
             assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
             assertEquals("orders", error.details().get("mockId"));
             assertEquals(0, transport.requestCount());
+        }
+    }
+
+    @Test
+    void capabilityGateUsesTheActiveRuntimeDuringFutureOnlyDrift() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.12.1\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .listUnmatchedStubs("orders", 50, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("WIREMOCK_VERSION_UNSUPPORTED", error.code());
+            assertEquals("3.12.1", error.details().get("actualVersion"));
+            assertEquals(List.of("POST /__fleet/api/mocks/orders/start"), fleet.requests());
+            assertEquals(1, transport.requestCount());
+        }
+    }
+
+    @Test
+    void legacyRuntimeFallsBackToTheFleetRuntimeAfterTheVersionEndpointIsAbsent() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(404, "");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, configRuntime("3.13.2", "3.0.4"));
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null);
+
+            assertFalse(response.isError());
+            assertEquals(List.of("POST /__fleet/api/mocks/orders/start", "GET /__fleet/api/config"), fleet.requests());
+            assertEquals(3, transport.requestCount());
+        }
+    }
+
+    @Test
+    void missingFleetRuntimeFailsClosedWhenTheVersionEndpointIsAbsent() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(404, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, configRuntime("3.13.2", null));
+
+            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null);
+
+            assertTrue(response.isError());
+            McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("WIREMOCK_VERSION_UNSUPPORTED", error.code());
+            assertEquals(1, transport.requestCount());
         }
     }
 
@@ -605,8 +660,7 @@ class FleetMcpToolsTrafficTest {
             FleetMcpConfig config) {
         var registry = new SimpleMeterRegistry();
         var metrics = new McpMetrics(registry);
-        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics,
-                new WireMockVersion(3, 13, 2));
+        var wireMock = new WireMockAdminClient(transport, mapper, 4096, Set.of("authorization"), metrics);
         return new FleetMcpTools(fleetApi, wireMock, config, mapper,
                 new OutboundTargetValidator(new TargetUrlPolicy(Set.of())), new PerMockCoordinator(),
                 new McpToolExecutor(registry), metrics);
@@ -643,6 +697,12 @@ class FleetMcpToolsTrafficTest {
         return "{\"mockId\":\"orders\",\"status\":\"STOPPED\",\"podName\":null,\"message\":null,\"retryAfterMs\":null}";
     }
 
+    private static String configRuntime(String desiredVersion, String runtimeVersion) {
+        String runtime = runtimeVersion == null ? "null" : "\"" + runtimeVersion + "\"";
+        return "{\"mocks\":[{\"mockId\":\"orders\",\"wireMockVersion\":\"" + desiredVersion
+                + "\",\"runtimeVersion\":" + runtime + "}]}";
+    }
+
     private static FleetMcpConfig config(boolean storageEnabled) {
         return config(storageEnabled, 4096);
     }
@@ -653,7 +713,6 @@ class FleetMcpToolsTrafficTest {
             @Override public URI proxyBaseUrl() { return URI.create("http://proxy"); }
             @Override public RoutingMode routingMode() { return RoutingMode.PATH; }
             @Override public Optional<String> fleetHost() { return Optional.empty(); }
-            @Override public String wiremockImage() { return "wiremock/wiremock:3.13.2-2"; }
             @Override public boolean storageEnabled() { return storageEnabled; }
             @Override public Duration timeout() { return Duration.ofSeconds(1); }
             @Override public Duration lifecycleTimeout() { return Duration.ofSeconds(2); }

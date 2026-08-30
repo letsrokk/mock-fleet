@@ -13,6 +13,8 @@ import jakarta.annotation.PreDestroy;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -56,10 +58,6 @@ public final class FleetApiClient {
                 .setIdleTimeoutUnit(TimeUnit.SECONDS));
     }
 
-    public JsonNode listMocks() {
-        return json(HttpMethod.GET, "/__fleet/api/mocks", null);
-    }
-
     public JsonNode startMock(String mockId) {
         return json(HttpMethod.POST, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId) + "/start", null);
     }
@@ -73,8 +71,36 @@ public final class FleetApiClient {
         return json(HttpMethod.GET, "/__fleet/api/config", null);
     }
 
+    public WireMockVersion runtimeVersion(String mockId) {
+        JsonNode mocks = getConfig().path("mocks");
+        if (!mocks.isArray()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Fleet API config is missing mocks", false,
+                    Map.of());
+        }
+        for (JsonNode mock : mocks) {
+            if (mockId.equals(mock.path("mockId").asText()) && mock.path("runtimeVersion").isTextual()) {
+                return WireMockVersion.parse(mock.path("runtimeVersion").asText());
+            }
+        }
+        throw new McpOperationException("WIREMOCK_VERSION_UNSUPPORTED",
+                "Mock " + mockId + " does not report a runtime WireMock version", false, Map.of("mockId", mockId));
+    }
+
+    public JsonNode getOptionCatalog(String version) {
+        String path = "/__fleet/api/config/options";
+        if (version != null) {
+            path += "?version=" + URLEncoder.encode(version, StandardCharsets.UTF_8).replace("+", "%20");
+        }
+        return json(HttpMethod.GET, path, null);
+    }
+
     public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,
             ConfigApplyMode applyMode) {
+        return updateConfig(mockId, resourceVersion, options, resources, null, applyMode);
+    }
+
+    public JsonNode updateConfig(String mockId, String resourceVersion, List<String> options, MockResources resources,
+            String wireMockVersion, ConfigApplyMode applyMode) {
         if (resourceVersion == null || resourceVersion.isBlank()) {
             throw new IllegalArgumentException("resourceVersion is required");
         }
@@ -95,6 +121,11 @@ public final class FleetApiClient {
             payload.putNull("resources");
         } else {
             payload.set("resources", mapper.valueToTree(resources));
+        }
+        if (wireMockVersion == null) {
+            payload.putNull("wireMockVersion");
+        } else {
+            payload.put("wireMockVersion", wireMockVersion);
         }
         payload.put("applyMode", applyMode.name());
         return json(HttpMethod.PUT, "/__fleet/api/config/" + MockIdValidator.requireValid(mockId), payload);

@@ -1,0 +1,10 @@
+FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.20
+WORKDIR /work/
+USER root
+COPY target/quarkus-app/lib/ /work/lib/
+COPY target/quarkus-app/*.jar /work/
+COPY target/quarkus-app/app/ /work/app/
+COPY target/quarkus-app/quarkus/ /work/quarkus/
+RUN chown -R 1001:0 /work
+USER 1001
+ENTRYPOINT ["java", "-jar", "/work/quarkus-run.jar"]

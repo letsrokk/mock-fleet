@@ -48,20 +48,27 @@ public class PodFactory {
         this(config, new WireMockResourcePolicy(config));
     }
 
-    public Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
-                             ResourceRequirements resources) {
+    Pod createPodSpec(String podName, String mockId, List<String> wireMockOptions,
+                      ResourceRequirements resources) {
         String configuredImage = config.wiremockImage();
         WireMockVersion configuredVersion = configuredImage == null || configuredImage.isBlank()
                 ? new WireMockVersion(3, 13, 2)
                 : WireMockVersion.parseImage(configuredImage);
-        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(wireMockOptions, configuredVersion);
+        return createPodSpec(podName, mockId, new WireMockResolvedConfig(
+                configuredVersion, configuredImage, wireMockOptions, resources));
+    }
+
+    public Pod createPodSpec(String podName, String mockId, WireMockResolvedConfig resolved) {
+        List<String> normalizedOptions = WireMockOptionCatalog.validateAndNormalize(
+                resolved.options(), resolved.version());
+        ResourceRequirements resources = resolved.resources();
         resourcePolicy.validateEffective(resources);
         MockFleetConfig.StorageConfig storage = config.storage();
 
         ContainerBuilder containerBuilder = new ContainerBuilder()
                 .withImagePullPolicy(config.wiremockImagePullPolicy())
                 .withName(config.wiremockContainerName())
-                .withImage(config.wiremockImage())
+                .withImage(resolved.image())
                 .withSecurityContext(restrictedContainerSecurityContext(CONTAINER_USER_ID))
                 .addNewPort()
                     .withContainerPort(8080)

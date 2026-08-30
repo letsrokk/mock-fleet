@@ -7,7 +7,6 @@ public final class OutputSchemas {
     }
 
     public static final class ListMocks {}
-    public static final class ListMockConfigs {}
     public static final class GetMockConfig {}
     public static final class ListOptionDefinitions {}
     public static final class UpdateMockConfig {}

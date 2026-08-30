@@ -24,7 +24,7 @@ class WireMockAdminClientTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final RecordingTransport transport = new RecordingTransport();
     private final WireMockAdminClient client = new WireMockAdminClient(
-            transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"), null, null,
+            transport, mapper, 1024 * 1024, Set.of("authorization", "cookie", "set-cookie"), null,
             67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
             new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
@@ -53,7 +53,7 @@ class WireMockAdminClientTest {
     @Test
     void retriesBodyFileReadAcrossAnS3RemountWindow() {
         WireMockAdminClient polling = new WireMockAdminClient(
-                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null,
                 67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
                 new WireMockAdminClient.BodyFileReadPolicy(5, 0));
         transport.respond(500, "java.io.IOException: Stale file handle");
@@ -869,7 +869,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderBaselineHonorsTheMappingScanItemBudget() {
         WireMockAdminClient limited = new WireMockAdminClient(transport, mapper, 1024 * 1024,
-                Set.of("cookie"), null, null, 1024 * 1024, 1);
+                Set.of("cookie"), null, 1024 * 1024, 1);
         transport.respond(200, """
                 {"mappings":[{"id":"first"},{"id":"second"}],"meta":{"total":2}}
                 """);
@@ -957,7 +957,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderFinalizationDiscoversAndDeletesCandidatesWhenResultIsOversized() {
         WireMockAdminClient limited = new WireMockAdminClient(
-                transport, mapper, 128, Set.of("authorization"), null, null,
+                transport, mapper, 128, Set.of("authorization"), null,
                 67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0));
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.respond(200, "x".repeat(129));
@@ -998,7 +998,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderFinalizationPollsForCandidatesCreatedAfterTheFirstRecoveryScan() {
         WireMockAdminClient polling = new WireMockAdminClient(
-                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null,
                 67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(4, 2, 0));
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
@@ -1039,7 +1039,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderFinalizationLabelsObservationInterruption() {
         WireMockAdminClient polling = new WireMockAdminClient(
-                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null,
                 67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 1, 1));
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
@@ -1082,7 +1082,7 @@ class WireMockAdminClientTest {
     @Test
     void recorderFinalizationReportsUnstableFinalCandidateScan() {
         WireMockAdminClient polling = new WireMockAdminClient(
-                transport, mapper, 1024 * 1024, Set.of("authorization"), null, null,
+                transport, mapper, 1024 * 1024, Set.of("authorization"), null,
                 67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(2, 2, 0));
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.fail(new McpOperationException("UPSTREAM_UNAVAILABLE", "response lost", true, Map.of()));
@@ -1335,13 +1335,11 @@ class WireMockAdminClientTest {
     }
 
     @Test
-    void verifiesLegacyThreeZeroRuntimeWithAdminProbeWhenVersionEndpointIsAbsent() {
-        var legacyClient = new WireMockAdminClient(transport, mapper, 1024 * 1024,
-                Set.of("authorization"), null, new WireMockVersion(3, 0, 4));
+    void resolvesLegacyThreeZeroRuntimeFromTheTargetFleetSupplier() {
         transport.respond(404, "");
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
 
-        WireMockVersion version = legacyClient.version("orders");
+        WireMockVersion version = client.version("orders", () -> new WireMockVersion(3, 0, 4));
 
         assertEquals(new WireMockVersion(3, 0, 4), version);
         assertEquals("/__admin/version", transport.requestAt(0).target());

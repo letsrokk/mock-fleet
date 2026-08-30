@@ -31,6 +31,8 @@ public final class UpdateMockConfigInputSchemaGenerator
                         .put("mockId", string("Mock ID").put("pattern", MockIdValidator.pattern())
                                 .put("maxLength", MockIdValidator.maxLength()))
                         .put("resourceVersion", string("Current Fleet ConfigMap resourceVersion"))
+                        .put("wireMockVersion", string("Exact selectable WireMock version, or the mock's current retained version; omit to inherit the catalog default")
+                                .put("pattern", WireMockVersion.EXACT_PATTERN))
                         .put("options", new JsonObject()
                                 .put("type", "array")
                                 .put("description", "Complete mock-specific WireMock CLI option override list")

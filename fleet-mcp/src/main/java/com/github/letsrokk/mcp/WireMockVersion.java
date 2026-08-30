@@ -6,6 +6,7 @@ import java.util.regex.Pattern;
 
 public record WireMockVersion(int major, int minor, int patch) implements Comparable<WireMockVersion> {
 
+    static final String EXACT_PATTERN = "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$";
     private static final Pattern VERSION = Pattern.compile("(?<![0-9])3\\.(\\d+)\\.(\\d+)(?![0-9])");
     private static final Pattern IMAGE = Pattern.compile(
             "^[^\\s]+:3\\.(\\d+)\\.(\\d+)(?:-\\d+)?(?:@sha256:[a-fA-F0-9]{64})?$");

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -38,7 +39,7 @@ class McpConfigContractTest {
         when(fleetApi.startMock(any())).thenReturn(mapper.createObjectNode()
                 .put("mockId", "catalog").put("status", "RUNNING").putNull("podName")
                 .putNull("message").putNull("retryAfterMs"));
-        when(wireMock.version(any())).thenReturn(new WireMockVersion(3, 13, 2));
+        when(wireMock.version(any(), any())).thenReturn(new WireMockVersion(3, 13, 2));
         sessionId = given()
                 .contentType("application/json")
                 .accept("application/json, text/event-stream")
@@ -68,24 +69,19 @@ class McpConfigContractTest {
     @Test
     void returnsFocusedConfigAndMetadataResponses() throws Exception {
         when(fleetApi.getConfig()).thenReturn(configView(true));
+        when(fleetApi.getOptionCatalog("3.13.2")).thenReturn(optionCatalog());
 
         JsonNode config = structured(callTool("get_mock_config", "{\"mockId\":\"catalog\"}"));
         assertEquals("42", config.path("resourceVersion").asText());
         assertEquals("catalog", config.path("mock").path("mockId").asText());
+        assertEquals("3.13.2", config.path("mock").path("wireMockVersion").asText());
+        assertEquals("3.12.1", config.path("mock").path("runtimeVersion").asText());
         assertTrue(config.path("mock").path("user").path("resources").isNull());
         assertTrue(config.has("routing"));
         assertFalse(config.has("optionDefinitions"));
 
-        JsonNode metadata = structured(callTool("list_option_definitions", "{}"));
-        assertEquals("--verbose", metadata.path("optionDefinitions").path(0).path("name").asText());
-        assertEquals("3.13.2", metadata.path("wireMock").path("version").asText());
-        assertEquals("supported",
-                metadata.path("optionDefinitions").path(0).path("compatibility").asText());
-        assertEquals(2, metadata.path("optionDefinitions").size());
-        assertEquals("--timeout", metadata.path("optionDefinitions").path(1).path("name").asText());
-        assertEquals("input", metadata.path("optionDefinitions").path(1).path("kind").asText());
-        assertTrue(metadata.path("optionDefinitions").path(1).path("compatibilityMessage").isNull());
-        assertEquals(2, metadata.size());
+        JsonNode metadata = structured(callTool("list_option_definitions", "{\"version\":\"3.13.2\"}"));
+        assertEquals(optionCatalog(), metadata);
     }
 
     @Test
@@ -124,6 +120,22 @@ class McpConfigContractTest {
         assertTrue(deletion.path("deleted").asBoolean());
         assertEquals("restartActive", deletion.path("apply").path("mode").asText());
         assertFalse(deletion.has("mocks"));
+    }
+
+    @Test
+    void forwardsExplicitWireMockVersionThroughUpdateMockConfig() throws Exception {
+        when(fleetApi.updateConfig("catalog", "41", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly))
+                .thenReturn(mutation(configView(true), "futureOnly"));
+
+        JsonNode update = structured(callTool("update_mock_config", """
+                {"mockId":"catalog","resourceVersion":"41","wireMockVersion":"3.12.1",
+                 "options":["--verbose"],"applyMode":"futureOnly"}
+                """));
+
+        assertEquals("catalog", update.path("mock").path("mockId").asText());
+        verify(fleetApi).updateConfig("catalog", "41", List.of("--verbose"), null,
+                "3.12.1", ConfigApplyMode.futureOnly);
     }
 
     @Test
@@ -285,21 +297,30 @@ class McpConfigContractTest {
 
     private JsonNode configView(boolean includeCatalog) throws Exception {
         String mocks = includeCatalog ? """
-                [{"mockId":"catalog","active":false,
-                  "baseline":{"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
-                  "user":{"options":[],"resources":null},
-                  "effective":{"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}}}]
+                [{"mockId":"catalog","lifecycle":"RUNNING",
+                  "baseline":{"version":null,"options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
+                  "user":{"version":null,"options":[],"resources":null},
+                  "effective":{"version":"3.13.2","options":["--verbose"],"resources":{"requests":{"cpu":"0.5"},"limits":{"cpu":"1"}}},
+                  "wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"}]
                 """ : "[]";
         return mapper.readTree("""
                 {"resourceVersion":"42","mockIds":%s,"savedMockIds":%s,"mocks":%s,
-                 "wireMock":{"configuredImage":"wiremock/wiremock:3.13.2-2","version":"3.13.2","minimumSupportedVersion":"3.0.0","maximumResearchedVersion":"3.13.2","rangeStatus":"supported"},
-                 "options":[
-                   {"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging","description":"Log details","values":[],"minimum":null,"maximum":null,"available":true,"unavailableReason":null,"compatibility":"supported","compatibilityMessage":null,"versionRanges":[{"minimumVersion":"3.0.0","maximumVersion":null}]},
-                   {"name":"--timeout","label":"Timeout ms","kind":"input","group":"Performance and Jetty","description":"Sets the default global timeout in milliseconds.","values":[],"minimum":null,"maximum":null,"available":true,"unavailableReason":null,"compatibility":"supported","compatibilityMessage":null,"versionRanges":[{"minimumVersion":"3.0.0","maximumVersion":null}]}
-                 ],
-                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
+                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+                 "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+                 "catalogResourceVersion":"7"}
                 """.formatted(includeCatalog ? "[\"catalog\"]" : "[]",
                         includeCatalog ? "[\"catalog\"]" : "[]", mocks));
+    }
+
+    private JsonNode optionCatalog() throws Exception {
+        return mapper.readTree("""
+                {"wireMockVersion":"3.13.2","catalogStatus":"supported","options":[
+                  {"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging",
+                   "description":"Log details","values":[],"minimum":null,"maximum":null},
+                  {"name":"--timeout","label":"Timeout ms","kind":"input","group":"Performance and Jetty",
+                   "description":"Sets the default global timeout in milliseconds.","values":[],"minimum":null,"maximum":null}
+                ]}
+                """);
     }
 
     private JsonNode mutation(JsonNode config, String mode) {

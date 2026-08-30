@@ -11,7 +11,10 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 @ApplicationScoped
 public class WireMockOptions {
@@ -20,6 +23,9 @@ public class WireMockOptions {
 
     @Inject
     MockFleetConfig config;
+
+    @Inject
+    WireMockVersionCatalogService catalogService;
 
     private WireMockConfigDocument baselineConfig = WireMockConfigDocument.empty();
     private WireMockConfigDocument userConfig = WireMockConfigDocument.empty();
@@ -56,6 +62,11 @@ public class WireMockOptions {
         rebuildEffectiveConfig();
     }
 
+    synchronized ConfigSnapshot setUserConfigAndSnapshot(WireMockConfigDocument userConfig) {
+        setUserConfig(userConfig);
+        return new ConfigSnapshot(baselineConfig, this.userConfig, effectiveConfig, currentCatalog());
+    }
+
     synchronized WireMockConfigDocument baselineConfig() {
         return baselineConfig;
     }
@@ -69,26 +80,125 @@ public class WireMockOptions {
     }
 
     public synchronized List<String> optionsFor(String mockId) {
-        validateSourceOptions(baselineConfig, mockId);
-        validateSourceOptions(userConfig, mockId);
-        List<String> options = effectiveConfig.optionsFor(mockId);
-        return WireMockOptionCatalog.validateAndNormalize(options, configuredVersion());
+        return resolveFor(mockId).options();
     }
 
     public synchronized ResourceRequirements resourcesFor(String mockId) {
         return effectiveConfig.resourcesFor(mockId);
     }
 
+    public synchronized WireMockResolvedConfig resolveFor(String mockId) {
+        return resolveFor(mockId, baselineConfig, userConfig, currentCatalog());
+    }
+
+    synchronized WireMockResolvedConfig resolveFor(String mockId, WireMockConfigDocument baseline,
+                                                    WireMockConfigDocument user,
+                                                    WireMockVersionCatalog catalog) {
+        WireMockConfigDocument effective = baseline.merge(user);
+        WireMockPodConfig effectiveMock = effective.mockConfigs().get(mockId);
+        WireMockVersion version = effectiveMock == null || effectiveMock.version() == null
+                ? catalog.defaultVersion()
+                : parseDesiredVersion(effectiveMock.version());
+        WireMockVersionCatalog.VersionEntry entry = catalog.versions().get(version);
+        if (entry == null) {
+            throw unsupportedVersion(version.toString());
+        }
+
+        List<String> effectiveOptions = effective.optionsFor(mockId);
+        rejectVersionConflicts(effectiveOptions, version);
+        validateSourceOptions(baseline, mockId, version);
+        validateSourceOptions(user, mockId, version);
+        List<String> normalized = WireMockOptionCatalog.validateAndNormalize(effectiveOptions, version);
+        return new WireMockResolvedConfig(version, entry.image(), normalized, effective.resourcesFor(mockId));
+    }
+
+    synchronized String explicitVersion(WireMockConfigDocument document, String mockId) {
+        WireMockPodConfig mock = document.mockConfigs().get(mockId);
+        return mock == null ? null : mock.version();
+    }
+
+    synchronized WireMockVersionCatalog catalog() {
+        return currentCatalog();
+    }
+
+    synchronized WireMockVersion desiredVersionFor(String mockId) {
+        return desiredVersionFor(mockId, currentCatalog());
+    }
+
+    synchronized WireMockVersion desiredVersionFor(String mockId, WireMockVersionCatalog catalog) {
+        return desiredVersionFor(mockId, effectiveConfig, catalog);
+    }
+
+    synchronized WireMockVersion desiredVersionFor(String mockId, WireMockConfigDocument effective,
+                                                    WireMockVersionCatalog catalog) {
+        WireMockPodConfig effectiveMock = effective.mockConfigs().get(mockId);
+        WireMockVersion version = effectiveMock == null || effectiveMock.version() == null
+                ? catalog.defaultVersion()
+                : parseDesiredVersion(effectiveMock.version());
+        if (!catalog.versions().containsKey(version)) {
+            throw unsupportedVersion(version.toString());
+        }
+        return version;
+    }
+
+    record ConfigSnapshot(WireMockConfigDocument baseline, WireMockConfigDocument user,
+                          WireMockConfigDocument effective, WireMockVersionCatalog catalog) {
+    }
+
     private void rebuildEffectiveConfig() {
         this.effectiveConfig = baselineConfig.merge(userConfig);
     }
 
-    private void validateSourceOptions(WireMockConfigDocument document, String mockId) {
-        WireMockOptionCatalog.validateAndNormalize(document.defaultOptions(), configuredVersion());
+    private void validateSourceOptions(WireMockConfigDocument document, String mockId, WireMockVersion version) {
+        WireMockOptionCatalog.validateAndNormalize(document.defaultOptions(), version);
         WireMockPodConfig mockConfig = document.mockConfigs().get(mockId);
         if (mockConfig != null) {
-            WireMockOptionCatalog.validateAndNormalize(mockConfig.options(), configuredVersion());
+            WireMockOptionCatalog.validateAndNormalize(mockConfig.options(), version);
         }
+    }
+
+    private void rejectVersionConflicts(List<String> options, WireMockVersion version) {
+        Set<String> supported = new LinkedHashSet<>();
+        WireMockOptionCatalog.definitions(version).forEach(option -> supported.add(option.name()));
+        Set<String> known = new LinkedHashSet<>();
+        WireMockOptionCatalog.baseDefinitions().forEach(option -> known.add(option.name()));
+        Set<String> conflicts = new LinkedHashSet<>();
+        WireMockOptionCatalog.tokenize(options).stream()
+                .filter(token -> token.startsWith("--"))
+                .map(token -> token.contains("=") ? token.substring(0, token.indexOf('=')) : token)
+                .filter(name -> known.contains(name) && !supported.contains(name))
+                .forEach(conflicts::add);
+        if (!conflicts.isEmpty()) {
+            throw ApiException.badRequest("UNSUPPORTED_WIREMOCK_OPTION",
+                    "WireMock options are not supported by version " + version + ".",
+                    Map.of("version", version.toString(), "options", List.copyOf(conflicts)));
+        }
+    }
+
+    private WireMockVersion parseDesiredVersion(String value) {
+        try {
+            return WireMockVersion.parse(value);
+        } catch (IllegalArgumentException error) {
+            throw unsupportedVersion(value);
+        }
+    }
+
+    private ApiException unsupportedVersion(String value) {
+        return ApiException.badRequest("UNSUPPORTED_WIREMOCK_VERSION",
+                "WireMock version is not present in the version catalog.", Map.of("version", value));
+    }
+
+    private WireMockVersionCatalog currentCatalog() {
+        if (catalogService != null) {
+            return catalogService.catalog();
+        }
+        WireMockVersion version = configuredVersion();
+        String configuredImage = config == null ? null : config.wiremockImage();
+        String image = configuredImage == null || configuredImage.isBlank()
+                ? "wiremock/wiremock:" + version
+                : configuredImage;
+        return new WireMockVersionCatalog(version, Map.of(version,
+                new WireMockVersionCatalog.VersionEntry(version, image, true)), null);
     }
 
     private WireMockVersion configuredVersion() {

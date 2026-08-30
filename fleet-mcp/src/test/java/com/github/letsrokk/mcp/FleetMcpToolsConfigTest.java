@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.vertx.core.Vertx;
@@ -23,15 +24,23 @@ class FleetMcpToolsConfigTest {
     private static final String CONFIG_VIEW = """
             {
               "resourceVersion":"42",
-              "mockIds":["active-only","alpha","zeta"],
-              "savedMockIds":["alpha","beta","zeta"],
+              "mockIds":["runtime-only","alpha","zeta"],
+              "savedMockIds":["alpha","zeta"],
               "mocks":[
-                {"mockId":"alpha","active":false,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}},"effective":{"options":["--verbose"],"resources":{"requests":{},"limits":{}}}},
-                {"mockId":"zeta","active":true,"baseline":{"options":[],"resources":{"requests":{},"limits":{}}},"user":{"options":[],"resources":{"requests":{},"limits":{}}},"effective":{"options":[],"resources":{"requests":{},"limits":{}}}}
+                {"mockId":"alpha","lifecycle":"STOPPED","baseline":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"user":{"version":"3.12.1","options":["--verbose"],"resources":{"requests":{},"limits":{}}},"effective":{"version":"3.12.1","options":["--verbose"],"resources":{"requests":{},"limits":{}}},"wireMockVersion":"3.12.1","runtimeVersion":null},
+                {"mockId":"zeta","lifecycle":"RUNNING","baseline":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"user":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"effective":{"version":"3.13.2","options":[],"resources":{"requests":{},"limits":{}}},"wireMockVersion":"3.13.2","runtimeVersion":"3.12.1"},
+                {"mockId":"runtime-only","lifecycle":"STARTING","baseline":{"version":null,"options":[],"resources":{"requests":{},"limits":{}}},"user":{"version":null,"options":[],"resources":null},"effective":{"version":"3.13.2","options":[],"resources":{"requests":{},"limits":{}}},"wireMockVersion":"3.13.2","runtimeVersion":"3.13.2"}
               ],
-              "options":[{"name":"--verbose"}],
-              "routing":{"mode":"PATH","host":"mock-fleet.localhost"}
+              "routing":{"mode":"PATH","host":"mock-fleet.localhost"},"defaultVersion":"3.13.2",
+              "versions":[{"version":"3.13.2","image":"wiremock/wiremock:3.13.2-2","selectable":true}],
+              "catalogResourceVersion":"7"
             }
+            """;
+
+    private static final String OPTION_CATALOG = """
+            {"wireMockVersion":"3.13.2","catalogStatus":"newer_unresearched",
+             "options":[{"name":"--verbose","label":"Verbose","kind":"flag","group":"Logging",
+             "description":"Log details","values":[],"minimum":null,"maximum":null}]}
             """;
 
     private final ObjectMapper mapper = new ObjectMapper();
@@ -66,54 +75,71 @@ class FleetMcpToolsConfigTest {
     }
 
     @Test
-    void listsOnlySavedMockIdsWithStablePaginationMetadata() throws Exception {
-        var firstResponse = tools.listMockConfigs(2, null);
+    void mergesConfiguredInactiveActiveAndRuntimeOnlyMocksFromOneConfigSnapshot() throws Exception {
+        var response = tools.listMocks(null, null);
 
-        assertFalse(firstResponse.isError());
+        assertFalse(response.isError(), response.toString());
+        assertEquals(mapper.readTree("""
+                {
+                  "mocks":[
+                    {"mockId":"alpha","lifecycle":"STOPPED","wireMockVersion":"3.12.1",
+                     "runtimeVersion":null,"hasSavedConfig":true},
+                    {"mockId":"runtime-only","lifecycle":"STARTING","wireMockVersion":"3.13.2",
+                     "runtimeVersion":"3.13.2","hasSavedConfig":false},
+                    {"mockId":"zeta","lifecycle":"RUNNING","wireMockVersion":"3.13.2",
+                     "runtimeVersion":"3.12.1","hasSavedConfig":true}
+                  ],
+                  "page":{"limit":50,"returned":3,"hasMore":false,"nextCursor":null}
+                }
+                """), response.structuredContent());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
+    }
+
+    @Test
+    void sortsMocksBeforeApplyingCursorPagination() throws Exception {
+        var firstResponse = tools.listMocks(2, null);
+
+        assertFalse(firstResponse.isError(), firstResponse.toString());
         ObjectNode first = (ObjectNode) firstResponse.structuredContent();
-        String cursor = first.path("page").path("nextCursor").asText();
-        var response = tools.listMockConfigs(2, cursor);
+        assertEquals(mapper.readTree("[\"alpha\",\"runtime-only\"]"), mockIds(first));
+        assertTrue(first.path("page").path("hasMore").asBoolean());
 
-        assertFalse(response.isError());
-        ObjectNode result = (ObjectNode) response.structuredContent();
-        assertEquals("42", result.path("resourceVersion").asText());
-        assertEquals(mapper.readTree("[\"zeta\"]"), result.path("mockIds"));
-        assertEquals(2, result.path("page").path("limit").asInt());
-        assertEquals(1, result.path("page").path("returned").asInt());
-        assertFalse(result.path("page").path("hasMore").asBoolean());
-        assertTrue(result.path("page").path("nextCursor").isNull());
-        assertFalse(result.has("mocks"));
+        var secondResponse = tools.listMocks(2, first.path("page").path("nextCursor").asText());
+
+        assertFalse(secondResponse.isError(), secondResponse.toString());
+        ObjectNode second = (ObjectNode) secondResponse.structuredContent();
+        assertEquals(mapper.readTree("[\"zeta\"]"), mockIds(second));
+        assertFalse(second.path("page").path("hasMore").asBoolean());
         assertEquals(List.of("GET /__fleet/api/config", "GET /__fleet/api/config"), requests);
     }
 
     @Test
-    void listsAnEmptySavedConfigCollection() throws Exception {
-        responseBody = """
-                {"resourceVersion":"42","mockIds":["active-only"],"savedMockIds":[],"mocks":[],"options":[],"routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
-                """;
+    void rejectsDuplicateMockRowsAsAnInvalidUpstreamResponse() throws Exception {
+        ObjectNode invalid = (ObjectNode) mapper.readTree(CONFIG_VIEW);
+        ArrayNode mocks = (ArrayNode) invalid.path("mocks");
+        mocks.add(mocks.get(0).deepCopy());
+        responseBody = mapper.writeValueAsString(invalid);
 
-        var response = tools.listMockConfigs(null, null);
+        var response = tools.listMocks(null, null);
 
-        assertFalse(response.isError());
-        ObjectNode result = (ObjectNode) response.structuredContent();
-        assertEquals(mapper.readTree("[]"), result.path("mockIds"));
-        assertEquals(50, result.path("page").path("limit").asInt());
-        assertEquals(0, result.path("page").path("returned").asInt());
-        assertFalse(result.path("page").path("hasMore").asBoolean());
-        assertTrue(result.path("page").path("nextCursor").isNull());
+        assertTrue(response.isError());
+        assertEquals("INVALID_UPSTREAM_RESPONSE",
+                ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
     @Test
-    void preservesNullResourceVersionInConfigWrapper() {
-        responseBody = """
-                {"resourceVersion":null,"mockIds":[],"savedMockIds":[],"mocks":[],"options":[],
-                 "routing":{"mode":"PATH","host":"mock-fleet.localhost"}}
-                """;
+    void rejectsNonTextSavedMockIdsAsAnInvalidUpstreamResponse() throws Exception {
+        ObjectNode invalid = (ObjectNode) mapper.readTree(CONFIG_VIEW);
+        ((ArrayNode) invalid.path("savedMockIds")).set(0, mapper.getNodeFactory().numberNode(42));
+        responseBody = mapper.writeValueAsString(invalid);
 
-        var response = tools.listMockConfigs(null, null);
+        var response = tools.listMocks(null, null);
 
-        assertFalse(response.isError());
-        assertTrue(((ObjectNode) response.structuredContent()).path("resourceVersion").isNull());
+        assertTrue(response.isError());
+        assertEquals("INVALID_UPSTREAM_RESPONSE",
+                ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
     @Test
@@ -153,6 +179,17 @@ class FleetMcpToolsConfigTest {
     }
 
     @Test
+    void forwardsTheVersionedCatalogWithoutReshapingIt() throws Exception {
+        responseBody = OPTION_CATALOG;
+
+        var response = tools.listOptionDefinitions("3.13.2+candidate");
+
+        assertFalse(response.isError());
+        assertEquals(mapper.readTree(OPTION_CATALOG), response.structuredContent());
+        assertEquals(List.of("GET /__fleet/api/config/options?version=3.13.2%2Bcandidate"), requests);
+    }
+
+    @Test
     void rejectsInvalidMockIdBeforeCallingFleetApi() {
         var response = tools.getMockConfig("bad_id");
 
@@ -167,7 +204,6 @@ class FleetMcpToolsConfigTest {
             @Override public URI proxyBaseUrl() { return URI.create("http://proxy"); }
             @Override public RoutingMode routingMode() { return RoutingMode.PATH; }
             @Override public Optional<String> fleetHost() { return Optional.empty(); }
-            @Override public String wiremockImage() { return "wiremock/wiremock:3.13.2-2"; }
             @Override public boolean storageEnabled() { return false; }
             @Override public Duration timeout() { return Duration.ofSeconds(1); }
             @Override public Duration lifecycleTimeout() { return Duration.ofSeconds(2); }
@@ -182,5 +218,11 @@ class FleetMcpToolsConfigTest {
             @Override public Optional<List<String>> outboundExceptions() { return Optional.empty(); }
             @Override public Optional<List<String>> outboundAllowedListeners() { return Optional.empty(); }
         };
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode mockIds(ObjectNode result) {
+        return mapper.valueToTree(java.util.stream.StreamSupport.stream(result.path("mocks").spliterator(), false)
+                .map(row -> row.path("mockId").asText())
+                .toList());
     }
 }

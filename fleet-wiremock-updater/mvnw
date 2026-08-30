@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$(dirname "$0")/../fleet-api/mvnw" -f "$(dirname "$0")/pom.xml" "$@"

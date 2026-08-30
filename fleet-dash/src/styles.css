@@ -780,20 +780,6 @@ tr:last-child td { border-bottom: 0; }
   overflow-wrap: anywhere;
 }
 
-.option-warning {
-  color: var(--warning, #a15c00);
-  cursor: help;
-  font-weight: 700;
-}
-
-.option-unavailable {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 0.68rem;
-  padding: 1px 6px;
-}
-
 .optional-option-control {
   display: grid;
   gap: 5px;

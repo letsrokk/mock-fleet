@@ -26,6 +26,9 @@ public class FleetResource {
     @Inject
     PodState podState;
 
+    @Inject
+    WireMockOptions wireMockOptions;
+
     @GET
     public List<MockRow> listActiveMocks() {
         return activeMocksSnapshot();
@@ -46,8 +49,13 @@ public class FleetResource {
 
     private List<MockRow> activeMocksSnapshot() {
         return podManager.listMocks().stream()
-                .map(mock -> new MockRow(mock.mockId(), mock.podName(), mock.status(), mock.message()))
+                .map(mock -> new MockRow(mock.mockId(), mock.podName(), mock.status(), mock.message(),
+                        desiredVersion(mock.mockId()), mock.runtimeVersion()))
                 .toList();
+    }
+
+    private String desiredVersion(String mockId) {
+        return wireMockOptions == null ? null : wireMockOptions.desiredVersionFor(mockId).toString();
     }
 
     @DELETE
@@ -98,7 +106,11 @@ public class FleetResource {
                 status.status() == MockLifecycleStatus.STARTING ? 1000 : null);
     }
 
-    public record MockRow(String mockId, String podName, MockLifecycleStatus status, String message) {
+    public record MockRow(String mockId, String podName, MockLifecycleStatus status, String message,
+                          String wireMockVersion, String runtimeVersion) {
+        public MockRow(String mockId, String podName, MockLifecycleStatus status, String message) {
+            this(mockId, podName, status, message, null, null);
+        }
     }
 
     public record MockLifecycleResponse(String mockId, MockLifecycleStatus status, String podName, String message,

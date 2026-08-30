@@ -2,20 +2,20 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 32 tools:
+The server publishes 31 tools:
 
 ```text
-list_mocks                 list_mock_configs          get_mock_config
-list_option_definitions    update_mock_config         delete_mock_config
-start_mock                 stop_mock                  list_stubs
-list_unmatched_stubs       get_stub                   create_stub
-update_stub                delete_stub                persist_stub
-unpersist_stub             send_request               find_requests
-count_requests             list_unmatched_requests    get_near_misses
-reset_request_journal      start_recording            get_recording_status
-stop_recording             snapshot_requests          list_body_files
-get_body_file              put_body_file              delete_body_file
-list_scenarios             reset_scenarios
+list_mocks                 get_mock_config             list_option_definitions
+update_mock_config         delete_mock_config          start_mock
+stop_mock                  list_stubs                  list_unmatched_stubs
+get_stub                   create_stub                 update_stub
+delete_stub                persist_stub                unpersist_stub
+send_request               find_requests               count_requests
+list_unmatched_requests    get_near_misses             reset_request_journal
+start_recording            get_recording_status        stop_recording
+snapshot_requests          list_body_files             get_body_file
+put_body_file              delete_body_file            list_scenarios
+reset_scenarios
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -40,7 +40,7 @@ Every closed tool-input object rejects unknown properties. Native WireMock mappi
 
 ## Collection pagination
 
-`list_mocks`, `list_mock_configs`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
+`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
 
 Every collection returns `page` with the same metadata:
 
@@ -54,6 +54,8 @@ Every collection returns `page` with the same metadata:
 ```
 
 `nextCursor` is a string only when `hasMore` is true and is otherwise null. Continue with that cursor until `hasMore` is false. WireMock collections do not provide snapshot isolation, so concurrent mutations between calls can cause duplicates or omissions. The MCP server streams large upstream collections, keeps only the requested page plus one item, and returns `RESULT_TOO_LARGE` if a configured byte or item scan budget is exhausted. `get_near_misses` returns `{mockId,nearMisses,page}`.
+
+`list_mocks` reads one Fleet configuration snapshot and returns every configured inactive, configured active, and runtime-only mock, sorted by `mockId` before pagination. Each row is exactly `{mockId,lifecycle,wireMockVersion,runtimeVersion,hasSavedConfig}`. `wireMockVersion` is the desired version, `runtimeVersion` is null while no runtime is present, and `hasSavedConfig` reports membership in the snapshot's saved configuration IDs.
 
 ## Lifecycle
 
@@ -73,11 +75,13 @@ Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is i
 
 ## Configuration
 
-`list_option_definitions` returns the Fleet API's pinned `wireMock` version metadata and resolved option catalog unchanged. The catalog contains only options present in the configured WireMock version; hidden options are rejected if submitted directly. Advertised options remain available without startup-compatibility warnings. An option with `available=false` is a hard security restriction and cannot be saved. The five direct credential options remain unavailable until Mock Fleet provides Secret-backed storage.
+`list_option_definitions` accepts an optional exact WireMock 3.x `version`. When omitted, it resolves the catalog default version. It forwards the Fleet API catalog unchanged as `{wireMockVersion,catalogStatus,options}`. The catalog contains only public options present in the selected version; hidden or sensitive options are rejected if submitted directly. `catalogStatus` is `supported` or `newer_unresearched`; it describes the catalog as a whole, not individual options.
 
-MCP tool discovery uses the configured WireMock version. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls apply the same gates against the active mock's reported runtime version, so a configured/runtime mismatch fails with the tool name and required version.
+The selected option version and the deployment version catalog are separate checks. `list_option_definitions` can inspect an exact future 3.x version and returns `newer_unresearched` above the researched maximum. `update_mock_config` can select only a catalog entry marked selectable, except that a mock can preserve its own existing retained baseline or user pin. A rejected pin returns the Fleet API's `UNSUPPORTED_WIREMOCK_VERSION`. Known options unavailable in the desired version return `UNSUPPORTED_WIREMOCK_OPTION` with exact `version` and `options` details. MCP preserves both errors in its standard error envelope without mutating configuration.
 
-`update_mock_config` takes the complete mock-specific option override. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the configured WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
+MCP always publishes the complete retained tool set. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls gate these tools against the target mock's active runtime version, so desired/runtime drift fails with the tool name, required version, and actual runtime version. Legacy WireMock 3.0.x targets resolve their runtime through Fleet API after the Admin version endpoint is absent; an unknown runtime fails closed.
+
+`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit `wireMockVersion` to inherit the catalog default. Explicit `null` is not accepted because the published input schema requires a string when the field is present. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
 
 ```json
 {
@@ -85,11 +89,12 @@ MCP tool discovery uses the configured WireMock version. `get_body_file` require
   "resourceVersion": "42",
   "options": ["--verbose --filename-template '{{{method}}}-{{{url}}}.json'"],
   "resources": {"requests": {}, "limits": {}},
+  "wireMockVersion": "3.12.1",
   "applyMode": "restartActive"
 }
 ```
 
-Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. A restart is asynchronous, so `lifecycle` can be STARTING. Configuration rows use `lifecycle`, not `active`, and inherited `user.resources` is null.
+Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. `futureOnly` saves the desired configuration without replacing an active pod. `restartActive` replaces only a STARTING or RUNNING pod and is asynchronous, so `lifecycle` can be STARTING; it does not start a STOPPED or FAILED mock. Configuration rows use `lifecycle`, not `active`, expose baseline, user, and effective version fields, desired `wireMockVersion`, and nullable active `runtimeVersion`, and use null `user.resources` for inherited resources.
 
 ## Encoded bodies
 
