@@ -16,7 +16,6 @@ public final class FleetMcpStartup {
 
     @PostConstruct
     void validate() {
-        WireMockVersion.parseImage(config.wiremockImage());
         if (config.defaultPageSize() < 1 || config.defaultPageSize() > config.maxPageSize()) {
             throw new IllegalArgumentException("defaultPageSize must be between 1 and maxPageSize");
         }

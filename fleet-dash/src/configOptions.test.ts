@@ -3,6 +3,7 @@ import {
   draftFromConfig,
   emptyUserConfig,
   hasOption,
+  incompatibleOptionNames,
   numberInputAttributes,
   optionsFromDraft,
   overrideOptions,
@@ -58,6 +59,9 @@ const definitions: OptionDefinition[] = [
 const emptyResources = { requests: {}, limits: {} };
 
 describe("config option helpers", () => {
+  it("reports every effective and raw argument unsupported by a target catalog", () => {
+    expect(incompatibleOptionNames(["--verbose", "--legacy=on", "--legacy"], definitions)).toEqual(["--legacy"]);
+  });
   it("shows only the configured WireMock version in the catalog heading", () => {
     expect(wireMockVersionLabel("3.13.2")).toBe("WireMock 3.13.2");
   });

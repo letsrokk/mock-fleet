@@ -146,6 +146,13 @@ export function hasOption(options: string[], name: string) {
   return parseOptionEntries(options).some((entry) => entry.name === name);
 }
 
+export function incompatibleOptionNames(options: string[], definitions: OptionDefinition[]) {
+  const known = new Set(definitions.map((definition) => definition.name));
+  return Array.from(new Set(parseOptionEntries(options)
+    .map((entry) => entry.name)
+    .filter((name): name is string => name !== null && !known.has(name)))).sort();
+}
+
 export function recordsEqual(left: Record<string, string>, right: Record<string, string>) {
   const cleanRight = cleanRecord(right);
   const leftEntries = Object.entries(left);

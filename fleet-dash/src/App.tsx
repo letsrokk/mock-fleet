@@ -8,6 +8,7 @@ import {
   emptyDraft,
   groupOptions,
   hasOption,
+  incompatibleOptionNames,
   numberInputAttributes,
   optionsFromDraft,
   resourceSummary,
@@ -936,6 +937,9 @@ export default function App() {
     }
 
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
+    const incompatibleOptions = selectedMock
+      ? incompatibleOptionNames([...selectedMock.effective.options, ...selectedMock.baseline.options, ...splitRawArgs(draft.rawArgs)], catalog.options)
+      : [];
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
     const filteredMockIds = configView.mockIds.filter((mockId) => matchesMockFilter(mockId, newMockId));
@@ -1105,6 +1109,9 @@ export default function App() {
                     </>}
                   />
                 </div>
+                {incompatibleOptions.length > 0 ? <p className="notice warning" role="alert">
+                  Unsupported by WireMock {catalog.wireMockVersion}: {incompatibleOptions.join(", ")}. Save is blocked; these options stay in your draft.
+                </p> : null}
 
                 <section className="option-group">
                   <button
@@ -1163,7 +1170,7 @@ export default function App() {
                   Delete override
                 </button>
                 <button className="primary-button" onClick={requestSaveConfig}
-                  disabled={saving || catalog.wireMockVersion !== (draftWireMockVersion ?? configView.defaultVersion)}>
+                  disabled={saving || incompatibleOptions.length > 0 || catalog.wireMockVersion !== (draftWireMockVersion ?? configView.defaultVersion)}>
                   {saving ? "Saving..." : "Save"}
                 </button>
               </div>
@@ -1560,6 +1567,10 @@ function normalizeMappingsView(mappingsView: MappingsView & { routing?: RoutingV
 
 function defaultRoutingView(): RoutingView {
   return { mode: "HOST", host: window.location.hostname };
+}
+
+function splitRawArgs(rawArgs: string) {
+  return rawArgs.trim() ? [rawArgs.trim()] : [];
 }
 
 function mockBaseUrl(mockId: string, routing: RoutingView) {

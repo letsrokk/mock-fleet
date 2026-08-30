@@ -19,9 +19,6 @@ public interface FleetMcpConfig {
 
     Optional<String> fleetHost();
 
-    @WithDefault("wiremock/wiremock:3.13.2-2")
-    String wiremockImage();
-
     @WithDefault("false")
     boolean storageEnabled();
 

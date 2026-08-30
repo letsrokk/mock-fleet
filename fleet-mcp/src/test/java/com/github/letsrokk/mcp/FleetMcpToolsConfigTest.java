@@ -183,7 +183,6 @@ class FleetMcpToolsConfigTest {
             @Override public URI proxyBaseUrl() { return URI.create("http://proxy"); }
             @Override public RoutingMode routingMode() { return RoutingMode.PATH; }
             @Override public Optional<String> fleetHost() { return Optional.empty(); }
-            @Override public String wiremockImage() { return "wiremock/wiremock:3.13.2-2"; }
             @Override public boolean storageEnabled() { return false; }
             @Override public Duration timeout() { return Duration.ofSeconds(1); }
             @Override public Duration lifecycleTimeout() { return Duration.ofSeconds(2); }
