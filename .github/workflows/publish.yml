@@ -71,6 +71,7 @@ jobs:
     needs: resolve-version
     uses: ./.github/workflows/build.yml
     with:
+      build_all: true
       maven_version: ${{ needs.resolve-version.outputs.maven_version }}
       dash_version: ${{ needs.resolve-version.outputs.app_version }}
 
