@@ -62,6 +62,11 @@ public class WireMockOptions {
         rebuildEffectiveConfig();
     }
 
+    synchronized ConfigSnapshot setUserConfigAndSnapshot(WireMockConfigDocument userConfig) {
+        setUserConfig(userConfig);
+        return new ConfigSnapshot(baselineConfig, this.userConfig, effectiveConfig, currentCatalog());
+    }
+
     synchronized WireMockConfigDocument baselineConfig() {
         return baselineConfig;
     }
@@ -121,7 +126,12 @@ public class WireMockOptions {
     }
 
     synchronized WireMockVersion desiredVersionFor(String mockId, WireMockVersionCatalog catalog) {
-        WireMockPodConfig effectiveMock = effectiveConfig.mockConfigs().get(mockId);
+        return desiredVersionFor(mockId, effectiveConfig, catalog);
+    }
+
+    synchronized WireMockVersion desiredVersionFor(String mockId, WireMockConfigDocument effective,
+                                                    WireMockVersionCatalog catalog) {
+        WireMockPodConfig effectiveMock = effective.mockConfigs().get(mockId);
         WireMockVersion version = effectiveMock == null || effectiveMock.version() == null
                 ? catalog.defaultVersion()
                 : parseDesiredVersion(effectiveMock.version());
@@ -129,6 +139,10 @@ public class WireMockOptions {
             throw unsupportedVersion(version.toString());
         }
         return version;
+    }
+
+    record ConfigSnapshot(WireMockConfigDocument baseline, WireMockConfigDocument user,
+                          WireMockConfigDocument effective, WireMockVersionCatalog catalog) {
     }
 
     private void rebuildEffectiveConfig() {

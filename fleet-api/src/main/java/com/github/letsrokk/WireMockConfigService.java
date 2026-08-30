@@ -83,10 +83,10 @@ public class WireMockConfigService {
 
     ConfigView view() {
         ConfigMap userConfigMap = userConfigMap();
-        WireMockConfigDocument userConfig = loadUserConfig(userConfigMap);
-        wireMockOptions.setUserConfig(userConfig);
-        WireMockConfigDocument baseline = wireMockOptions.baselineConfig();
-        WireMockConfigDocument effective = wireMockOptions.effectiveConfig();
+        WireMockOptions.ConfigSnapshot snapshot = wireMockOptions.setUserConfigAndSnapshot(loadUserConfig(userConfigMap));
+        WireMockConfigDocument baseline = snapshot.baseline();
+        WireMockConfigDocument userConfig = snapshot.user();
+        WireMockConfigDocument effective = snapshot.effective();
 
         Set<String> mockIds = new LinkedHashSet<>();
         mockIds.addAll(baseline.mockConfigs().keySet());
@@ -102,7 +102,7 @@ public class WireMockConfigService {
         List<String> savedMockIds = userConfig.mockConfigs().keySet().stream()
                 .sorted()
                 .toList();
-        WireMockVersionCatalog versionCatalog = wireMockOptions.catalog();
+        WireMockVersionCatalog versionCatalog = snapshot.catalog();
 
         List<MockConfigView> mocks = mockIds.stream()
                 .sorted()
@@ -116,7 +116,6 @@ public class WireMockConfigService {
                 List.copyOf(mockIds.stream().sorted().toList()),
                 savedMockIds,
                 mocks,
-                wireMockView(versionCatalog),
                 routingView(),
                 versionCatalog.defaultVersion().toString(),
                 versionCatalog.versions().values().stream()
@@ -235,7 +234,7 @@ public class WireMockConfigService {
                                           WireMockConfigDocument effective,
                                           PodManager.MockPodStatus status,
                                           WireMockVersionCatalog catalog) {
-        String desiredVersion = wireMockOptions.desiredVersionFor(mockId, catalog).toString();
+        String desiredVersion = wireMockOptions.desiredVersionFor(mockId, effective, catalog).toString();
         return new MockConfigView(
                 mockId,
                 status.status(),
@@ -443,25 +442,9 @@ public class WireMockConfigService {
                 .toList());
     }
 
-    private WireMockVersionView wireMockView(WireMockVersionCatalog versionCatalog) {
-        WireMockOptionMatrix.ResolvedCatalog catalog = WireMockOptionMatrix.loadDefault()
-                .resolve(versionCatalog.defaultVersion());
-        return new WireMockVersionView(
-                versionCatalog.versions().get(versionCatalog.defaultVersion()).image(),
-                catalog.version().toString(),
-                catalog.minimumSupportedVersion().toString(),
-                catalog.maximumResearchedVersion().toString(),
-                catalog.rangeStatus());
-    }
-
     public record ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
-                             List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing,
-                             String defaultVersion, List<VersionView> versions, String catalogResourceVersion) {
-        public ConfigView(String resourceVersion, List<String> mockIds, List<String> savedMockIds,
-                          List<MockConfigView> mocks, WireMockVersionView wireMock, RoutingView routing) {
-            this(resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing,
-                    wireMock.version(), List.of(), null);
-        }
+                             List<MockConfigView> mocks, RoutingView routing, String defaultVersion,
+                             List<VersionView> versions, String catalogResourceVersion) {
     }
 
     public record OptionCatalogView(String wireMockVersion, String catalogStatus,
@@ -474,10 +457,6 @@ public class WireMockConfigService {
             return new PublicOptionDefinition(option.name(), option.label(), option.kind(), option.group(),
                     option.description(), option.values(), option.minimum(), option.maximum());
         }
-    }
-
-    public record WireMockVersionView(String configuredImage, String version, String minimumSupportedVersion,
-                                      String maximumResearchedVersion, String rangeStatus) {
     }
 
     public record MockConfigView(String mockId, MockLifecycleStatus lifecycle, ConfigData baseline, ConfigData user,

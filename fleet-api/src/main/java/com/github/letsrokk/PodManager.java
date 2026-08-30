@@ -227,7 +227,7 @@ public class PodManager {
         MockPodRef pod = podState.getPod(mockId);
         MockPodLifecycle lifecycle = podState.lifecycle(mockId);
         return new MockPodStatus(mockId, lifecycle.podName(), lifecycle.status(), lifecycle.message(),
-                pod == null ? null : pod.runtimeVersion());
+                pod == null ? null : runtimeVersion(mockId, pod));
     }
 
     private MockPodRef startClaimedMock(String mockId, String attemptId, String previousPodName) {
@@ -418,10 +418,34 @@ public class PodManager {
         });
         podState.getPods().entrySet().forEach(entry -> mocks.put(entry.getKey(),
                 new MockPodStatus(entry.getKey(), entry.getValue().podName(), MockLifecycleStatus.RUNNING, null,
-                        entry.getValue().runtimeVersion())));
+                        runtimeVersion(entry.getKey(), entry.getValue()))));
         return mocks.values().stream()
                 .sorted(Comparator.comparing(MockPodStatus::mockId))
                 .toList();
+    }
+
+    private String runtimeVersion(String mockId, MockPodRef ref) {
+        if (ref.runtimeVersion() != null && !ref.runtimeVersion().isBlank()) {
+            return ref.runtimeVersion();
+        }
+        try {
+            Pod pod = kubernetesClient.pods().inNamespace(currentNamespace()).withName(ref.podName()).get();
+            if (pod == null || pod.getSpec() == null || pod.getSpec().getContainers() == null) {
+                return null;
+            }
+            String image = pod.getSpec().getContainers().stream()
+                    .filter(container -> Objects.equals(config.wiremockContainerName(), container.getName()))
+                    .map(container -> container.getImage())
+                    .findFirst()
+                    .orElse(null);
+            String recovered = WireMockVersion.parseImage(image).toString();
+            podState.backfillRuntimeVersion(mockId, ref, recovered);
+            return recovered;
+        } catch (RuntimeException error) {
+            LOG.warnf(error, "Could not recover WireMock runtime version for mock id '%s' from pod '%s'.",
+                    mockId, ref.podName());
+            return null;
+        }
     }
 
     public DeleteMockResult deleteMock(String mockId) {

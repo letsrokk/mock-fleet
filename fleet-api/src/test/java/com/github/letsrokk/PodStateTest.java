@@ -32,6 +32,20 @@ import org.mockito.ArgumentCaptor;
 class PodStateTest {
 
     @Test
+    void backfillRuntimeVersionUsesConditionalDistributedMapReplacement() {
+        IMap<String, MockPodRef> pods = podMap();
+        PodState podState = podStateWithMaps(pods, lifecycleMap());
+        MockPodRef legacy = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        when(pods.replace("demo", legacy,
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1", "3.13.2"))).thenReturn(true);
+
+        assertEquals(true, podState.backfillRuntimeVersion("demo", legacy, "3.13.2"));
+
+        verify(pods).replace("demo", legacy,
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1", "3.13.2"));
+    }
+
+    @Test
     void failedLifecycleWithCleanupTargetExpiresAfterRetentionWindow() {
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap(), lifecycleMap);

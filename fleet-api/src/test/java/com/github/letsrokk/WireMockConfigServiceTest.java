@@ -62,6 +62,42 @@ class WireMockConfigServiceTest {
     }
 
     @Test
+    void viewDerivesEveryMockFieldFromOneCapturedSnapshot() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        WireMockOptions options = mock(WireMockOptions.class);
+        WireMockConfigDocument baseline = WireMockConfigDocument.load("""
+                wiremock:
+                  default:
+                    options: [--verbose]
+                  mocks:
+                    - id: demo
+                      version: 3.12.1
+                """);
+        WireMockConfigDocument user = WireMockConfigDocument.empty();
+        WireMockConfigDocument effective = baseline.merge(user);
+        WireMockVersionCatalog catalog = versionCatalog();
+        when(options.setUserConfigAndSnapshot(any())).thenReturn(
+                new WireMockOptions.ConfigSnapshot(baseline, user, effective, catalog));
+        when(options.explicitVersion(baseline, "demo")).thenReturn("3.12.1");
+        when(options.desiredVersionFor("demo", effective, catalog)).thenReturn(WireMockVersion.parse("3.12.1"));
+        service.wireMockOptions = options;
+
+        WireMockConfigService.ConfigView view = service.view();
+
+        assertEquals("3.12.1", view.mocks().getFirst().baseline().version());
+        assertEquals(List.of("--verbose"), view.mocks().getFirst().effective().options());
+        assertEquals("3.12.1", view.mocks().getFirst().wireMockVersion());
+        verify(options, never()).baselineConfig();
+        verify(options, never()).effectiveConfig();
+        verify(options, never()).catalog();
+    }
+
+    @Test
     void rejectsRetainedVersionAsANewSelection() {
         WireMockConfigService service = serviceWithUserConfig("""
                 wiremock:

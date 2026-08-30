@@ -9,13 +9,72 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class WireMockOptionsTest {
+
+    @Test
+    void configSnapshotCannotMixAConcurrentWatchUpdateIntoItsEffectiveView() throws Exception {
+        WireMockOptions options = new WireMockOptions();
+        WireMockVersionCatalogService catalogs = mock(WireMockVersionCatalogService.class);
+        WireMockVersion version = WireMockVersion.parse("3.13.2");
+        WireMockVersionCatalog catalog = new WireMockVersionCatalog(version, Map.of(version,
+                new WireMockVersionCatalog.VersionEntry(version, "wiremock/wiremock:3.13.2-2", true)), "17");
+        CountDownLatch catalogRead = new CountDownLatch(1);
+        CountDownLatch releaseCatalog = new CountDownLatch(1);
+        when(catalogs.catalog()).thenAnswer(invocation -> {
+            catalogRead.countDown();
+            releaseCatalog.await(5, TimeUnit.SECONDS);
+            return catalog;
+        });
+        options.catalogService = catalogs;
+        WireMockConfigDocument first = WireMockConfigDocument.load("""
+                wiremock:
+                  default: {options: [--verbose]}
+                  mocks: []
+                """);
+        WireMockConfigDocument watchUpdate = WireMockConfigDocument.load("""
+                wiremock:
+                  default: {options: [--disable-gzip]}
+                  mocks: []
+                """);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<WireMockOptions.ConfigSnapshot> snapshot = executor.submit(
+                    () -> options.setUserConfigAndSnapshot(first));
+            assertTrue(catalogRead.await(5, TimeUnit.SECONDS));
+            CountDownLatch updateAttempted = new CountDownLatch(1);
+            Future<?> update = executor.submit(() -> {
+                updateAttempted.countDown();
+                options.setUserConfig(watchUpdate);
+            });
+            assertTrue(updateAttempted.await(5, TimeUnit.SECONDS));
+            assertFalse(update.isDone());
+
+            releaseCatalog.countDown();
+            WireMockOptions.ConfigSnapshot captured = snapshot.get(5, TimeUnit.SECONDS);
+            update.get(5, TimeUnit.SECONDS);
+
+            assertEquals(List.of("--verbose"), captured.user().defaultOptions());
+            assertEquals(List.of("--verbose"), captured.effective().defaultOptions());
+            assertEquals(catalog, captured.catalog());
+            assertEquals(List.of("--disable-gzip"), options.userConfig().defaultOptions());
+        } finally {
+            releaseCatalog.countDown();
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     void userEntryWithoutVersionClearsBaselinePinWhileAbsentEntryPreservesIt() {

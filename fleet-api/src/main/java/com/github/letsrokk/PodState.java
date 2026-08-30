@@ -59,6 +59,14 @@ public class PodState {
         return this.podMap.get(mockId);
     }
 
+    public boolean backfillRuntimeVersion(String mockId, MockPodRef expected, String runtimeVersion) {
+        if (expected == null || runtimeVersion == null) {
+            return false;
+        }
+        return podMap.replace(mockId, expected,
+                new MockPodRef(expected.podName(), expected.podIp(), runtimeVersion));
+    }
+
     public StartClaim claimStart(String mockId, long nowEpochMillis, long startupLeaseMillis) {
         return withCapacityLock(() -> {
             podLifecycleMap.lock(mockId);

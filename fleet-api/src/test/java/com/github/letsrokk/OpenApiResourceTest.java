@@ -138,7 +138,7 @@ class OpenApiResourceTest {
     }
 
     @Test
-    void documentsConfiguredWireMockVersionMetadata() throws Exception {
+    void documentsClosedPerMockVersionContractsWithoutLegacyGlobalVersionView() throws Exception {
         String document = given()
                 .queryParam("format", "json")
         .when()
@@ -149,17 +149,42 @@ class OpenApiResourceTest {
         JsonNode schemas = new ObjectMapper().readTree(document).path("components").path("schemas");
 
         JsonNode config = schemas.path("ConfigView");
-        assertTrue(config.path("required").toString().contains("wireMock"));
-        assertEquals("#/components/schemas/WireMockVersionView",
-                config.path("properties").path("wireMock").path("$ref").asText());
-        assertTrue(config.path("required").toString().contains("defaultVersion"));
-        assertTrue(config.path("required").toString().contains("versions"));
-        assertTrue(config.path("required").toString().contains("catalogResourceVersion"));
+        assertClosedObject(config, Set.of("resourceVersion", "mockIds", "savedMockIds", "mocks", "routing",
+                "defaultVersion", "versions", "catalogResourceVersion"));
+        assertFalse(schemas.has("WireMockVersionView"));
 
         JsonNode mock = schemas.path("MockConfigView");
-        assertTrue(mock.path("required").toString().contains("wireMockVersion"));
-        assertTrue(mock.path("required").toString().contains("runtimeVersion"));
+        assertClosedObject(mock, Set.of("mockId", "lifecycle", "baseline", "user", "effective",
+                "wireMockVersion", "runtimeVersion"));
+        assertClosedObject(schemas.path("MockRow"), Set.of("mockId", "podName", "status", "message",
+                "wireMockVersion", "runtimeVersion"));
+        assertClosedObject(schemas.path("MockLifecycleResponse"),
+                Set.of("mockId", "status", "podName", "message", "retryAfterMs"));
+        assertClosedObject(schemas.path("ResolvedConfigData"), Set.of("version", "options", "resources"));
+        assertClosedObject(schemas.path("UserConfigData"), Set.of("version", "options", "resources"));
+        assertClosedObject(schemas.path("RoutingView"), Set.of("mode", "host"));
+        assertClosedObject(schemas.path("ConfigMutationResult"), Set.of("config", "apply"));
+        assertClosedObject(schemas.path("ApplyResult"), Set.of("mockId", "mode", "lifecycle"));
+        assertClosedObject(schemas.path("ResourceData"), Set.of("requests", "limits"), Set.of());
+        assertClosedObject(schemas.path("ConfigUpdateRequest"),
+                Set.of("resourceVersion", "wireMockVersion", "options", "resources", "applyMode"), Set.of());
+        assertClosedObject(schemas.path("ConfigDeleteRequest"), Set.of("resourceVersion", "applyMode"), Set.of());
+        assertEquals("^3\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$",
+                mock.path("properties").path("wireMockVersion").path("pattern").asText());
+    }
 
+    private void assertClosedObject(JsonNode schema, Set<String> expectedProperties) {
+        assertClosedObject(schema, expectedProperties, expectedProperties);
+    }
+
+    private void assertClosedObject(JsonNode schema, Set<String> expectedProperties, Set<String> expectedRequired) {
+        Set<String> properties = new HashSet<>();
+        schema.path("properties").fieldNames().forEachRemaining(properties::add);
+        Set<String> required = new HashSet<>();
+        schema.path("required").forEach(node -> required.add(node.asText()));
+        assertEquals(expectedProperties, properties);
+        assertEquals(expectedRequired, required);
+        assertFalse(schema.path("additionalProperties").asBoolean());
     }
 
     @Test

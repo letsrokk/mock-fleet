@@ -498,6 +498,79 @@ class PodManagerTest {
     }
 
     @Test
+    void listMocksRecoversAndBackfillsLegacyRuntimeVersionFromLivePod() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodRef> pods = mock(IMap.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        KubernetesClient client = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked") MixedOperation<Pod, PodList, PodResource> podOperations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked") NonNamespaceOperation<Pod, PodList, PodResource> namespaced = mock(NonNamespaceOperation.class);
+        PodResource resource = mock(PodResource.class);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockPodRef legacy = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        Pod live = new PodBuilder().withNewSpec().addNewContainer()
+                .withName("wiremock").withImage("wiremock/wiremock:3.13.2-2").endContainer().endSpec().build();
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+        podManager.kubernetesClient = client;
+        podManager.config = config;
+        when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
+        when(pods.entrySet()).thenReturn(Map.of("demo", legacy).entrySet());
+        when(lifecycles.entrySet()).thenReturn(Map.<String, MockPodLifecycle>of().entrySet());
+        when(client.getNamespace()).thenReturn("test");
+        when(config.wiremockContainerName()).thenReturn("wiremock");
+        when(client.pods()).thenReturn(podOperations);
+        when(podOperations.inNamespace("test")).thenReturn(namespaced);
+        when(namespaced.withName("mock-fleet-demo-1")).thenReturn(resource);
+        when(resource.get()).thenReturn(live);
+
+        assertEquals("3.13.2", podManager.listMocks().get(0).runtimeVersion());
+        verify(podState).backfillRuntimeVersion("demo", legacy, "3.13.2");
+    }
+
+    @Test
+    void listMocksLeavesLegacyRuntimeUnknownWhenLiveImageIsInvalid() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodRef> pods = mock(IMap.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        KubernetesClient client = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
+        MockFleetConfig config = mock(MockFleetConfig.class);
+        MockPodRef legacy = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+        podManager.kubernetesClient = client;
+        podManager.config = config;
+        when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
+        when(pods.entrySet()).thenReturn(Map.of("demo", legacy).entrySet());
+        when(lifecycles.entrySet()).thenReturn(Map.<String, MockPodLifecycle>of().entrySet());
+        when(client.getNamespace()).thenReturn("test");
+
+        assertEquals(null, podManager.listMocks().get(0).runtimeVersion());
+        verify(podState, never()).backfillRuntimeVersion(anyString(), any(), anyString());
+    }
+
+    @Test
+    void listMocksDoesNotFetchPodsWhenRuntimeVersionIsAlreadyKnown() {
+        PodState podState = mock(PodState.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodRef> pods = mock(IMap.class);
+        @SuppressWarnings("unchecked") IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
+        KubernetesClient client = mock(KubernetesClient.class);
+        PodManager podManager = new PodManager();
+        podManager.podState = podState;
+        podManager.kubernetesClient = client;
+        when(podState.getPods()).thenReturn(pods);
+        when(podState.getPodLifecycles()).thenReturn(lifecycles);
+        when(pods.entrySet()).thenReturn(Map.of("demo",
+                new MockPodRef("mock-fleet-demo-1", "10.0.0.1", "3.12.1")).entrySet());
+        when(lifecycles.entrySet()).thenReturn(Map.<String, MockPodLifecycle>of().entrySet());
+
+        assertEquals("3.12.1", podManager.listMocks().get(0).runtimeVersion());
+        verify(client, never()).pods();
+    }
+
+    @Test
     void listMocksOmitsStoppedDeletionRetryState() {
         PodState podState = mock(PodState.class);
         @SuppressWarnings("unchecked")

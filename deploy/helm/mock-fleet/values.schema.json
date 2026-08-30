@@ -259,10 +259,12 @@
           "properties": {
             "default": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "options": { "type": "array", "items": { "type": "string" } },
                 "resources": {
                   "type": "object",
+                  "additionalProperties": false,
                   "properties": {
                     "requests": { "$ref": "#/definitions/resourcePair" },
                     "limits": { "$ref": "#/definitions/resourcePair" }
@@ -276,6 +278,7 @@
               "type": "array",
               "items": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "id": { "type": "string", "minLength": 1 },
                   "version": {
@@ -283,7 +286,14 @@
                     "pattern": "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
                   },
                   "options": { "type": "array", "items": { "type": "string" } },
-                  "resources": { "type": "object" }
+                  "resources": {
+                    "type": ["object", "null"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "requests": { "$ref": "#/definitions/partialResourcePair" },
+                      "limits": { "$ref": "#/definitions/partialResourcePair" }
+                    }
+                  }
                 },
                 "required": ["id"]
               }
@@ -420,6 +430,14 @@
         "memory": { "$ref": "#/definitions/resourceQuantity" }
       },
       "required": ["cpu", "memory"],
+      "additionalProperties": false
+    },
+    "partialResourcePair": {
+      "type": "object",
+      "properties": {
+        "cpu": { "$ref": "#/definitions/resourceQuantity" },
+        "memory": { "$ref": "#/definitions/resourceQuantity" }
+      },
       "additionalProperties": false
     }
   }

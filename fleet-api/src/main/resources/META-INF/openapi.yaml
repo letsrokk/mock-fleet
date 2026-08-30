@@ -281,6 +281,7 @@ components:
       enum: [STOPPED, STARTING, RUNNING, FAILED]
     MockRow:
       type: object
+      additionalProperties: false
       required: [mockId, podName, status, message, wireMockVersion, runtimeVersion]
       properties:
         mockId: { type: string }
@@ -288,10 +289,11 @@ components:
         status:
           $ref: "#/components/schemas/MockLifecycle"
         message: { type: [string, "null"] }
-        wireMockVersion: { type: string }
-        runtimeVersion: { type: [string, "null"] }
+        wireMockVersion: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
+        runtimeVersion: { type: [string, "null"], pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
     MockLifecycleResponse:
       type: object
+      additionalProperties: false
       required: [mockId, status, podName, message, retryAfterMs]
       properties:
         mockId: { type: string }
@@ -316,6 +318,7 @@ components:
           additionalProperties: true
     ResourceData:
       type: object
+      additionalProperties: false
       properties:
         requests:
           type: object
@@ -325,9 +328,10 @@ components:
           additionalProperties: { type: string }
     ResolvedConfigData:
       type: object
+      additionalProperties: false
       required: [version, options, resources]
       properties:
-        version: { type: [string, "null"] }
+        version: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         options:
           type: array
           items: { type: string }
@@ -335,9 +339,10 @@ components:
           $ref: "#/components/schemas/ResourceData"
     UserConfigData:
       type: object
+      additionalProperties: false
       required: [version, options, resources]
       properties:
-        version: { type: [string, "null"] }
+        version: { type: [string, "null"], pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         options:
           type: array
           items: { type: string }
@@ -347,25 +352,26 @@ components:
             - type: "null"
     MockConfigView:
       type: object
+      additionalProperties: false
       required: [mockId, lifecycle, baseline, user, effective, wireMockVersion, runtimeVersion]
       properties:
         mockId: { type: string }
         lifecycle:
           $ref: "#/components/schemas/MockLifecycle"
         baseline:
-          $ref: "#/components/schemas/ResolvedConfigData"
+          $ref: "#/components/schemas/UserConfigData"
         user:
           $ref: "#/components/schemas/UserConfigData"
         effective:
           $ref: "#/components/schemas/ResolvedConfigData"
-        wireMockVersion: { type: string }
-        runtimeVersion: { type: [string, "null"] }
+        wireMockVersion: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
+        runtimeVersion: { type: [string, "null"], pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
     VersionView:
       type: object
       additionalProperties: false
       required: [version, image, selectable]
       properties:
-        version: { type: string }
+        version: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         image: { type: string }
         selectable: { type: boolean }
     PublicOptionDefinition:
@@ -394,24 +400,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PublicOptionDefinition"
-    WireMockVersionView:
-      type: object
-      required: [configuredImage, version, minimumSupportedVersion, maximumResearchedVersion, rangeStatus]
-      properties:
-        configuredImage: { type: string }
-        version: { type: string }
-        minimumSupportedVersion: { type: string }
-        maximumResearchedVersion: { type: string }
-        rangeStatus: { type: string, enum: [supported, newer_unresearched] }
     RoutingView:
       type: object
+      additionalProperties: false
       required: [mode, host]
       properties:
         mode: { type: string, enum: [HOST, PATH] }
         host: { type: string }
     ConfigView:
       type: object
-      required: [resourceVersion, mockIds, savedMockIds, mocks, wireMock, routing, defaultVersion, versions, catalogResourceVersion]
+      additionalProperties: false
+      required: [resourceVersion, mockIds, savedMockIds, mocks, routing, defaultVersion, versions, catalogResourceVersion]
       properties:
         resourceVersion: { type: [string, "null"] }
         mockIds:
@@ -424,11 +423,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MockConfigView"
-        wireMock:
-          $ref: "#/components/schemas/WireMockVersionView"
         routing:
           $ref: "#/components/schemas/RoutingView"
-        defaultVersion: { type: string }
+        defaultVersion: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         versions:
           type: array
           items:
@@ -436,6 +433,7 @@ components:
         catalogResourceVersion: { type: [string, "null"] }
     ConfigUpdateRequest:
       type: object
+      additionalProperties: false
       properties:
         resourceVersion: { type: [string, "null"] }
         wireMockVersion:
@@ -451,11 +449,13 @@ components:
         applyMode: { type: string, enum: [futureOnly, restartActive] }
     ConfigDeleteRequest:
       type: object
+      additionalProperties: false
       properties:
         resourceVersion: { type: [string, "null"] }
         applyMode: { type: string, enum: [futureOnly, restartActive] }
     ApplyResult:
       type: object
+      additionalProperties: false
       required: [mockId, mode, lifecycle]
       properties:
         mockId: { type: string }
@@ -464,6 +464,7 @@ components:
           $ref: "#/components/schemas/MockLifecycle"
     ConfigMutationResult:
       type: object
+      additionalProperties: false
       required: [config, apply]
       properties:
         config:

@@ -426,3 +426,17 @@ for arguments in "${invalid_catalog_values[@]}"; do
     exit 1
   fi
 done
+
+invalid_config_keys=(
+  '--set wiremock.config.default.optionz=true'
+  '--set-json wiremock.config.mocks=[{"id":"demo","versoin":"3.13.2"}]'
+  '--set-json wiremock.config.mocks=[{"id":"demo","resources":{"requestz":{"cpu":"1"}}}]'
+  '--set-json wiremock.config.mocks=[{"id":"demo","resources":{"requests":{"cpux":"1"}}}]'
+)
+for arguments in "${invalid_config_keys[@]}"; do
+  read -r -a config_args <<<"${arguments}"
+  if helm template invalid "${chart_dir}" "${config_args[@]}" >/dev/null 2>&1; then
+    echo "Releases must reject unknown WireMock config keys: ${arguments}" >&2
+    exit 1
+  fi
+done
