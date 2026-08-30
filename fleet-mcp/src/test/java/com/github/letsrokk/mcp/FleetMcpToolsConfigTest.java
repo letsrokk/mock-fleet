@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.vertx.core.Vertx;
@@ -110,6 +111,35 @@ class FleetMcpToolsConfigTest {
         assertEquals(mapper.readTree("[\"zeta\"]"), mockIds(second));
         assertFalse(second.path("page").path("hasMore").asBoolean());
         assertEquals(List.of("GET /__fleet/api/config", "GET /__fleet/api/config"), requests);
+    }
+
+    @Test
+    void rejectsDuplicateMockRowsAsAnInvalidUpstreamResponse() throws Exception {
+        ObjectNode invalid = (ObjectNode) mapper.readTree(CONFIG_VIEW);
+        ArrayNode mocks = (ArrayNode) invalid.path("mocks");
+        mocks.add(mocks.get(0).deepCopy());
+        responseBody = mapper.writeValueAsString(invalid);
+
+        var response = tools.listMocks(null, null);
+
+        assertTrue(response.isError());
+        assertEquals("INVALID_UPSTREAM_RESPONSE",
+                ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
+    }
+
+    @Test
+    void rejectsNonTextSavedMockIdsAsAnInvalidUpstreamResponse() throws Exception {
+        ObjectNode invalid = (ObjectNode) mapper.readTree(CONFIG_VIEW);
+        ((ArrayNode) invalid.path("savedMockIds")).set(0, mapper.getNodeFactory().numberNode(42));
+        responseBody = mapper.writeValueAsString(invalid);
+
+        var response = tools.listMocks(null, null);
+
+        assertTrue(response.isError());
+        assertEquals("INVALID_UPSTREAM_RESPONSE",
+                ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error().code());
+        assertEquals(List.of("GET /__fleet/api/config"), requests);
     }
 
     @Test

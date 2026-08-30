@@ -774,14 +774,21 @@ public final class FleetMcpTools {
         }
 
         Set<String> saved = new HashSet<>();
-        savedMockIds.forEach(mockId -> {
-            if (mockId.isTextual()) {
-                saved.add(mockId.asText());
+        for (JsonNode mockId : savedMockIds) {
+            if (!mockId.isTextual()) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config savedMockIds must contain only strings", false, Map.of());
             }
-        });
+            saved.add(mockId.asText());
+        }
         List<ObjectNode> rows = new ArrayList<>();
+        Set<String> seenMockIds = new HashSet<>();
         for (JsonNode mock : mocks) {
             String mockId = requiredInventoryText(mock, "mockId");
+            if (!seenMockIds.add(mockId)) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                        "Fleet API config contains duplicate mock rows", false, Map.of("mockId", mockId));
+            }
             ObjectNode row = mapper.createObjectNode();
             row.put("mockId", mockId);
             row.put("lifecycle", requiredInventoryText(mock, "lifecycle"));
