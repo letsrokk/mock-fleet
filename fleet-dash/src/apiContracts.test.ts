@@ -70,6 +70,69 @@ describe("Fleet API dashboard contracts", () => {
     );
   });
 
+  it("does not repeat a structured detail already present in the error message", async () => {
+    const response = new Response(JSON.stringify({
+      code: "INVALID_OPTIONS",
+      message: "WireMock option requires a value: --disable-connection-reuse",
+      retryable: false,
+      stateMayHaveChanged: false,
+      details: { option: "--disable-connection-reuse" }
+    }), { status: 400, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+      "WireMock option requires a value: --disable-connection-reuse [INVALID_OPTIONS]"
+    );
+  });
+
+  it("keeps distinct details with matching values and option-name prefixes", async () => {
+    const response = new Response(JSON.stringify({
+      code: "CONFIG_CONFLICT",
+      message: "Unknown option --foobar; expected version 42.",
+      retryable: true,
+      stateMayHaveChanged: false,
+      details: { option: "--foo", expectedVersion: "42", currentVersion: "42" }
+    }), { status: 409, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+      "Unknown option --foobar; expected version 42. [CONFIG_CONFLICT] "
+      + "option=--foo, expectedVersion=42, currentVersion=42"
+    );
+  });
+
+  it("does not repeat other structured details embedded in their messages", async () => {
+    for (const [message, details] of [
+      ["Unsupported WireMock resource: gpu", { resource: "gpu" }],
+      ["Invalid WireMock resource quantity: requests.cpu", { field: "requests.cpu" }],
+      ["Unsupported config apply mode: restartNever", { applyMode: "restartNever" }]
+    ] as const) {
+      const response = new Response(JSON.stringify({
+        code: "INVALID_REQUEST",
+        message,
+        retryable: false,
+        stateMayHaveChanged: false,
+        details
+      }), { status: 400, headers: { "Content-Type": "application/json" } });
+
+      await expect(errorMessage(response, "Unable to save config.")).resolves.toBe(
+        `${message} [INVALID_REQUEST]`
+      );
+    }
+  });
+
+  it("keeps an empty detail that is not present in the message", async () => {
+    const response = new Response(JSON.stringify({
+      code: "MAPPING_FOLDER_NOT_FOUND",
+      message: "Mappings folder not found.",
+      retryable: false,
+      stateMayHaveChanged: false,
+      details: { path: "" }
+    }), { status: 404, headers: { "Content-Type": "application/json" } });
+
+    await expect(errorMessage(response, "Unable to load mappings.")).resolves.toBe(
+      "Mappings folder not found. [MAPPING_FOLDER_NOT_FOUND] path="
+    );
+  });
+
   it("keeps a non-JSON server message instead of replacing it with a client rule", async () => {
     const response = new Response("Mappings storage is unavailable.", { status: 503 });
 

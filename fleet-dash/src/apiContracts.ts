@@ -85,7 +85,15 @@ export async function errorMessage(response: Response, fallback: string) {
   try {
     const parsed = JSON.parse(text) as unknown;
     if (isApiError(parsed)) {
-      const details = Object.entries(parsed.details)
+      const detailEntries = Object.entries(parsed.details);
+      const detailValueCounts = detailEntries.reduce((counts, [, value]) => {
+        const formatted = formatDetail(value);
+        counts.set(formatted, (counts.get(formatted) ?? 0) + 1);
+        return counts;
+      }, new Map<string, number>());
+      const details = detailEntries
+        .filter(([, value]) => detailValueCounts.get(formatDetail(value)) !== 1
+          || !containsExactDetail(parsed.message, value))
         .map(([key, value]) => `${key}=${formatDetail(value)}`)
         .join(", ");
       return `${parsed.message} [${parsed.code}]${details ? ` ${details}` : ""}`;
@@ -94,6 +102,15 @@ export async function errorMessage(response: Response, fallback: string) {
     // A non-JSON response is still useful server feedback.
   }
   return text;
+}
+
+function containsExactDetail(message: string, value: unknown) {
+  const formattedValue = formatDetail(value);
+  if (!formattedValue) {
+    return false;
+  }
+  const escapedValue = formattedValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\w-])${escapedValue}(?=$|[^\\w-])`).test(message);
 }
 
 function isApiError(value: unknown): value is ApiError {

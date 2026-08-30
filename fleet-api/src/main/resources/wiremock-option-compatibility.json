@@ -96,7 +96,7 @@
     { "name": "--record-mappings" },
     { "name": "--root-dir" },
     { "name": "--supported-proxy-encodings", "minimumVersion": "3.6.0" },
-    { "name": "--timeout" },
+    { "name": "--timeout", "unavailableReason": "INCONSISTENT_VALUE_HANDLING" },
     { "name": "--trust-all-proxy-targets" },
     { "name": "--trust-proxy-target" },
     { "name": "--truststore-password", "unavailableReason": "SECRET_STORAGE_REQUIRED" },

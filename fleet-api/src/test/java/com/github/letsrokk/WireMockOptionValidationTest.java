@@ -78,6 +78,25 @@ class WireMockOptionValidationTest {
     }
 
     @Test
+    void normalizesLegacyValuelessBooleanOptionsToTrueBeforePersistence() {
+        Fixture fixture = fixture();
+
+        fixture.service.upsertMockConfig("demo", request(List.of(
+                "--proxy-pass-through",
+                "--disable-connection-reuse",
+                "--async-response-enabled")));
+
+        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespacedConfigMaps).resource(persisted.capture());
+        assertEquals(List.of(
+                        "--proxy-pass-through", "true",
+                        "--disable-connection-reuse", "true",
+                        "--async-response-enabled", "true"),
+                WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
+                        .mockConfigs().get("demo").options());
+    }
+
+    @Test
     void rejectsPasswordOptionsInSplitAndEqualsFormsWithoutDisclosingValues() {
         List.of(
                 "--admin-api-basic-auth",
@@ -129,22 +148,13 @@ class WireMockOptionValidationTest {
     }
 
     @Test
-    void persistsTimeoutOnlyWhenItHasAValue() {
-        Fixture fixture = fixture();
-
-        fixture.service.upsertMockConfig("demo", request(List.of("--timeout", "10000")));
-
-        ArgumentCaptor<ConfigMap> persisted = ArgumentCaptor.forClass(ConfigMap.class);
-        verify(fixture.namespacedConfigMaps).resource(persisted.capture());
-        assertEquals(List.of("--timeout", "10000"),
-                WireMockConfigDocument.load(persisted.getValue().getData().get("wiremock-options.yaml"))
-                        .mockConfigs().get("demo").options());
-
-        Fixture inlineFixture = fixture();
-        inlineFixture.service.upsertMockConfig("demo", request(List.of("--timeout=2500")));
-        verify(inlineFixture.namespacedConfigMaps).resource(any());
-
-        assertInvalid(List.of("--timeout"), "WireMock option requires a value: --timeout");
+    void rejectsTimeoutBecauseWireMockCannotAcceptItsRequiredValue() {
+        for (List<String> syntax : List.of(List.of("--timeout"), List.of("--timeout", "10000"),
+                List.of("--timeout=2500"))) {
+            assertInvalid(syntax,
+                    "WireMock option is unavailable because its CLI definition cannot accept the value it requires: "
+                            + "--timeout");
+        }
     }
 
     @Test
