@@ -480,6 +480,14 @@ h1 {
   border-bottom: 1px solid var(--border);
 }
 
+.config-transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 .add-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -833,6 +841,7 @@ tr:last-child td { border-bottom: 0; }
 
 .editor-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   padding: 14px 18px;

@@ -50,6 +50,7 @@ class FleetMcpToolsConfigTest {
     private FleetApiClient fleetApi;
     private FleetMcpTools tools;
     private String responseBody;
+    private String requestBody;
 
     @BeforeEach
     void startServer() {
@@ -57,6 +58,7 @@ class FleetMcpToolsConfigTest {
         vertx = Vertx.vertx();
         server = vertx.createHttpServer().requestHandler(request -> request.bodyHandler(body -> {
             requests.add(request.method().name() + " " + request.uri());
+            requestBody = body.toString();
             request.response().putHeader("Content-Type", "application/json").end(responseBody);
         })).listen(0, "127.0.0.1").toCompletionStage().toCompletableFuture().join();
         var registry = new SimpleMeterRegistry();
@@ -72,6 +74,91 @@ class FleetMcpToolsConfigTest {
         fleetApi.close();
         server.close().toCompletionStage().toCompletableFuture().join();
         vertx.close().toCompletionStage().toCompletableFuture().join();
+    }
+
+    @Test
+    void exportsOnlySavedOverridesAndImportsTheSameArray() throws Exception {
+        var exported = tools.exportMockConfigs(null);
+        assertFalse(exported.isError(), exported.toString());
+        ObjectNode result = (ObjectNode) exported.structuredContent();
+        assertEquals("42", result.path("resourceVersion").asText());
+        assertEquals(2, result.path("mocks").size());
+        assertEquals("alpha", result.path("mocks").get(0).path("mockId").asText());
+        assertEquals(4, result.path("mocks").get(0).size());
+        assertTrue(result.path("mocks").get(1).path("version").isNull());
+
+        var imported = tools.importMockConfigs("42", mapper.convertValue(result.path("mocks"),
+                new com.fasterxml.jackson.core.type.TypeReference<List<java.util.Map<String, Object>>>() {}), null);
+        assertFalse(imported.isError(), imported.toString());
+        assertEquals(mapper.readTree("[\"alpha\",\"zeta\"]"),
+                ((ObjectNode) imported.structuredContent()).path("importedMockIds"));
+        assertEquals(result, mapper.readTree(requestBody));
+        assertEquals(List.of("GET /__fleet/api/config", "POST /__fleet/api/config/import"), requests);
+    }
+
+    @Test
+    void rejectsMalformedSavedVersionsWithoutReportingImportSuccess() throws Exception {
+        ObjectNode view = (ObjectNode) mapper.readTree(CONFIG_VIEW);
+        ((ObjectNode) view.path("mocks").get(0).path("user")).put("version", "latest");
+        responseBody = view.toString();
+        var exported = tools.exportMockConfigs(null);
+        assertEquals("INVALID_UPSTREAM_RESPONSE", ((McpToolExecutor.ErrorEnvelope) exported.structuredContent()).error().code());
+        var imported = tools.importMockConfigs("41", List.of(), null);
+        var error = ((McpToolExecutor.ErrorEnvelope) imported.structuredContent()).error();
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void exportsOneSavedMockAndRejectsRuntimeOnlyMocks() {
+        var exported = tools.exportMockConfigs("alpha");
+        assertFalse(exported.isError());
+        assertEquals(1, ((ObjectNode) exported.structuredContent()).path("mocks").size());
+        var missing = tools.exportMockConfigs("runtime-only");
+        assertEquals("NOT_FOUND", ((McpToolExecutor.ErrorEnvelope) missing.structuredContent()).error().code());
+    }
+
+    @Test
+    void importsSingleEntryUnderTheTargetIdWithoutModifyingTheSource() throws Exception {
+        var entry = new java.util.LinkedHashMap<String, Object>();
+        entry.put("mockId", "source");
+        entry.put("version", "3.12.1");
+        entry.put("options", List.of("--verbose"));
+        entry.put("resources", java.util.Map.of("requests", java.util.Map.of(), "limits", java.util.Map.of()));
+        var imported = tools.importMockConfigs("41", List.of(entry), "alpha");
+        assertFalse(imported.isError(), imported.toString());
+        assertEquals("alpha", mapper.readTree(requestBody).path("mocks").get(0).path("mockId").asText());
+        assertEquals("source", entry.get("mockId"));
+        assertEquals(List.of("POST /__fleet/api/config/import"), requests);
+    }
+
+    @Test
+    void rejectsInvalidImportsBeforeSendingAndMarksMalformedMutationResponsesUncertain() {
+        var duplicate = java.util.Map.<String, Object>of("mockId", "alpha");
+        assertTrue(tools.importMockConfigs("41", List.of(duplicate, duplicate), null).isError());
+        assertTrue(tools.importMockConfigs("41", List.of(), "alpha").isError());
+        assertTrue(tools.importMockConfigs("41", List.of(java.util.Map.of("mockId", "bad_id")), null).isError());
+        assertEquals(List.of(), requests);
+
+        responseBody = "{}";
+        var malformed = tools.importMockConfigs("41", List.of(), null);
+        var error = ((McpToolExecutor.ErrorEnvelope) malformed.structuredContent()).error();
+        assertEquals("INVALID_UPSTREAM_RESPONSE", error.code());
+        assertTrue(error.stateMayHaveChanged());
+    }
+
+    @Test
+    void rejectsOversizedImportsBeforeSendingAndExportsWithoutTruncation() {
+        var oversized = java.util.Map.<String, Object>of("mockId", "alpha", "options", List.of("x".repeat(5000)));
+        var imported = tools.importMockConfigs("41", List.of(oversized), null);
+        var error = ((McpToolExecutor.ErrorEnvelope) imported.structuredContent()).error();
+        assertEquals("RESULT_TOO_LARGE", error.code());
+        assertFalse(error.stateMayHaveChanged());
+        assertEquals(List.of(), requests);
+
+        responseBody = " ".repeat(5000) + CONFIG_VIEW;
+        var exported = tools.exportMockConfigs(null);
+        assertEquals("RESULT_TOO_LARGE", ((McpToolExecutor.ErrorEnvelope) exported.structuredContent()).error().code());
     }
 
     @Test

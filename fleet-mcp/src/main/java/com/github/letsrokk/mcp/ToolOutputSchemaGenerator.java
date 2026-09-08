@@ -21,6 +21,10 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mocks", array(mockRow()), "page", page()));
             case "GetMockConfig" -> strict(properties(
                     "resourceVersion", nullableString(), "mock", mockConfig(), "routing", routing()));
+            case "ExportMockConfigs" -> strict(properties(
+                    "resourceVersion", nullableString(), "mocks", array(savedMockConfig())));
+            case "ImportMockConfigs" -> strict(properties(
+                    "resourceVersion", nullableString(), "importedMockIds", array(string())));
             case "ListOptionDefinitions" -> strict(properties(
                     "wireMockVersion", versionString(),
                     "catalogStatus", string().put("enum", new JsonArray().add("supported").add("newer_unresearched")),
@@ -127,6 +131,13 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "effective", configData(false, false),
                 "wireMockVersion", versionString(),
                 "runtimeVersion", nullableVersionString()));
+    }
+
+    private JsonObject savedMockConfig() {
+        JsonObject schema = configData(true, true);
+        schema.getJsonObject("properties").put("mockId", string());
+        schema.getJsonArray("required").add("mockId");
+        return schema;
     }
 
     private JsonObject configData(boolean nullableVersion, boolean nullableResources) {

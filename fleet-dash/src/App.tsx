@@ -22,6 +22,7 @@ import {
   loadConfigView,
   loadEditorCatalog
 } from "./configCatalog";
+import { exportMockConfigs, parseMockConfigs, type MockConfigExport } from "./configTransfer";
 import { OptionCatalogPresentation } from "./optionCatalogPresentation";
 import { mockStatusPresentation, type MockStatus } from "./mockStatus";
 import {
@@ -129,6 +130,8 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const importAllInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
   const toastTimerRef = useRef<number | null>(null);
   const optionCollapseStateReadyRef = useRef(hasStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY));
@@ -318,6 +321,68 @@ export default function App() {
       setError(deleteError instanceof Error ? deleteError.message : "Unable to delete mock.");
     } finally {
       setBusyMockId(null);
+    }
+  }
+
+  function exportConfig(mockId?: string) {
+    if (!configView) return;
+    try {
+      const mocks = exportMockConfigs(configView, mockId);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(mocks, null, 2) + "\n"], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = mockId ? `${mockId}-config.json` : "mock-fleet-config.json";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Unable to export config.");
+    }
+  }
+
+  async function requestImportConfig(file: File, targetMockId?: string) {
+    try {
+      const mocks = parseMockConfigs(await file.text(), targetMockId);
+      if (mocks.length === 0) {
+        showToast("No mock configurations to import.");
+        return;
+      }
+      setError(null);
+      setConfirmDialog({
+        title: "Import mock config?",
+        body: `Replace saved overrides or create configs for: ${mocks.map((mock) => mock.mockId).join(", ")}. Other saved mocks are preserved. Changes apply to future pods only; active pods will not restart.${configDirty ? " Unsaved editor changes will be discarded." : ""}`,
+        confirmLabel: "Import",
+        danger: false,
+        onConfirm: () => importConfig(mocks)
+      });
+    } catch (importError) {
+      setError(importError instanceof Error ? importError.message : "Unable to read config file.");
+    }
+  }
+
+  async function importConfig(mocks: MockConfigExport[]) {
+    if (!configView) return;
+    const request = configRequestRef.current.begin();
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${CONFIG_API_PATH}/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resourceVersion: configView.resourceVersion, mocks })
+      });
+      if (!response.ok) throw new Error(await errorMessage(response, "Unable to import config."));
+      const data = normalizeConfigView(await response.json() as ConfigView);
+      const nextSelected = selectedMockId && data.mockIds.includes(selectedMockId)
+        ? selectedMockId : mocks[0].mockId;
+      if (await applyConfigSelection(data, nextSelected, request)) {
+        showToast(`Imported ${mocks.length} mock configuration${mocks.length === 1 ? "" : "s"}. Changes apply to future pods.`);
+      }
+    } catch (importError) {
+      if (configRequestRef.current.isCurrent(request)) {
+        setError(importError instanceof Error ? importError.message : "Unable to import config.");
+      }
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -975,6 +1040,16 @@ export default function App() {
 
     return (
       <section className="config-layout">
+        <input type="file" accept=".json,application/json" hidden ref={importAllInputRef} onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void requestImportConfig(file);
+        }} />
+        <input type="file" accept=".json,application/json" hidden ref={importInputRef} onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file && selectedMockId) void requestImportConfig(file, selectedMockId);
+        }} />
         <aside className="panel mock-list">
           <div className="panel-header">
             <span>
@@ -997,6 +1072,10 @@ export default function App() {
                 )}
               </button>
             </span>
+          </div>
+          <div className="config-transfer-actions">
+            <button className="secondary-button" onClick={() => exportConfig()} disabled={saving}>Export all</button>
+            <button className="secondary-button" onClick={() => importAllInputRef.current?.click()} disabled={saving}>Import all</button>
           </div>
           <div className="add-row">
             <input
@@ -1187,6 +1266,9 @@ export default function App() {
                 </section>
               </div>
               <div className="editor-actions">
+                <button className="secondary-button" onClick={() => exportConfig(selectedMock.mockId)}
+                  disabled={saving || !configView.savedMockIds.includes(selectedMock.mockId)}>Export</button>
+                <button className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={saving}>Import</button>
                 <button
                   className="secondary-button"
                   onClick={requestResetConfig}

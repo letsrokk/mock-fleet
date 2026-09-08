@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 31 tools:
+The server publishes 33 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -15,7 +15,7 @@ list_unmatched_requests    get_near_misses             reset_request_journal
 start_recording            get_recording_status        stop_recording
 snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
-reset_scenarios
+reset_scenarios             export_mock_configs         import_mock_configs
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -74,6 +74,23 @@ Every collection returns `page` with the same metadata:
 Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and waits for an existing pod to be removed before it returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`. Already stopped or absent mocks return STOPPED directly. Pod deletion uses the longer `fleet.mcp.lifecycleTimeout` budget, which must exceed the Fleet API pod-creation timeout. If a mutating Fleet API request times out or loses its response, MCP reports `stateMayHaveChanged: true`; reconcile the lifecycle or config before retrying. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
 
 ## Configuration
+
+`export_mock_configs` exports saved overrides for all mocks, or one saved mock when `mockId` is supplied. It returns `{resourceVersion,mocks}`; save the `mocks` array directly as the same JSON file used by the Config tab. A requested mock without saved overrides returns `NOT_FOUND`. Export excludes inherited settings and unsaved edits, and retains existing sensitive-option redaction. Results are never silently truncated.
+
+`import_mock_configs` accepts `resourceVersion` from the destination's current configuration and a `mocks` array. Matching IDs have their saved overrides replaced; missing IDs are created; other mocks are preserved. Optional `targetMockId` requires exactly one entry and applies it to that ID. Import validates the complete batch and writes once with optimistic concurrency. It affects future pods only, never restarts active mocks, and returns `{resourceVersion,importedMockIds}`. An empty array changes nothing. Existing option, resource, version, and password-option restrictions apply.
+
+Example import arguments (replace `42` with the destination's current resource version):
+
+```json
+{
+  "resourceVersion": "42",
+  "mocks": [
+    {"mockId": "orders", "version": null, "options": ["--verbose"], "resources": null}
+  ]
+}
+```
+
+The same array supports one mock or many. Each entry has `mockId`, nullable `version`, `options`, and nullable `resources`; non-null resources contain `requests` and `limits` maps. Null version/resources inherit destination defaults. The tool response wrapper is not part of the downloadable file.
 
 `list_option_definitions` accepts an optional exact WireMock 3.x `version`. When omitted, it resolves the catalog default version. It forwards the Fleet API catalog unchanged as `{wireMockVersion,catalogStatus,options}`. The catalog contains only public options present in the selected version; hidden or sensitive options are rejected if submitted directly. `catalogStatus` is `supported` or `newer_unresearched`; it describes the catalog as a whole, not individual options.
 

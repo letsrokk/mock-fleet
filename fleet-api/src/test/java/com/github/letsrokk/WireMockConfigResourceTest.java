@@ -24,6 +24,48 @@ class WireMockConfigResourceTest {
     WireMockConfigService configService;
 
     @Test
+    void importsAnArrayAndReturnsTheRefreshedConfig() {
+        var request = new WireMockConfigService.ConfigImportRequest("42", List.of(
+                new WireMockConfigService.ConfigImportEntry("demo", null, List.of("--verbose"), null)));
+        when(configService.importMockConfigs(request)).thenReturn(configView());
+        given().contentType("application/json").body("""
+                {"resourceVersion":"42","mocks":[
+                  {"mockId":"demo","version":null,"options":["--verbose"],"resources":null}
+                ]}
+                """)
+                .when().post("/__fleet/api/config/import")
+                .then().statusCode(200)
+                .body("savedMockIds[0]", is("demo"))
+                .body("resourceVersion", is("42"));
+        verify(configService).importMockConfigs(request);
+    }
+
+    @Test
+    void importPreservesStructuredValidationErrors() {
+        var request = new WireMockConfigService.ConfigImportRequest("41", List.of());
+        doThrow(ApiException.badRequest("INVALID_REQUEST", "Duplicate mock ID in import.", Map.of("mockId", "demo")))
+                .when(configService).importMockConfigs(request);
+        given().contentType("application/json").body(request)
+                .when().post("/__fleet/api/config/import")
+                .then().statusCode(400)
+                .body("code", is("INVALID_REQUEST"))
+                .body("stateMayHaveChanged", is(false));
+    }
+
+    @Test
+    void importRequiresNullableFieldsToBeExplicitBeforeCallingTheService() {
+        for (String entry : List.of(
+                "{\"mockId\":\"demo\",\"options\":[],\"resources\":null}",
+                "{\"mockId\":\"demo\",\"version\":null,\"options\":[]}")) {
+            given().contentType("application/json")
+                    .body("{\"resourceVersion\":\"42\",\"mocks\":[" + entry + "]}")
+                    .when().post("/__fleet/api/config/import")
+                    .then().statusCode(400);
+        }
+        verifyNoMoreInteractions(configService);
+    }
+
+    @Test
     void getsConfig() {
         when(configService.view()).thenReturn(configView());
 

@@ -86,6 +86,79 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "export_mock_configs", description = "Export saved mock overrides as a reusable configuration array; omit mockId to export all. Does not include inherited defaults or start pods.",
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.ExportMockConfigs.class, generator = ToolOutputSchemaGenerator.class),
+            annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse exportMockConfigs(
+            @ToolArg(description = "Saved mock ID; omit to export all saved mocks", required = false) String mockId) {
+        return fleet("export_mock_configs", () -> {
+            if (mockId != null) {
+                MockIdValidator.requireValid(mockId);
+            }
+            JsonNode view = fleetApi.getConfig();
+            ArrayNode mocks = savedConfigs(view);
+            if (mockId != null) {
+                JsonNode selected = requireMockConfig(mocks, mockId, "NOT_FOUND");
+                mocks = mapper.createArrayNode().add(selected);
+            }
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            result.set("mocks", mocks);
+            return McpToolExecutor.ToolResult.of("Exported saved mock configurations.", result);
+        });
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "import_mock_configs", description = "Atomically create or replace saved mock overrides from a configuration array using optimistic concurrency. Preserves other mocks and applies to future pods only.",
+            inputSchema = @Tool.InputSchema(generator = ImportMockConfigsInputSchemaGenerator.class),
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.ImportMockConfigs.class, generator = ToolOutputSchemaGenerator.class),
+            annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    public ToolResponse importMockConfigs(
+            @ToolArg(description = "Current Fleet ConfigMap resourceVersion") String resourceVersion,
+            @ToolArg(description = "Saved mock configuration array, in the same format as exports") List<Map<String, Object>> mocks,
+            @ToolArg(description = "Override the ID of an import containing exactly one mock", required = false) String targetMockId) {
+        return fleet("import_mock_configs", () -> {
+            if (mocks == null) {
+                throw new IllegalArgumentException("mocks is required");
+            }
+            ArrayNode entries = mapper.valueToTree(mocks);
+            if (targetMockId != null) {
+                MockIdValidator.requireValid(targetMockId);
+                if (entries.size() != 1 || !entries.get(0).isObject()) {
+                    throw new IllegalArgumentException("targetMockId requires exactly one mock");
+                }
+                ((ObjectNode) entries.get(0)).put("mockId", targetMockId);
+            }
+            Set<String> ids = new HashSet<>();
+            ArrayNode importedIds = mapper.createArrayNode();
+            for (JsonNode entry : entries) {
+                String id = MockIdValidator.requireValid(entry.path("mockId").asText(null));
+                if (!ids.add(id)) {
+                    throw new IllegalArgumentException("Duplicate mockId: " + id);
+                }
+                importedIds.add(id);
+            }
+            JsonNode view = fleetApi.importConfigs(resourceVersion, entries);
+            try {
+                ArrayNode saved = savedConfigs(view);
+                for (JsonNode entry : entries) {
+                    JsonNode actual = findMockConfig(saved, entry.path("mockId").asText());
+                    if (actual == null) {
+                        throw new McpOperationException("INVALID_UPSTREAM_RESPONSE",
+                                "Imported configuration is missing from the saved response", false, Map.of());
+                    }
+                }
+            } catch (McpOperationException failure) {
+                throw new McpOperationException(failure.code(), failure.getMessage(), false, true, failure.details());
+            }
+            ObjectNode result = mapper.createObjectNode();
+            result.set("resourceVersion", view.path("resourceVersion"));
+            result.set("importedMockIds", importedIds);
+            return McpToolExecutor.ToolResult.of("Imported saved mock configurations for future pods.", result);
+        });
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "list_option_definitions", description = "List the public option catalog for an optional exact WireMock 3.x version.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ListOptionDefinitions.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listOptionDefinitions(
             @ToolArg(description = "Exact WireMock 3.x semantic version; omit to use the catalog default.", required = false) String version) {
@@ -763,6 +836,52 @@ public final class FleetMcpTools {
             page.putNull("nextCursor");
         }
         return result;
+    }
+
+    private ArrayNode savedConfigs(JsonNode view) {
+        if (view == null || !view.isObject()
+                || !(view.path("resourceVersion").isTextual() || view.path("resourceVersion").isNull())) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Fleet API config is malformed", false, Map.of());
+        }
+        mockInventory(view);
+        ArrayNode saved = mapper.createArrayNode();
+        Set<String> seen = new HashSet<>();
+        for (JsonNode id : view.path("savedMockIds")) {
+            JsonNode mock = findMockConfig(view.path("mocks"), id.asText());
+            JsonNode user = mock == null ? mapper.nullNode() : mock.path("user");
+            JsonNode version = user.path("version");
+            JsonNode resources = user.path("resources");
+            if (!seen.add(id.asText()) || !user.isObject()
+                    || !(version.isNull() || (version.isTextual()
+                        && Pattern.matches(WireMockVersion.EXACT_PATTERN, version.asText())))
+                    || !user.path("options").isArray()
+                    || !(resources.isNull() || (resources.isObject()
+                        && stringMap(resources.path("requests")) && stringMap(resources.path("limits"))))) {
+                throw invalidUpstreamResponse("Fleet API saved configuration is malformed", id.asText());
+            }
+            for (JsonNode option : user.path("options")) {
+                if (!option.isTextual()) {
+                    throw invalidUpstreamResponse("Fleet API saved options must contain strings", id.asText());
+                }
+            }
+            ObjectNode entry = saved.addObject().put("mockId", id.asText());
+            entry.set("version", version);
+            entry.set("options", user.path("options"));
+            entry.set("resources", resources);
+        }
+        return saved;
+    }
+
+    private boolean stringMap(JsonNode value) {
+        if (!value.isObject()) {
+            return false;
+        }
+        for (JsonNode entry : value) {
+            if (!entry.isTextual()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private ObjectNode mockInventory(JsonNode configView) {

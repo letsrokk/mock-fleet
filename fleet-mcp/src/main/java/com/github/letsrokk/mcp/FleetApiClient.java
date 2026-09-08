@@ -131,6 +131,23 @@ public final class FleetApiClient {
         return json(HttpMethod.PUT, "/__fleet/api/config/" + MockIdValidator.requireValid(mockId), payload);
     }
 
+    public JsonNode importConfigs(String resourceVersion, JsonNode mocks) {
+        if (resourceVersion == null || resourceVersion.isBlank()) {
+            throw new IllegalArgumentException("resourceVersion is required");
+        }
+        if (mocks == null || !mocks.isArray()) {
+            throw new IllegalArgumentException("mocks must be an array");
+        }
+        var payload = mapper.createObjectNode().put("resourceVersion", resourceVersion);
+        payload.set("mocks", mocks);
+        int bytes = payload.toString().getBytes(StandardCharsets.UTF_8).length;
+        if (bytes > maxPayloadBytes) {
+            throw new McpOperationException("RESULT_TOO_LARGE", "Import payload exceeds the configured limit", false,
+                    Map.of("actualBytes", bytes, "limitBytes", maxPayloadBytes));
+        }
+        return json(HttpMethod.POST, "/__fleet/api/config/import", payload);
+    }
+
     public JsonNode deleteConfig(String mockId, String resourceVersion, ConfigApplyMode applyMode) {
         if (resourceVersion == null || resourceVersion.isBlank()) {
             throw new IllegalArgumentException("resourceVersion is required");

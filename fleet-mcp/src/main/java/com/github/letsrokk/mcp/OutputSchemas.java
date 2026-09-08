@@ -8,6 +8,8 @@ public final class OutputSchemas {
 
     public static final class ListMocks {}
     public static final class GetMockConfig {}
+    public static final class ExportMockConfigs {}
+    public static final class ImportMockConfigs {}
     public static final class ListOptionDefinitions {}
     public static final class UpdateMockConfig {}
     public static final class DeleteMockConfig {}

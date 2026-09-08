@@ -1,5 +1,6 @@
 package com.github.letsrokk;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
@@ -140,22 +141,59 @@ public class WireMockConfigService {
         }
         ApplyMode applyMode = ApplyMode.from(request.applyMode());
         WireMockVersionCatalog catalog = wireMockOptions.catalog();
-        WireMockPodConfig mockConfig = new WireMockPodConfig(
-                request.options() == null ? List.of() : request.options(),
-                toResources(mockId, request.resources()), request.wireMockVersion());
-        updateUserConfigMap(mockId, "saved", request.resourceVersion(), current -> {
-            validateVersionSelection(mockId, request.wireMockVersion(), current, catalog);
-            WireMockConfigDocument candidate = current.withMockConfig(mockId, mockConfig);
-            WireMockResolvedConfig resolved = wireMockOptions.resolveFor(
-                    mockId, wireMockOptions.baselineConfig(), candidate, catalog);
-            List<String> normalizedOverride = WireMockOptionCatalog.validateAndNormalize(
-                    mockConfig.options(), resolved.version());
-            return current.withMockConfig(mockId,
-                    new WireMockPodConfig(normalizedOverride, mockConfig.resources(), request.wireMockVersion()));
-        });
+        ResourceRequirements resources = toResources(mockId, request.resources());
+        updateUserConfigMap(mockId, "saved", request.resourceVersion(), current ->
+                withValidatedMock(current, catalog, mockId, request.wireMockVersion(),
+                        request.options() == null ? List.of() : request.options(), resources));
         refreshUserConfig();
         MockLifecycleStatus lifecycle = applyMode.apply(mockId, podManager);
         return new ConfigMutationResult(view(), new ApplyResult(mockId, applyMode.wireValue, lifecycle));
+    }
+
+    ConfigView importMockConfigs(ConfigImportRequest request) {
+        if (request == null || request.mocks() == null
+                || request.resourceVersion() == null || request.resourceVersion().isBlank()) {
+            throw ApiException.badRequest("INVALID_REQUEST", "resourceVersion and mocks are required.", Map.of());
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        for (ConfigImportEntry entry : request.mocks()) {
+            if (entry == null || entry.options() == null || entry.options().stream().anyMatch(Objects::isNull)
+                    || (entry.resources() != null
+                        && (entry.resources().requests() == null || entry.resources().limits() == null))) {
+                throw ApiException.badRequest("INVALID_REQUEST", "Each mock requires options and valid resources.", Map.of());
+            }
+            validateMockId(entry.mockId());
+            if (!ids.add(entry.mockId())) {
+                throw ApiException.badRequest("INVALID_REQUEST", "Duplicate mock ID in import.",
+                        Map.of("mockId", entry.mockId()));
+            }
+        }
+        if (request.mocks().isEmpty()) {
+            return view();
+        }
+        WireMockVersionCatalog catalog = wireMockOptions.catalog();
+        updateUserConfigMap(String.join(",", ids), "imported", request.resourceVersion(), current -> {
+            WireMockConfigDocument next = current;
+            for (ConfigImportEntry entry : request.mocks()) {
+                next = withValidatedMock(next, catalog, entry.mockId(), entry.version(), entry.options(),
+                        toResources(entry.mockId(), entry.resources()));
+            }
+            return next;
+        });
+        return view();
+    }
+
+    private WireMockConfigDocument withValidatedMock(WireMockConfigDocument current,
+                                                     WireMockVersionCatalog catalog, String mockId,
+                                                     String version, List<String> options,
+                                                     ResourceRequirements resources) {
+        validateVersionSelection(mockId, version, current, catalog);
+        WireMockConfigDocument candidate = current.withMockConfig(mockId,
+                new WireMockPodConfig(options, resources, version));
+        WireMockResolvedConfig resolved = wireMockOptions.resolveFor(
+                mockId, wireMockOptions.baselineConfig(), candidate, catalog);
+        return current.withMockConfig(mockId, new WireMockPodConfig(
+                WireMockOptionCatalog.validateAndNormalize(options, resolved.version()), resources, version));
     }
 
     ConfigMutationResult deleteMockConfig(String mockId, ConfigUpdateRequest request) {
@@ -545,6 +583,15 @@ public class WireMockConfigService {
                                    String applyMode) {
             this(resourceVersion, null, options, resources, applyMode);
         }
+    }
+
+    public record ConfigImportRequest(String resourceVersion, List<ConfigImportEntry> mocks) {
+    }
+
+    public record ConfigImportEntry(@JsonProperty(required = true) String mockId,
+                                    @JsonProperty(required = true) String version,
+                                    @JsonProperty(required = true) List<String> options,
+                                    @JsonProperty(required = true) ResourceData resources) {
     }
 
     public record ConfigMutationResult(ConfigView config, ApplyResult apply) {
