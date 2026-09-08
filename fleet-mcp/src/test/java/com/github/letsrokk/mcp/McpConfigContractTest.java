@@ -68,6 +68,44 @@ class McpConfigContractTest {
     }
 
     @Test
+    void roundTripsTheConfigurationArrayThroughMcp() throws Exception {
+        when(fleetApi.getConfig()).thenReturn(configView(true));
+        when(fleetApi.importConfigs(eq("42"), any(JsonNode.class))).thenReturn(configView(true));
+        JsonNode exported = structured(callTool("export_mock_configs", "{}"));
+        assertEquals(mapper.readTree("""
+                [{"mockId":"catalog","version":null,"options":[],"resources":null}]
+                """), exported.path("mocks"));
+        JsonNode imported = structured(callTool("import_mock_configs", exported.toString()));
+        assertEquals(mapper.readTree("[\"catalog\"]"), imported.path("importedMockIds"));
+        verify(fleetApi).importConfigs("42", exported.path("mocks"));
+    }
+
+    @Test
+    void importSchemaRejectsMalformedEntries() throws Exception {
+        for (String entry : List.of(
+                "{\"mockId\":\"catalog\",\"version\":null,\"options\":[],\"resources\":42}",
+                "{\"mockId\":\"catalog\",\"version\":null,\"options\":[42],\"resources\":null}",
+                "{\"mockId\":\"catalog\",\"version\":null,\"options\":[],\"resources\":{\"requests\":{}}}",
+                "{\"mockId\":\"catalog\",\"version\":null,\"options\":[],\"resources\":null,\"extra\":true}")) {
+            JsonNode result = callTool("import_mock_configs", "{\"resourceVersion\":\"42\",\"mocks\":[" + entry + "]}");
+            assertTrue(result.path("isError").asBoolean(), result.toPrettyString());
+            assertEquals("INVALID_ARGUMENT", result.path("structuredContent").path("error").path("code").asText());
+        }
+        org.mockito.Mockito.verify(fleetApi, org.mockito.Mockito.never()).importConfigs(any(), any());
+    }
+
+    @Test
+    void importPreservesConflictDetails() throws Exception {
+        when(fleetApi.importConfigs(eq("41"), any(JsonNode.class))).thenThrow(new McpOperationException(
+                "CONFIG_CONFLICT", "Configuration changed", true, false, Map.of("resourceVersion", "42")));
+        JsonNode result = callTool("import_mock_configs", "{\"resourceVersion\":\"41\",\"mocks\":[]}");
+        JsonNode error = result.path("structuredContent").path("error");
+        assertEquals("CONFIG_CONFLICT", error.path("code").asText());
+        assertFalse(error.path("stateMayHaveChanged").asBoolean());
+        assertEquals("42", error.path("details").path("resourceVersion").asText());
+    }
+
+    @Test
     void returnsFocusedConfigAndMetadataResponses() throws Exception {
         when(fleetApi.getConfig()).thenReturn(configView(true));
         when(fleetApi.getOptionCatalog("3.13.2")).thenReturn(optionCatalog());

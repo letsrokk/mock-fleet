@@ -40,6 +40,94 @@ import static org.mockito.Mockito.when;
 class WireMockConfigServiceTest {
 
     @Test
+    void importsReplaceAndCreateInOneWriteWithoutRestartingPods() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: [--disable-banner]
+                  mocks:
+                    - id: existing
+                      options: [--verbose]
+                    - id: untouched
+                      options: [--disable-banner]
+                """);
+        var namespaced = service.kubernetesClient.configMaps().inNamespace("mock-fleet");
+        var current = namespaced.withName("user-config");
+        @SuppressWarnings("unchecked")
+        Resource<ConfigMap> writer = mock(Resource.class);
+        when(namespaced.resource(any())).thenAnswer(invocation -> {
+            ConfigMap next = invocation.getArgument(0);
+            when(writer.update()).thenAnswer(update -> {
+                when(current.get()).thenReturn(next);
+                return next;
+            });
+            return writer;
+        });
+        ArgumentCaptor<ConfigMap> saved = ArgumentCaptor.forClass(ConfigMap.class);
+        var result = service.importMockConfigs(new WireMockConfigService.ConfigImportRequest("42", List.of(
+                new WireMockConfigService.ConfigImportEntry("existing", null, List.of(), null),
+                new WireMockConfigService.ConfigImportEntry("new-mock", "3.13.2", List.of("--verbose"), null))));
+
+        assertEquals(List.of("existing", "new-mock", "untouched"), result.savedMockIds());
+        verify(namespaced).resource(saved.capture());
+        verify(writer).update();
+        WireMockConfigDocument document = WireMockConfigDocument.load(
+                saved.getValue().getData().get("wiremock-options.yaml"));
+        assertEquals(Set.of("existing", "new-mock", "untouched"), document.mockConfigs().keySet());
+        assertEquals(List.of(), document.mockConfigs().get("existing").options());
+        assertNull(document.mockConfigs().get("existing").resources());
+        assertEquals("3.13.2", document.mockConfigs().get("new-mock").version());
+        assertEquals(List.of("--verbose"), document.mockConfigs().get("new-mock").options());
+        assertEquals(List.of("--disable-banner"), document.mockConfigs().get("untouched").options());
+        assertEquals(List.of("--disable-banner"), document.defaultOptions());
+        verify(service.podManager).listMocks();
+        org.mockito.Mockito.verifyNoMoreInteractions(service.podManager);
+    }
+
+    @Test
+    void invalidImportNeverPersistsAnEarlierValidEntry() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        var valid = new WireMockConfigService.ConfigImportEntry("valid", null, List.of("--verbose"), null);
+        for (var invalid : List.of(
+                new WireMockConfigService.ConfigImportEntry("invalid", null, List.of("--unknown-option"), null),
+                new WireMockConfigService.ConfigImportEntry("invalid", "9.0.0", List.of(), null),
+                new WireMockConfigService.ConfigImportEntry("invalid", null, List.of("--keystore-password=x"), null),
+                new WireMockConfigService.ConfigImportEntry("invalid", null, List.of(),
+                        new WireMockConfigService.ResourceData(Map.of("cpu", "99"), Map.of())),
+                new WireMockConfigService.ConfigImportEntry("Bad ID", null, List.of(), null),
+                valid)) {
+            assertThrows(ApiException.class, () -> service.importMockConfigs(
+                    new WireMockConfigService.ConfigImportRequest("42", List.of(valid, invalid))));
+        }
+        verify(service.kubernetesClient.configMaps().inNamespace("mock-fleet"), never()).resource(any());
+        verifyNoInteractions(service.podManager);
+    }
+
+    @Test
+    void importRequiresConcurrencyAndTreatsEmptyArrayAsNoOp() {
+        WireMockConfigService service = serviceWithUserConfig("""
+                wiremock:
+                  default:
+                    options: []
+                  mocks: []
+                """);
+        var entries = List.of(new WireMockConfigService.ConfigImportEntry("demo", null, List.of(), null));
+        var conflict = assertThrows(ApiException.class, () -> service.importMockConfigs(
+                new WireMockConfigService.ConfigImportRequest("41", entries)));
+        assertEquals("CONFIG_CONFLICT", ((ApiError) conflict.getResponse().getEntity()).code());
+        assertThrows(ApiException.class, () -> service.importMockConfigs(
+                new WireMockConfigService.ConfigImportRequest(null, entries)));
+        assertEquals(List.of(), service.importMockConfigs(
+                new WireMockConfigService.ConfigImportRequest("42", List.of())).savedMockIds());
+        verify(service.kubernetesClient.configMaps().inNamespace("mock-fleet"), never()).resource(any());
+    }
+
+    @Test
     void viewReportsCatalogAndDesiredRuntimeDrift() {
         WireMockConfigService service = serviceWithUserConfig("""
                 wiremock:

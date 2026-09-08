@@ -21,7 +21,17 @@ Inspect currently active mocks.
 
 ### Configuration
 
-Edit per-mock startup options.
+Edit per-mock startup options, resources, and WireMock versions. **Export all / Import all** transfer saved overrides for every mock; **Export / Import** in a mock editor transfer one mock. Both use the same JSON array:
+
+```json
+[
+  {"mockId":"orders","version":null,"options":["--verbose"],"resources":null}
+]
+```
+
+Imports replace overrides for matching IDs, create missing IDs, and keep other mocks. Individual import applies the single entry to the selected mock ID. The entire import is validated before saving; active pods are not restarted. Exports contain saved overrides only, including explicit version pins and resource overrides; null values inherit destination defaults. Unsaved edits and inherited settings are excluded. Existing password-option redaction and validation still apply.
+
+The REST import endpoint is `POST /__fleet/api/config/import` with `{resourceVersion,mocks}`, where `mocks` is the exported array and `resourceVersion` comes from the destination's current configuration. It returns the refreshed configuration view. Empty arrays do not change configuration.
 
 ![Configuration tab](docs/screenshots/configuration.png)
 
@@ -86,7 +96,7 @@ The REST lifecycle is asynchronous and idempotent. `POST /__fleet/api/mocks/{moc
 
 The checked-in [OpenAPI contract](fleet-api/src/main/resources/META-INF/openapi.yaml) documents the exact REST shapes. The running API serves the merged document at `/__fleet/api/openapi?format=json` and Swagger UI at `/__fleet/api/swagger-ui`.
 
-MCP publishes 31 schema-backed tools. `list_mocks` includes configured inactive and active mocks with desired/runtime version state and a saved-config flag. The tool set also includes `start_mock` and `get_recording_status`; the old `recording_status` name is absent. WireMock tools preflight the lifecycle and return retryable `MOCK_STARTING` while a cold pod starts. Successes use tool-specific structured objects. Failures use `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Native WireMock JSON stays native, while byte inputs and outputs use `{body:{encoding:utf8|base64,data,sizeBytes}}`.
+MCP publishes 33 schema-backed tools. `list_mocks` includes configured inactive and active mocks with desired/runtime version state and a saved-config flag. The tool set also includes `start_mock` and `get_recording_status`; the old `recording_status` name is absent. WireMock tools preflight the lifecycle and return retryable `MOCK_STARTING` while a cold pod starts. Successes use tool-specific structured objects. Failures use `{error:{code,message,retryable,stateMayHaveChanged,details}}` with `isError: true`. Native WireMock JSON stays native, while byte inputs and outputs use `{body:{encoding:utf8|base64,data,sizeBytes}}`.
 
 See the [MCP contract and examples](docs/mcp-contract.md) for tool names, lifecycle polling, config application, body encoding, recording candidates, matched/missed analysis, redaction, SSRF controls, Admin-path guards, and persistent mutation recovery.
 
