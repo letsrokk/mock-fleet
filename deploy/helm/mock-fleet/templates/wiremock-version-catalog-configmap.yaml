@@ -2,6 +2,57 @@
 {{- $name := include "mock-fleet.wiremockVersionCatalogConfigMapName" . -}}
 {{- $namespace := include "mock-fleet.namespace" . -}}
 {{- $existing := lookup "v1" "ConfigMap" $namespace $name -}}
+{{- $oldData := dig "data" (dict) $existing -}}
+{{- $repository := include "mock-fleet.wiremockImageRepository" . -}}
+{{- $fallback := include "mock-fleet.wiremockDefaultVersion" . -}}
+{{- $selectable := dict -}}
+{{- $retained := dict -}}
+{{- $allowedImages := list -}}
+{{- range $tag := .Values.wiremock.supportedImageTags -}}
+{{- $version := regexFind "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)" $tag -}}
+{{- $image := printf "%s:%s" $repository $tag -}}
+{{- if $.Values.mockOps.enabled -}}
+{{- if eq (include "mock-fleet.versionInRange" (dict "version" $version "range" $.Values.mockOps.allowedVersionRange)) "true" -}}
+{{- $_ := set $selectable $version $image -}}
+{{- end -}}
+{{- else -}}
+{{- $allowedImages = append $allowedImages $image -}}
+{{- $_ := set $selectable $version $image -}}
+{{- end -}}
+{{- end -}}
+{{- range $key, $image := $oldData -}}
+{{- if or (hasPrefix "selectable." $key) (hasPrefix "retained." $key) -}}
+{{- $version := trimPrefix "retained." (trimPrefix "selectable." $key) -}}
+{{- if and $.Values.mockOps.enabled (hasPrefix "selectable." $key) (eq (include "mock-fleet.versionInRange" (dict "version" $version "range" $.Values.mockOps.allowedVersionRange)) "true") -}}
+{{- $_ := set $selectable $version $image -}}
+{{- else -}}
+{{- $_ := set $retained $version $image -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $defaultVersion := get $oldData "defaultVersion" -}}
+{{- $oldDefaultImage := get $oldData (printf "selectable.%s" $defaultVersion) -}}
+{{- if or (not $defaultVersion) (not (hasKey $selectable $defaultVersion)) (ne (get $selectable $defaultVersion) $oldDefaultImage) -}}
+{{- $defaultVersion = $fallback -}}
+{{- $_ := set $selectable $fallback .Values.wiremock.containerImage -}}
+{{- else if not (hasKey $selectable $fallback) -}}
+{{- $_ := set $selectable $fallback .Values.wiremock.containerImage -}}
+{{- end -}}
+{{- $data := dict "defaultVersion" $defaultVersion -}}
+{{- range $version, $image := $retained -}}
+{{- if not (hasKey $selectable $version) -}}
+{{- $_ := set $data (printf "retained.%s" $version) $image -}}
+{{- end -}}
+{{- end -}}
+{{- range $version, $image := $selectable -}}
+{{- $_ := set $data (printf "selectable.%s" $version) $image -}}
+{{- end -}}
+{{/* Explicit deletions remove controller-added keys that Helm never owned in its previous manifest. */}}
+{{- range $key, $_ := $oldData -}}
+{{- if not (hasKey $data $key) -}}
+{{- $_ := set $data $key nil -}}
+{{- end -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,18 +60,7 @@ metadata:
   namespace: {{ $namespace }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
+  annotations:
+    mock-fleet/image-policy: {{ toJson (dict "defaultImage" .Values.wiremock.containerImage "allowedImages" $allowedImages "allowedVersionRange" (ternary .Values.mockOps.allowedVersionRange "" .Values.mockOps.enabled)) | quote }}
 data:
-  {{- if $existing }}
-{{- toYaml $existing.data | nindent 2 }}
-  {{- else }}
-  {{- $defaultVersion := include "mock-fleet.wiremockDefaultVersion" . }}
-  defaultVersion: {{ $defaultVersion }}
-  selectable.{{ $defaultVersion }}: {{ .Values.wiremock.containerImage }}
-  {{- $repository := include "mock-fleet.wiremockImageRepository" . }}
-  {{- range $tag := .Values.wiremock.supportedImageTags }}
-  {{- $version := regexFind "^3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)" $tag }}
-  {{- if ne $version $defaultVersion }}
-  selectable.{{ $version }}: {{ printf "%s:%s" $repository $tag }}
-  {{- end }}
-  {{- end }}
-  {{- end }}
+  {{- toYaml $data | nindent 2 }}

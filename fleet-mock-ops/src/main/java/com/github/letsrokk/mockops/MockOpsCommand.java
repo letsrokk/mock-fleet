@@ -34,14 +34,7 @@ public final class MockOpsCommand implements QuarkusApplication {
     @Override
     public int run(String... args) {
         URI registryUri = URI.create(config.registryUrl());
-        RegistryV2Client registry = new RegistryV2Client(
-                HttpClient.newHttpClient(), json, registryCredentials());
         String imageRepository = imageRepository(registryUri, config.repository(), config.imageRepository());
-        CatalogSelection.Selection selection = CatalogSelection.select(
-                imageRepository,
-                registry.tags(registryUri, config.repository(), config.pageSize()),
-                config.minorLines());
-
         new CatalogReconciler(kubernetes, new ObjectMapper(new YAMLFactory())).reconcile(
                 config.namespace(),
                 config.catalogConfigMapName(),
@@ -49,8 +42,11 @@ public final class MockOpsCommand implements QuarkusApplication {
                 config.userConfigMapName(),
                 config.configKey(),
                 imageRepository,
-                selection,
-                config.defaultVersionConstraint());
+                () -> new RegistryV2Client(HttpClient.newHttpClient(), json, registryCredentials())
+                        .tags(registryUri, config.repository(), config.pageSize()),
+                config.minorLines(),
+                config.allowedVersionRange(),
+                config.defaultImage());
         return 0;
     }
 

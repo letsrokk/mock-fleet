@@ -61,8 +61,10 @@ spec:
                   value: {{ .Values.mockOps.registry.repository | quote }}
                 - name: MOCK_FLEET_WIREMOCK_IMAGE_REPOSITORY
                   value: {{ .Values.mockOps.registry.imageRepository | quote }}
-                - name: MOCK_FLEET_WIREMOCK_DEFAULT_VERSION_CONSTRAINT
-                  value: {{ .Values.mockOps.defaultVersionConstraint | quote }}
+                - name: MOCK_FLEET_WIREMOCK_ALLOWED_VERSION_RANGE
+                  value: {{ .Values.mockOps.allowedVersionRange | quote }}
+                - name: MOCK_FLEET_WIREMOCK_DEFAULT_IMAGE
+                  value: {{ .Values.wiremock.containerImage | quote }}
                 - name: MOCK_FLEET_WIREMOCK_MINOR_LINES
                   value: {{ .Values.mockOps.minorLines | quote }}
                 {{- with .Values.mockOps.registry.credentialsSecretName }}

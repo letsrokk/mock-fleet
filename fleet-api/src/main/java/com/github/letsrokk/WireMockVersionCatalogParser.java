@@ -1,14 +1,22 @@
 package com.github.letsrokk;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.function.Predicate;
 import java.util.Map;
 
 @ApplicationScoped
 public class WireMockVersionCatalogParser {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String IMAGE_POLICY_ANNOTATION = "mock-fleet/image-policy";
     private static final String DEFAULT_VERSION_KEY = "defaultVersion";
     private static final String SELECTABLE_PREFIX = "selectable.";
     private static final String RETAINED_PREFIX = "retained.";
@@ -50,6 +58,7 @@ public class WireMockVersionCatalogParser {
             }
         }
 
+        defaultVersion = applyPolicy(configMap, defaultVersion, versions);
         WireMockVersionCatalog.VersionEntry defaultEntry = versions.get(defaultVersion);
         if (defaultEntry == null || !defaultEntry.selectable()) {
             throw new IllegalArgumentException("The default WireMock version must be present and selectable.");
@@ -58,5 +67,59 @@ public class WireMockVersionCatalogParser {
                 ? null
                 : configMap.getMetadata().getResourceVersion();
         return new WireMockVersionCatalog(defaultVersion, versions, resourceVersion);
+    }
+    private WireMockVersion applyPolicy(ConfigMap configMap, WireMockVersion defaultVersion,
+                                       Map<WireMockVersion, WireMockVersionCatalog.VersionEntry> versions) {
+        String policyText = configMap.getMetadata() == null || configMap.getMetadata().getAnnotations() == null
+                ? null : configMap.getMetadata().getAnnotations().get(IMAGE_POLICY_ANNOTATION);
+        if (policyText == null) {
+            return defaultVersion;
+        }
+        JsonNode policy;
+        try {
+            policy = JSON.readTree(policyText);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Invalid WireMock image policy JSON.", e);
+        }
+        if (policy == null || !policy.isObject() || !policy.path("defaultImage").isTextual()
+                || !policy.path("allowedImages").isArray() || !policy.path("allowedVersionRange").isTextual()) {
+            throw new IllegalArgumentException("WireMock image policy requires defaultImage, allowedImages and allowedVersionRange.");
+        }
+        String fallbackImage = policy.get("defaultImage").textValue();
+        WireMockVersion fallbackVersion = WireMockVersion.parseImage(fallbackImage);
+        Set<String> allowedImages = new HashSet<>();
+        for (JsonNode image : policy.get("allowedImages")) {
+            if (!image.isTextual()) {
+                throw new IllegalArgumentException("WireMock allowedImages must contain image strings.");
+            }
+            WireMockVersion.parseImage(image.textValue());
+            allowedImages.add(image.textValue());
+        }
+        String interval = policy.get("allowedVersionRange").textValue();
+        if (allowedImages.isEmpty() == interval.isEmpty()) {
+            throw new IllegalArgumentException("WireMock image policy requires exactly one allowed-image mode.");
+        }
+        Predicate<String> allowed;
+        if (interval.isEmpty()) {
+            allowed = allowedImages::contains;
+        } else {
+            WireMockAllowedVersionRange range = WireMockAllowedVersionRange.parse(interval);
+            allowed = image -> range.contains(WireMockVersion.parseImage(image));
+        }
+        if (!allowed.test(fallbackImage)) {
+            throw new IllegalArgumentException("The configured default WireMock image must satisfy its image policy.");
+        }
+        versions.replaceAll((version, entry) -> new WireMockVersionCatalog.VersionEntry(
+                version, entry.image(), entry.selectable() && allowed.test(entry.image())));
+        WireMockVersionCatalog.VersionEntry current = versions.get(defaultVersion);
+        if (current != null && allowed.test(current.image())) {
+            return defaultVersion;
+        }
+        WireMockVersionCatalog.VersionEntry fallback = versions.get(fallbackVersion);
+        if (fallback == null || !fallback.image().equals(fallbackImage)) {
+            throw new IllegalArgumentException("The configured default WireMock image must be present in the catalog.");
+        }
+        versions.put(fallbackVersion, new WireMockVersionCatalog.VersionEntry(fallbackVersion, fallbackImage, true));
+        return fallbackVersion;
     }
 }

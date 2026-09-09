@@ -245,8 +245,8 @@ app.kubernetes.io/component: mock-ops
 {{- if not (regexMatch "^[^[:space:]@]*[^[:space:]:@]:3\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9]+)?$" .Values.wiremock.containerImage) -}}
 {{- fail "wiremock.containerImage must use an exact WireMock 3.x.y tag with an optional numeric image revision" -}}
 {{- end -}}
-{{- if lt (len .Values.wiremock.supportedImageTags) 1 -}}
-{{- fail "wiremock.supportedImageTags must contain at least one exact WireMock 3.x.y tag" -}}
+{{- if and (not .Values.mockOps.enabled) (lt (len .Values.wiremock.supportedImageTags) 1) -}}
+{{- fail "wiremock.supportedImageTags must contain at least one exact WireMock 3.x.y tag in static mode" -}}
 {{- end -}}
 {{- $versions := dict -}}
 {{- range $tag := .Values.wiremock.supportedImageTags -}}
@@ -259,10 +259,49 @@ app.kubernetes.io/component: mock-ops
 {{- end -}}
 {{- $_ := set $versions $version true -}}
 {{- end -}}
-{{- $defaultVersion := include "mock-fleet.wiremockDefaultVersion" . -}}
-{{- if not (hasKey $versions $defaultVersion) -}}
-{{- fail "wiremock.containerImage semantic version must occur exactly once in wiremock.supportedImageTags" -}}
+{{- if .Values.mockOps.enabled -}}
+{{- if ne (include "mock-fleet.versionInRange" (dict "version" (include "mock-fleet.wiremockDefaultVersion" .) "range" .Values.mockOps.allowedVersionRange)) "true" -}}
+{{- fail "wiremock.containerImage must be within mockOps.allowedVersionRange" -}}
 {{- end -}}
+{{- else -}}
+{{- $defaultTag := regexFind "[^:]+$" .Values.wiremock.containerImage -}}
+{{- if not (has $defaultTag .Values.wiremock.supportedImageTags) -}}
+{{- fail "wiremock.containerImage exact tag must occur in wiremock.supportedImageTags in static mode" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "mock-fleet.versionInRange" -}}
+{{- $pattern := "^[\\[(](0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?,(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*))?[\\])]$" -}}
+{{- if not (regexMatch $pattern .range) -}}
+{{- fail "mockOps.allowedVersionRange must be a numeric interval such as [3.0,4.0)" -}}
+{{- end -}}
+{{- $endpoints := splitList "," (substr 1 (sub (len .range) 1 | int) .range) -}}
+{{- $lower := index $endpoints 0 -}}
+{{- $upper := index $endpoints 1 -}}
+{{- $bounds := include "mock-fleet.compareVersions" (list $lower $upper) -}}
+{{- if or (eq $bounds "1") (and (eq $bounds "0") (not (and (hasPrefix "[" .range) (hasSuffix "]" .range)))) -}}
+{{- fail "mockOps.allowedVersionRange must not be reversed or empty" -}}
+{{- end -}}
+{{- $fromLower := include "mock-fleet.compareVersions" (list .version $lower) -}}
+{{- $fromUpper := include "mock-fleet.compareVersions" (list .version $upper) -}}
+{{- and (or (eq $fromLower "1") (and (eq $fromLower "0") (hasPrefix "[" .range))) (or (eq $fromUpper "-1") (and (eq $fromUpper "0") (hasSuffix "]" .range))) -}}
+{{- end -}}
+
+{{/* Numeric component comparison avoids integer overflow and partial-version semver constraint rules. */}}
+{{- define "mock-fleet.compareVersions" -}}
+{{- $left := splitList "." (printf "%s.0" (index . 0)) -}}
+{{- $right := splitList "." (printf "%s.0" (index . 1)) -}}
+{{- $result := 0 -}}
+{{- range $index := until 3 -}}
+{{- $a := index $left $index -}}{{- $b := index $right $index -}}
+{{- if and (eq $result 0) (ne $a $b) -}}
+{{- if or (gt (len $a) (len $b)) (and (eq (len $a) (len $b)) (gt $a $b)) -}}
+{{- $result = 1 -}}
+{{- else -}}{{- $result = -1 -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $result -}}
 {{- end -}}
 
 {{/* Keep resource quantities as decimal digit strings so policy comparisons never round through float64. */}}

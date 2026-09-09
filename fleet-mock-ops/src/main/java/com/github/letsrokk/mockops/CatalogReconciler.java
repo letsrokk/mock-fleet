@@ -11,12 +11,15 @@ import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.function.Supplier;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
 final class CatalogReconciler {
+    static final String IMAGE_POLICY = "mock-fleet/image-policy";
     private static final String DEFAULT_VERSION = "defaultVersion";
     private static final String SELECTABLE_PREFIX = "selectable.";
     private static final String RETAINED_PREFIX = "retained.";
@@ -35,11 +38,44 @@ final class CatalogReconciler {
                    String userName,
                    String configKey,
                    String repository,
-                   CatalogSelection.Selection selection,
-                   String defaultConstraint) {
+                   Supplier<List<String>> registryTags,
+                   int minorLines,
+                   String allowedVersionRange,
+                   String defaultImage) {
         NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps =
                 kubernetes.configMaps().inNamespace(namespace);
         ConfigMap catalog = requireConfigMap(configMaps, catalogName);
+        String annotation = catalog.getMetadata().getAnnotations() == null ? null
+                : catalog.getMetadata().getAnnotations().get(IMAGE_POLICY);
+        if (annotation != null) {
+            JsonNode policy;
+            try {
+                policy = new ObjectMapper().readTree(annotation);
+            } catch (JsonProcessingException error) {
+                throw new IllegalStateException("Invalid catalog image policy annotation.", error);
+            }
+            if (policy == null || !policy.isObject() || !policy.path("defaultImage").isTextual()
+                    || !policy.path("allowedImages").isArray() || !policy.path("allowedVersionRange").isTextual()) {
+                throw new IllegalStateException("Invalid catalog image policy annotation.");
+            }
+            allowedVersionRange = policy.path("allowedVersionRange").textValue();
+            defaultImage = policy.path("defaultImage").textValue();
+            if (!policy.path("allowedImages").isEmpty()) {
+                if (!allowedVersionRange.isEmpty()) {
+                    throw new IllegalStateException("Catalog image policy must select static images or a version range.");
+                }
+                return;
+            }
+        }
+        AllowedVersionRange range = AllowedVersionRange.parse(allowedVersionRange);
+        WireMockTag fallback = tagFromImage(defaultImage, null);
+        if (!range.contains(fallback)) {
+            throw new IllegalArgumentException("defaultImage must be inside allowedVersionRange.");
+        }
+        CatalogSelection.Selection selection = CatalogSelection.select(repository, registryTags.get(), minorLines, range);
+        if (selection.candidates().isEmpty()) {
+            return;
+        }
         ConfigMap baseline = requireConfigMap(configMaps, baselineName);
         ConfigMap user = requireConfigMap(configMaps, userName);
 
@@ -53,7 +89,7 @@ final class CatalogReconciler {
         Map<String, String> currentData = requireData(catalog, catalogName);
         String currentDefault = validateCatalog(currentData);
         Map<String, String> nextData = buildCatalog(
-                currentData, referencedVersions, repository, selection, defaultConstraint, currentDefault);
+                currentData, referencedVersions, repository, selection, range, defaultImage, currentDefault);
 
         ConfigMap update = new ConfigMapBuilder(catalog).withData(nextData).build();
         configMaps.resource(update).update();
@@ -99,13 +135,16 @@ final class CatalogReconciler {
                                              Set<String> referencedVersions,
                                              String repository,
                                              CatalogSelection.Selection selection,
-                                             String defaultConstraint,
+                                             AllowedVersionRange range,
+                                             String fallbackImage,
                                              String currentDefault) {
         String currentDefaultImage = requireCatalogImage(currentData, currentDefault);
         WireMockTag currentDefaultTag = tagFromImage(currentDefaultImage, currentDefault);
-        CatalogSelection.matchesConstraint(defaultConstraint, currentDefault);
+        if (!range.contains(currentDefaultTag)) {
+            currentDefaultImage = fallbackImage;
+            currentDefaultTag = tagFromImage(fallbackImage, null);
+        }
         WireMockTag candidate = selection.candidates().stream()
-                .filter(tag -> CatalogSelection.matchesConstraint(defaultConstraint, tag.version()))
                 .max(WireMockTag.ORDER)
                 .orElse(null);
         boolean advancesDefault = candidate != null && WireMockTag.ORDER.compare(candidate, currentDefaultTag) > 0;
@@ -113,7 +152,7 @@ final class CatalogReconciler {
         String nextDefault = nextDefaultTag.version();
 
         Map<String, String> selectable = new LinkedHashMap<>(selection.selectable());
-        selectable.computeIfAbsent(nextDefault, ignored -> advancesDefault
+        selectable.put(nextDefault, advancesDefault
                 ? repository + ":" + nextDefaultTag.imageTag()
                 : currentDefaultImage);
 
@@ -205,7 +244,7 @@ final class CatalogReconciler {
         int separator = image.lastIndexOf(':');
         WireMockTag tag = separator < 1 || separator == image.length() - 1
                 ? null : WireMockTag.parse(image.substring(separator + 1)).orElse(null);
-        if (tag == null || !tag.version().equals(expectedVersion)) {
+        if (tag == null || (expectedVersion != null && !tag.version().equals(expectedVersion))) {
             throw new IllegalStateException("Catalog image does not match version " + expectedVersion + ": " + image);
         }
         return tag;

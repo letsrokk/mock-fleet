@@ -13,7 +13,8 @@ interface MockOpsConfig {
     String registryUrl();
     String repository();
     Optional<String> imageRepository();
-    String defaultVersionConstraint();
+    String allowedVersionRange();
+    String defaultImage();
     int minorLines();
     int pageSize();
     Optional<String> registryUsername();
