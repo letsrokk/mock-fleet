@@ -14,8 +14,8 @@ def render(values, template="wiremock-version-catalog-configmap.yaml", valid=Tru
         json.dump(values, source)
         source.flush()
         result = subprocess.run(
-            ["helm", "template", "image-policy-test", str(CHART), "-f", source.name,
-             "--show-only", f"templates/{template}"], capture_output=True, text=True)
+            ["helm", "template", "image-policy-test", str(CHART), "-f", source.name]
+            + (["--show-only", f"templates/{template}"] if template else []), capture_output=True, text=True)
     assert (result.returncode == 0) == valid, result.stderr
     return result.stdout
 
@@ -59,3 +59,16 @@ cron = render({"mockOps": {"enabled": True, "registry": {"credentialsSecretName"
 assert "MOCK_FLEET_WIREMOCK_ALLOWED_VERSION_RANGE" in cron and "MOCK_FLEET_WIREMOCK_DEFAULT_IMAGE" in cron
 assert 'name: "registry-login"' in cron and "key: username" in cron and "key: password" in cron
 print("Image-policy render checks passed")
+
+initializer = render({}, "wiremock-user-config-init.yaml")
+assert "kind: ConfigMap" not in initializer
+assert initializer.count("argocd.argoproj.io/hook: PreSync") == 4
+assert initializer.count("helm.sh/hook: pre-install,pre-upgrade") == 4
+assert initializer.count("argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded") == 4
+assert "args: [initialize-user-config]" in initializer
+assert "verbs: [get, update]" in initializer and "verbs: [create]" in initializer
+assert "MOCK_FLEET_WIREMOCK_REGISTRY_PASSWORD" not in initializer
+external_rbac = render({"rbac": {"create": False}}, "wiremock-user-config-init.yaml")
+assert "kind: Role" not in external_rbac and "kind: ServiceAccount" in external_rbac
+assert not re.search(r"kind: ConfigMap\nmetadata:\n  name: [^\n]*-wiremock-user-config\n", render({}, template=None))
+print("User-config initialization hook render checks passed")
