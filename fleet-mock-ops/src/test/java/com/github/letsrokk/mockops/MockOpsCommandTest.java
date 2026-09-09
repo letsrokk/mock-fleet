@@ -38,7 +38,7 @@ class MockOpsCommandTest {
 
         assertEquals("registry.testing.svc:5000/mirror/wiremock", imageRepository);
         assertEquals(Map.of("3.13.2", "registry.testing.svc:5000/mirror/wiremock:3.13.2-2"),
-                CatalogSelection.select(imageRepository, List.of("3.13.2-2"), 1).selectable());
+                CatalogSelection.select(imageRepository, List.of("3.13.2-2"), 1, AllowedVersionRange.parse("[3.0,4.0)")).selectable());
     }
 
     @Test
@@ -160,18 +160,26 @@ class MockOpsCommandTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void registryParsingFailureLeavesKubernetesCatalogUntouched() throws Exception {
         HttpServer registry = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         registry.createContext("/v2/example/wiremock/tags/list", exchange -> json(exchange, "not-json"));
         registry.start();
         try {
-            MockOpsConfig config = mock(MockOpsConfig.class);
+            MockOpsConfig config = config("http://127.0.0.1:" + registry.getAddress().getPort(),
+                    "example/wiremock", Optional.empty());
             KubernetesClient kubernetes = mock(KubernetesClient.class);
-            when(config.registryUrl()).thenReturn("http://127.0.0.1:" + registry.getAddress().getPort());
-            when(config.repository()).thenReturn("example/wiremock");
-            when(config.pageSize()).thenReturn(100);
-            when(config.registryUsername()).thenReturn(Optional.empty());
-            when(config.registryPassword()).thenReturn(Optional.empty());
+            MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
+            NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced =
+                    mock(NonNamespaceOperation.class);
+            Resource<ConfigMap> catalog = mock(Resource.class);
+            when(kubernetes.configMaps()).thenReturn(configMaps);
+            when(configMaps.inNamespace("test")).thenReturn(namespaced);
+            when(namespaced.withName("catalog")).thenReturn(catalog);
+            when(catalog.get())
+                    .thenReturn(new ConfigMapBuilder().withNewMetadata().withName("catalog").endMetadata()
+                            .withData(Map.of("defaultVersion", "3.13.2",
+                                    "selectable.3.13.2", "example/wiremock:3.13.2-2")).build());
             MockOpsCommand command = new MockOpsCommand();
             command.config = config;
             command.kubernetes = kubernetes;
@@ -179,7 +187,8 @@ class MockOpsCommandTest {
 
             assertThrows(IllegalStateException.class, command::run);
 
-            verify(kubernetes, never()).configMaps();
+            verify(kubernetes.configMaps().inNamespace("test"), never())
+                    .resource(org.mockito.ArgumentMatchers.any(ConfigMap.class));
             verify(kubernetes, never()).pods();
         } finally {
             registry.stop(0);
@@ -194,7 +203,8 @@ class MockOpsCommandTest {
         when(config.imageRepository()).thenReturn(imageRepository);
         when(config.pageSize()).thenReturn(100);
         when(config.minorLines()).thenReturn(1);
-        when(config.defaultVersionConstraint()).thenReturn("3.x");
+        when(config.allowedVersionRange()).thenReturn("[3.0,4.0)");
+        when(config.defaultImage()).thenReturn("wiremock/wiremock:3.13.2-2");
         when(config.namespace()).thenReturn("test");
         when(config.catalogConfigMapName()).thenReturn("catalog");
         when(config.baselineConfigMapName()).thenReturn("baseline");

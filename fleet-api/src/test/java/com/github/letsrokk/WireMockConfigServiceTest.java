@@ -1060,14 +1060,20 @@ class WireMockConfigServiceTest {
     }
 
     private WireMockVersionCatalog versionCatalog() {
-        WireMockVersion current = WireMockVersion.parse("3.13.2");
-        WireMockVersion retained = WireMockVersion.parse("3.12.1");
-        Map<WireMockVersion, WireMockVersionCatalog.VersionEntry> versions = new java.util.LinkedHashMap<>();
-        versions.put(current, new WireMockVersionCatalog.VersionEntry(
-                current, "wiremock/wiremock:3.13.2-7", true));
-        versions.put(retained, new WireMockVersionCatalog.VersionEntry(
-                retained, "wiremock/wiremock:3.12.1-2", false));
-        return new WireMockVersionCatalog(current, versions, "catalog-17");
+        Map<String, String> data = new java.util.LinkedHashMap<>();
+        data.put("defaultVersion", "3.13.2");
+        data.put("selectable.3.13.2", "wiremock/wiremock:3.13.2-7");
+        data.put("selectable.3.12.1", "wiremock/wiremock:3.12.1-2");
+        return new WireMockVersionCatalogParser().parse(new ConfigMapBuilder()
+                .withNewMetadata()
+                    .withResourceVersion("catalog-17")
+                    .addToAnnotations("mock-fleet/image-policy", """
+                            {"defaultImage":"wiremock/wiremock:3.13.2-7",
+                             "allowedImages":["wiremock/wiremock:3.13.2-7"],"allowedVersionRange":""}
+                            """)
+                .endMetadata()
+                .withData(data)
+                .build());
     }
 
     private WireMockConfigService.ConfigView configViewForUserYaml(String userYaml) {

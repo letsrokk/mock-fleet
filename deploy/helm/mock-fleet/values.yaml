@@ -241,7 +241,7 @@ mockOps:
   enabled: false
   schedule: "0 2 * * *"
   timeZone: Etc/UTC
-  defaultVersionConstraint: "3.x"
+  allowedVersionRange: "[3.0,4.0)"
   minorLines: 5
   registry:
     url: https://registry-1.docker.io
@@ -280,6 +280,7 @@ wiremock:
     create: true
     name: ""
     annotations: {}
+    imagePullSecrets: []
   admissionPolicy:
     enabled: true
     workloadIdentity:

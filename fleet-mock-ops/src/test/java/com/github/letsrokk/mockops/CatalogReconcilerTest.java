@@ -49,19 +49,18 @@ class CatalogReconcilerTest {
                                 """)).build(),
                 configDocument("user", "other", "3.10.0"));
         CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock",
-                List.of("3.15.1-2", "3.14.4-3", "3.13.9-5"), 2);
+                List.of("3.15.1-2", "3.14.4-3", "3.13.9-5"), 2, AllowedVersionRange.parse("[3.0,4.0)"));
 
         new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.13.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.13,3.14)", "example/wiremock:3.13.2-2");
 
         ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespaced).resource(updated.capture());
         assertEquals("19", updated.getValue().getMetadata().getResourceVersion());
         assertEquals(Map.of(
                 "defaultVersion", "3.13.9",
-                "selectable.3.15.1", "example/wiremock:3.15.1-2",
-                "selectable.3.14.4", "example/wiremock:3.14.4-3",
                 "selectable.3.13.9", "example/wiremock:3.13.9-5",
                 "retained.3.12.1", "example/wiremock:3.12.1-2",
                 "retained.3.13.2", "example/wiremock:3.13.2-7",
@@ -81,11 +80,12 @@ class CatalogReconcilerTest {
                         "selectable.3.13.2", "example/wiremock:3.13.2-7")),
                 configDocument("baseline", null, null), configDocument("user", null, null));
         when(fixture.updated.update()).thenThrow(new KubernetesClientException("conflict", 409, null));
-        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1);
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         assertThrows(KubernetesClientException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x"));
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2"));
 
         verify(fixture.catalog, times(1)).get();
         verify(fixture.baseline, times(1)).get();
@@ -102,11 +102,12 @@ class CatalogReconcilerTest {
                 new ConfigMapBuilder().withNewMetadata().withName("baseline").endMetadata()
                         .withData(Map.of("wiremock.yaml", "wiremock:\n  mocks: not-a-list\n")).build(),
                 configDocument("user", "demo", "3.13.2"));
-        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1);
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         assertThrows(IllegalStateException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x"));
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2"));
 
         verify(fixture.catalog, times(1)).get();
         verify(fixture.baseline, times(1)).get();
@@ -122,11 +123,12 @@ class CatalogReconcilerTest {
                         "selectable.3.14.2", "example/wiremock:3.14.2-8")),
                 configDocument("baseline", null, null), configDocument("user", null, null));
         CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock",
-                List.of("3.14.1-9", "3.15.0-1"), 1);
+                List.of("3.14.1-9", "3.15.0-1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.14.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.14,3.15)", "example/wiremock:3.14.0");
 
         ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespaced).resource(updated.capture());
@@ -136,18 +138,19 @@ class CatalogReconcilerTest {
     }
 
     @Test
-    void constrainedCandidateOutsideMinorLinesUsesItsExactNewerRevision() {
+    void rangeFilteringKeepsTheExactNewerRevision() {
         KubernetesFixture fixture = fixture(
                 configMap("catalog", "22", Map.of(
                         "defaultVersion", "3.13.2",
                         "selectable.3.13.2", "example/wiremock:3.13.2-2")),
                 configDocument("baseline", null, null), configDocument("user", null, null));
         CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock",
-                List.of("3.15.1-2", "3.14.4-3", "3.13.2-7"), 2);
+                List.of("3.15.1-2", "3.14.4-3", "3.13.2-7"), 2, AllowedVersionRange.parse("[3.0,4.0)"));
 
         new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.13.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.13,3.14)", "example/wiremock:3.13.2-2");
 
         ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespaced).resource(updated.capture());
@@ -162,11 +165,12 @@ class CatalogReconcilerTest {
                         "defaultVersion", "3.13.2",
                         "selectable.3.13.2", "example/wiremock:3.13.2-2")),
                 configDocument("baseline", "demo", "3.12.1"), configDocument("user", null, null));
-        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1);
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         assertThrows(IllegalStateException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x"));
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2"));
 
         verify(fixture.namespaced, never()).resource(any());
     }
@@ -178,11 +182,12 @@ class CatalogReconcilerTest {
                         "defaultVersion", "3.13.2",
                         "selectable.3.13.2", "example/wiremock:3.13.2-2")),
                 configDocument("baseline", null, null), configDocument("user", null, null));
-        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of(), 1);
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of(), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         assertThrows(IllegalArgumentException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.13"));
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                1, "3.13", "example/wiremock:3.13.2-2"));
 
         verify(fixture.namespaced, never()).resource(any());
     }
@@ -243,11 +248,12 @@ class CatalogReconcilerTest {
                               version: null
                         """));
         CatalogSelection.Selection selection = CatalogSelection.select(
-                "example/wiremock", List.of("3.14.1"), 1);
+                "example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2");
 
         ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespaced).resource(updated.capture());
@@ -267,11 +273,12 @@ class CatalogReconcilerTest {
                         "retained.3.11.0", "example/wiremock:3.11.0-3")),
                 configDocument("baseline", null, null), configDocument("user", null, null));
         CatalogSelection.Selection selection = CatalogSelection.select(
-                "example/wiremock", List.of("3.14.1"), 1);
+                "example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2");
 
         ArgumentCaptor<ConfigMap> updated = ArgumentCaptor.forClass(ConfigMap.class);
         verify(fixture.namespaced).resource(updated.capture());
@@ -285,7 +292,7 @@ class CatalogReconcilerTest {
     @Test
     void apiSaveAfterConfigReadCanReferenceGraceVersionOnNextCycle() {
         CatalogSelection.Selection selection = CatalogSelection.select(
-                "example/wiremock", List.of("3.14.1"), 1);
+                "example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
         KubernetesFixture firstCycle = fixture(
                 configMap("catalog", "28", Map.of(
                         "defaultVersion", "3.13.2",
@@ -294,7 +301,8 @@ class CatalogReconcilerTest {
                 configDocument("baseline", null, null), configDocument("user", null, null));
         new CatalogReconciler(firstCycle.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2");
         ArgumentCaptor<ConfigMap> firstUpdate = ArgumentCaptor.forClass(ConfigMap.class);
         verify(firstCycle.namespaced).resource(firstUpdate.capture());
 
@@ -303,7 +311,8 @@ class CatalogReconcilerTest {
                 configDocument("baseline", null, null), configDocument("user", "saved-after-read", "3.12.1"));
         new CatalogReconciler(nextCycle.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x");
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2");
 
         ArgumentCaptor<ConfigMap> secondUpdate = ArgumentCaptor.forClass(ConfigMap.class);
         verify(nextCycle.namespaced).resource(secondUpdate.capture());
@@ -311,15 +320,84 @@ class CatalogReconcilerTest {
                 secondUpdate.getValue().getData().get("retained.3.12.1"));
     }
 
+    @Test
+    void latestHelmRangeOverridesOldJobEnvironmentBeforeSelectingMinorLines() {
+        ConfigMap catalog = configMap("catalog", "30", Map.of(
+                "defaultVersion", "3.14.1", "selectable.3.14.1", "example/wiremock:3.14.1-2",
+                "retained.3.12.0", "example/wiremock:3.12.0"));
+        catalog.getMetadata().setAnnotations(Map.of(CatalogReconciler.IMAGE_POLICY, """
+                {"defaultImage":"example/wiremock:3.13.2-2","allowedImages":[],"allowedVersionRange":"[3.13,3.13.8]"}
+                """));
+        KubernetesFixture fixture = fixture(catalog, configDocument("baseline", "pinned", "3.12.0"),
+                configDocument("user", null, null));
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                () -> List.of("3.15.0", "3.14.2", "3.13.9", "3.13.8-5"), 1,
+                "[3.14,4.0)", "example/wiremock:3.14.0");
+        ArgumentCaptor<ConfigMap> update = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespaced).resource(update.capture());
+        assertEquals(Map.of("defaultVersion", "3.13.8",
+                "selectable.3.13.8", "example/wiremock:3.13.8-5",
+                "retained.3.14.1", "example/wiremock:3.14.1-2",
+                "retained.3.12.0", "example/wiremock:3.12.0"), update.getValue().getData());
+        assertEquals(catalog.getMetadata().getAnnotations(), update.getValue().getMetadata().getAnnotations());
+        verify(fixture.client, never()).pods();
+    }
+
+    @Test
+    void excludedDefaultFallsBackToConfiguredImageWhenRegistryIsOlder() {
+        KubernetesFixture fixture = fixture(configMap("catalog", "31", Map.of(
+                "defaultVersion", "3.14.0", "selectable.3.14.0", "example/wiremock:3.14.0")),
+                configDocument("baseline", null, null), configDocument("user", null, null));
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                () -> List.of("3.13.1"), 1, "[3.13,3.14)", "mirror/wiremock:3.13.2-7");
+        ArgumentCaptor<ConfigMap> update = ArgumentCaptor.forClass(ConfigMap.class);
+        verify(fixture.namespaced).resource(update.capture());
+        assertEquals("3.13.2", update.getValue().getData().get("defaultVersion"));
+        assertEquals("mirror/wiremock:3.13.2-7", update.getValue().getData().get("selectable.3.13.2"));
+    }
+
+    @Test
+    void emptyEligibleTagsLeaveCatalogUntouched() {
+        KubernetesFixture fixture = fixture(configMap("catalog", "32", Map.of(
+                "defaultVersion", "3.14.0", "selectable.3.14.0", "example/wiremock:3.14.0")),
+                configDocument("baseline", null, null), configDocument("user", null, null));
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                () -> List.of("3.15.0", "latest", "3.13.3-beta"), 1, "[3.13,3.14)", "example/wiremock:3.13.2-2");
+        verify(fixture.namespaced, never()).resource(any());
+        verify(fixture.client, never()).pods();
+    }
+
+    @Test
+    void helmStaticModeStopsOldJobsBeforeRegistryAccess() {
+        ConfigMap catalog = configMap("catalog", "33", Map.of(
+                "defaultVersion", "3.13.2", "selectable.3.13.2", "example/wiremock:3.13.2-2"));
+        catalog.getMetadata().setAnnotations(Map.of(CatalogReconciler.IMAGE_POLICY, """
+                {"defaultImage":"example/wiremock:3.13.2-2","allowedImages":["example/wiremock:3.13.2-2"],"allowedVersionRange":""}
+                """));
+        KubernetesFixture fixture = fixture(catalog, configDocument("baseline", null, null),
+                configDocument("user", null, null));
+        new CatalogReconciler(fixture.client, yaml()).reconcile(
+                "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
+                () -> { throw new AssertionError("Static mode must not call the registry"); },
+                1, "[3.0,4.0)", "example/wiremock:3.13.2-2");
+        verify(fixture.namespaced, never()).resource(any());
+        verify(fixture.baseline, never()).get();
+        verify(fixture.user, never()).get();
+    }
+
     private static void assertInvalidCatalog(Map<String, String> catalogData, String referencedVersion) {
         KubernetesFixture fixture = fixture(configMap("catalog", "25", catalogData),
                 configDocument("baseline", referencedVersion == null ? null : "demo", referencedVersion),
                 configDocument("user", null, null));
-        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1);
+        CatalogSelection.Selection selection = CatalogSelection.select("example/wiremock", List.of("3.14.1"), 1, AllowedVersionRange.parse("[3.0,4.0)"));
 
         assertThrows(IllegalStateException.class, () -> new CatalogReconciler(fixture.client, yaml()).reconcile(
                 "test", "catalog", "baseline", "user", "wiremock.yaml", "example/wiremock",
-                selection, "3.x"));
+                () -> selection.candidates().stream().map(WireMockTag::imageTag).toList(),
+                selection.selectable().size(), "[3.0,4.0)", "example/wiremock:3.13.2-2"));
 
         verify(fixture.namespaced, never()).resource(any());
     }

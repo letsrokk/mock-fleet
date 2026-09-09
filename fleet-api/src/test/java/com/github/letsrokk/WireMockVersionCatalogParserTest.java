@@ -5,6 +5,7 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -104,6 +105,73 @@ class WireMockVersionCatalogParserTest {
         assertThrows(IllegalArgumentException.class, () -> parser.parse(configMap("42", Map.of(
                 "defaultVersion", "3.13.2",
                 "selectable.3.13.02", "wiremock/wiremock:3.13.2-2"))));
+    }
+
+    @Test
+    void staticPolicyRequiresExactImagesAndFallsBackWithoutDroppingExistingPins() {
+        ConfigMap config = configMap("43", Map.of(
+                "defaultVersion", "3.13.2",
+                "selectable.3.13.2", "wiremock/wiremock:3.13.2-2",
+                "retained.3.12.1", "wiremock/wiremock:3.12.1"));
+        config.getMetadata().setAnnotations(Map.of("mock-fleet/image-policy", """
+                {"defaultImage":"wiremock/wiremock:3.12.1",
+                 "allowedImages":["wiremock/wiremock:3.12.1","wiremock/wiremock:3.13.2-1"],
+                 "allowedVersionRange":""}
+                """));
+        WireMockVersionCatalog catalog = parser.parse(config);
+        assertEquals(WireMockVersion.parse("3.12.1"), catalog.defaultVersion());
+        assertTrue(catalog.versions().get(WireMockVersion.parse("3.12.1")).selectable());
+        assertEquals(false, catalog.versions().get(WireMockVersion.parse("3.13.2")).selectable());
+        assertEquals("wiremock/wiremock:3.13.2-2", catalog.versions().get(WireMockVersion.parse("3.13.2")).image());
+    }
+
+    @Test
+    void rangePolicyPreservesAnAllowedRuntimeDefaultAndFiltersStaleSelections() {
+        ConfigMap config = configMap("44", Map.of(
+                "defaultVersion", "3.13.2", "selectable.3.13.2", "wiremock/wiremock:3.13.2-7",
+                "selectable.3.12.1", "wiremock/wiremock:3.12.1",
+                "selectable.3.14.0", "wiremock/wiremock:3.14.0"));
+        config.getMetadata().setAnnotations(Map.of("mock-fleet/image-policy", """
+                {"defaultImage":"wiremock/wiremock:3.12.1","allowedImages":[],"allowedVersionRange":"[3.12,3.14)"}
+                """));
+        WireMockVersionCatalog catalog = parser.parse(config);
+        assertEquals(WireMockVersion.parse("3.13.2"), catalog.defaultVersion());
+        assertEquals(false, catalog.versions().get(WireMockVersion.parse("3.14.0")).selectable());
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = ';', value = {
+            "[3.12,3.13];true;true", "[3.12,3.13);true;false",
+            "(3.12,3.13];false;true", "(3.12,3.13);false;false",
+            "[3.12,3.12];true;false", "[3.12.0,3.13.0];true;true",
+            "[3.0,999999999999999999999.0);true;true"
+    })
+    void intervalBoundariesUseExactNumericVersions(String interval, boolean lower, boolean upper) {
+        WireMockAllowedVersionRange range = WireMockAllowedVersionRange.parse(interval);
+        assertEquals(lower, range.contains(WireMockVersion.parseImage("wiremock/wiremock:3.12.0-7")));
+        assertEquals(upper, range.contains(WireMockVersion.parse("3.13.0")));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"3.x", "[3,4)", "[3.12,3.11]", "(3.12,3.12]", "[3.12,3.12)",
+            "(3.12,3.12)", "[3.01,4.0)", "[3.0, 4.0)", "[3.0,4.0-beta)", "[3.0,)", ""})
+    void rejectsMalformedOrEmptyIntervals(String interval) {
+        assertThrows(IllegalArgumentException.class, () -> WireMockAllowedVersionRange.parse(interval));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "{}", "null", "not-json",
+            "{\"defaultImage\":\"wiremock/wiremock:3.13.2\",\"allowedImages\":[],\"allowedVersionRange\":\"\"}",
+            "{\"defaultImage\":\"wiremock/wiremock:3.13.2\",\"allowedImages\":[\"wiremock/wiremock:3.13.2\"],\"allowedVersionRange\":\"[3.0,4.0)\"}",
+            "{\"defaultImage\":\"wiremock/wiremock:3.13.2\",\"allowedImages\":[],\"allowedVersionRange\":\"[3.0,3.12)\"}",
+            "{\"defaultImage\":\"wiremock/wiremock:3.12.1\",\"allowedImages\":[],\"allowedVersionRange\":\"[3.0,3.12.1]\"}"
+    })
+    void rejectsInvalidPoliciesAndMissingFallbackImages(String policy) {
+        ConfigMap config = configMap("45", Map.of(
+                "defaultVersion", "3.13.2", "selectable.3.13.2", "wiremock/wiremock:3.13.2"));
+        config.getMetadata().setAnnotations(Map.of("mock-fleet/image-policy", policy));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(config));
     }
 
     private ConfigMap configMap(String resourceVersion, Map<String, String> data) {
