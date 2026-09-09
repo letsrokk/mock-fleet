@@ -33,6 +33,10 @@ public final class MockOpsCommand implements QuarkusApplication {
 
     @Override
     public int run(String... args) {
+        if (args.length == 1 && "initialize-user-config".equals(args[0])) {
+            UserConfigInitializer.initialize(kubernetes, config.namespace(), config.userConfigMapName(), config.configKey());
+            return 0;
+        }
         URI registryUri = URI.create(config.registryUrl());
         String imageRepository = imageRepository(registryUri, config.repository(), config.imageRepository());
         new CatalogReconciler(kubernetes, new ObjectMapper(new YAMLFactory())).reconcile(
