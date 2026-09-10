@@ -11,6 +11,10 @@ It is deployed as three core services and one optional service:
 
 ## Main Functions
 
+### Supported Mock Kinds
+
+- **WireMock** — the only supported mock kind currently; supports 3.x+.
+
 ### Active Mocks
 
 Inspect currently active mocks.
