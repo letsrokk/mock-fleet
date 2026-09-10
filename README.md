@@ -40,27 +40,19 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
   --create-namespace
 ```
 
-Install from this repository:
-
-```bash
-helm upgrade --install mock-fleet deploy/helm/mock-fleet \
-  --namespace mock-fleet \
-  --create-namespace
-```
-
 For all chart values and deployment options, see the [Helm chart README](deploy/helm/mock-fleet/README.md).
-
-## Mock Ops
-
-Mock Ops discovers WireMock releases and updates the available versions and default within the configured version range, without restarting active mocks. Enable it by adding `--set mockOps.enabled=true` to the Helm command above.
-
-See the [Mock Ops chart options](deploy/helm/mock-fleet/README.md#fleet-mock-ops) for version ranges and private registries. With Helm 4, use `--server-side=false` when upgrading.
 
 ## MCP
 
 MCP lets AI clients operate mocks through the Model Context Protocol. Enable it by adding `--set fleet.mcp.enabled=true --set ingress.enabled=true` to the Helm command above, then connect your client to `/__fleet/mcp` on your ingress host.
 
 See the [MCP contract and examples](docs/mcp-contract.md) for client usage.
+
+## Mock Ops
+
+Mock Ops discovers WireMock releases and updates the available versions and default within the configured version range, without restarting active mocks. Enable it by adding `--set mockOps.enabled=true` to the Helm command above.
+
+See the [Mock Ops chart options](deploy/helm/mock-fleet/README.md#fleet-mock-ops) for version ranges and private registries. With Helm 4, use `--server-side=false` when upgrading.
 
 ## Further Reading
 
