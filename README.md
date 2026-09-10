@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="fleet-dash/public/favicon.svg" width="220" height="220" alt="Mock Fleet logo">
+</p>
+
 # mock-fleet
 
 `mock-fleet` routes HTTP requests to on-demand WireMock pods in Kubernetes and provides a dashboard and optional MCP server for operating those mocks.
