@@ -531,10 +531,10 @@ Reconciliation validates the complete registry result, both configuration docume
 | `rbac.create` | `true` | Create role and role binding for mock pod management. |
 | `resourceQuota.enabled` | `true` | Create the namespace quota backstop. Disabling it removes the cluster-side aggregate pod/CPU/memory boundary. |
 | `resourceQuota.hard.pods` | `30` | Namespace pod quota; size for active mocks, fixed workloads, and rollout or operator pods. |
-| `resourceQuota.hard.requests.cpu` | `"8"` | Aggregate namespace CPU-request quota. |
-| `resourceQuota.hard.requests.memory` | `12Gi` | Aggregate namespace memory-request quota. |
-| `resourceQuota.hard.limits.cpu` | `"16"` | Aggregate namespace CPU-limit quota. |
-| `resourceQuota.hard.limits.memory` | `24Gi` | Aggregate namespace memory-limit quota. |
+| `resourceQuota.hard.requests.cpu` | `"16"` | Aggregate namespace CPU-request quota. |
+| `resourceQuota.hard.requests.memory` | `16Gi` | Aggregate namespace memory-request quota. |
+| `resourceQuota.hard.limits.cpu` | `"36"` | Aggregate namespace CPU-limit quota. |
+| `resourceQuota.hard.limits.memory` | `36Gi` | Aggregate namespace memory-limit quota. |
 | `hazelcast.clusterName` | `mock-fleet` | Cluster name used by embedded Hazelcast members. |
 | `hazelcast.port` | `5701` | Embedded Hazelcast member and headless-service port. |
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
