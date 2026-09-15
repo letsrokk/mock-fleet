@@ -394,7 +394,6 @@ if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
     use_minikube_docker_daemon
     docker build -t ghcr.io/letsrokk/mock-fleet/tinyproxy:latest "${REPO_ROOT}/fleet-tinyproxy"
     reset_docker_daemon
-    "${SCRIPT_DIR}/setup-tinyproxy.sh"
 fi
 HELM_ARGS=(
     upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"

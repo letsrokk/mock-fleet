@@ -185,7 +185,7 @@ client -> Traefik or NLB -> Tinyproxy -> Fleet ingress -> Fleet Proxy -> mock po
 ```
 
 The base chart disables the proxy. `make local-deploy` enables it, builds its
-Alpine-based image, configures Traefik listeners, and maps the Fleet hostname to
+Alpine-based image and maps the Fleet hostname to
 Traefik’s current ClusterIP using `hostAliases` only on Tinyproxy pods. Minikube
 supports PATH routing only; local setup does not modify shared CoreDNS. Keep `minikube tunnel`
 running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `TINYPROXY=false` or `--no-tinyproxy`.
@@ -233,11 +233,13 @@ can use HOST routing with normal DNS resolution and certificates covering mock s
 
 ### Traefik and AWS
 
-Traefik needs the CRD provider and two dedicated entry points. The local helper
-`bin/local/setup-tinyproxy.sh` applies
-`deploy/helm/traefik/values.tinyproxy.minikube.yaml` to the installed controller,
-keeping its chart version and existing values. Port 8080 uses container port 18080
-to avoid Traefik's administrative listener. Port 8433 uses container port 18433.
+Traefik needs the CRD provider and two dedicated entry points. Configure them in
+[the shared Minikube workloads repo](https://github.com/letsrokk/minikube), in
+`environments/minikube/traefik-values.yaml.gotmpl`, and apply that stack before
+using Tinyproxy. Mock Fleet does not install or upgrade Traefik. The required
+entry points are `tinyproxy-http` (Service 8080, container 18080) and
+`tinyproxy-https` (Service 8433, container 18433). Mock Fleet owns the TCP routes
+and selects Traefik's default TLS certificate unless another Secret is supplied.
 A standard HTTP Ingress cannot expose the CONNECT tunnel.
 
 For AWS, merge `values.aws-nlb.example.yaml` with your Fleet AWS values. Replace

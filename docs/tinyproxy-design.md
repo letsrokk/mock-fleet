@@ -110,12 +110,11 @@ entry point, and a TLS route matching the proxy hostname on the HTTPS entry
 point. Both target the Tinyproxy ClusterIP Service. Render these CRDs only when
 `fleet.tinyproxy.ingress.enabled` is true.
 
-Provide a small Traefik Helm values overlay declaring and exposing ports 8080
-and 8433. The local setup applies this overlay to the existing Traefik release;
-the Fleet chart does not own the Traefik installation. Preserve other controller
-values. Port 8080 must use a distinct container listener port if Traefik's
-administrative entry point already occupies container port 8080. Existing
-public ports 80 and 443 continue serving Fleet.
+The shared Minikube workloads repository owns Traefik's Helm values and its
+8080/8433 Service ports. Mock Fleet owns only its TCP routes and does not upgrade
+Traefik during local deployment. The dedicated container listener ports are
+18080/18433, avoiding Traefik's administrative port. Existing public ports 80/443
+continue serving Fleet. Apply the shared workloads stack before using Tinyproxy.
 
 Minikube supports PATH routing only. Local deployment reads Traefik's Service
 ClusterIP and passes `fleet.tinyproxy.hostAliases` to Helm, mapping the exact
