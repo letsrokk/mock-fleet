@@ -197,11 +197,11 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --set fleet.mitmproxy.caSecretName=mock-fleet-mitmproxy-ca
 ```
 
-The namespace must exist before creating the Secret. For Minikube, `make local-deploy MITMPROXY=true` creates a local CA Secret if absent and enables a LoadBalancer Service on port 8888. Keep `minikube tunnel` running and obtain its address with `kubectl -n mock-fleet get service mock-fleet-mitmproxy`. The local CA survives Helm uninstall; deleting the namespace deletes it.
+The namespace must exist before creating the Secret. For Minikube, `make local-deploy` enables mitmweb by default, creates a local CA Secret if absent, and exposes a LoadBalancer Service on port 8888. Use `make local-deploy MITMPROXY=false` or `bin/local/deploy.sh --no-mitmproxy` to disable it. Keep `minikube tunnel` running and obtain its address with `kubectl -n mock-fleet get service mock-fleet-mitmproxy`. The local CA survives Helm uninstall; deleting the namespace deletes it.
 
 | Value | Default | Purpose |
 | --- | --- | --- |
-| `fleet.mitmproxy.enabled` | `false` | Render the Deployment, Service, ConfigMap, and NetworkPolicy. |
+| `fleet.mitmproxy.enabled` | `false` (`true` in Minikube) | Render the Deployment, Service, ConfigMap, and NetworkPolicy. |
 | `fleet.mitmproxy.image` | `mitmproxy/mitmproxy:12.2.3`, `IfNotPresent` | Pinned mitmweb image, independent of the Fleet application version. |
 | `fleet.mitmproxy.replicas` | `1` | Number of proxy pods; each UI shows only that pod's traffic. |
 | `fleet.mitmproxy.caSecretName` | `""` | Required existing CA Secret when enabled. |

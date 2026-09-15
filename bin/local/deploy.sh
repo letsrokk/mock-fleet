@@ -17,17 +17,18 @@ REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
-ENABLE_MITMPROXY=false
+ENABLE_MITMPROXY=true
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy|--no-mitmproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
-  --mitmproxy         Enable mitmweb on port 8888 and create its local CA Secret if absent.
+  --mitmproxy         Enable mitmweb on port 8888 (default); create its local CA Secret if absent.
+  --no-mitmproxy      Disable mitmweb for this local deployment.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
@@ -213,6 +214,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --mitmproxy)
             ENABLE_MITMPROXY=true
+            shift
+            ;;
+        --no-mitmproxy)
+            ENABLE_MITMPROXY=false
             shift
             ;;
         --port-forward)
@@ -429,9 +434,7 @@ HELM_ARGS=(
     --set "mockOps.image.tag=latest"
 )
 
-if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
-    HELM_ARGS+=(--set "fleet.mitmproxy.enabled=true")
-fi
+HELM_ARGS+=(--set "fleet.mitmproxy.enabled=${ENABLE_MITMPROXY}")
 
 if [[ "${REMOTE_DEV_MODULE}" == "proxy" ]]; then
     HELM_ARGS+=(--set "fleet.proxy.dev.enabled=true")

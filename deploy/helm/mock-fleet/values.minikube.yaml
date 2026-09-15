@@ -8,6 +8,7 @@ ingress:
 
 fleet:
   mitmproxy:
+    enabled: true
     caSecretName: mock-fleet-mitmproxy-ca
     service:
       type: LoadBalancer

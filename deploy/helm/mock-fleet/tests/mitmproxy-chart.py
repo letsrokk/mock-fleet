@@ -8,12 +8,14 @@ from pathlib import Path
 CHART = Path(__file__).resolve().parents[1]
 
 
-def render(values, valid=True):
+def render(values, valid=True, minikube=False):
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json") as source:
         json.dump(values, source)
         source.flush()
         result = subprocess.run(
-            ["helm", "template", "proxy-test", str(CHART), "-f", source.name],
+            ["helm", "template", "proxy-test", str(CHART)]
+            + (["-f", str(CHART / "values.minikube.yaml")] if minikube else [])
+            + ["-f", source.name],
             capture_output=True, text=True,
         )
     assert (result.returncode == 0) == valid, result.stderr
@@ -21,6 +23,8 @@ def render(values, valid=True):
 
 
 assert "name: mock-fleet-mitmproxy" not in render({})
+assert "name: mock-fleet-mitmproxy" in render({}, minikube=True)
+assert "name: mock-fleet-mitmproxy" not in render({"fleet": {"mitmproxy": {"enabled": False}}}, minikube=True)
 values = {"fleet": {"mitmproxy": {"enabled": True, "caSecretName": "test-ca"}}}
 output = render(values)
 assert "name: mock-fleet-mitmproxy" in output
