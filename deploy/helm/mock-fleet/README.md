@@ -203,14 +203,14 @@ Scrape every replica directly: a load-balanced Service address hides individual 
 
 ### Scrape configuration
 
-API, proxy, and MCP pod templates include `prometheus.io/scrape: "false"`, `prometheus.io/port` from the component's `service.ports.targetHttp`, the metrics path above, and `prometheus.io/scheme: "http"`. Enable scraping for these components with `--set metrics.scrape=true` or a values file:
+Prometheus annotations are omitted by default. Set `metrics.enabled=true` to add all four annotations to API, proxy, and MCP pod templates: `prometheus.io/scrape: "true"`, `prometheus.io/port` from the component's `service.ports.targetHttp`, the metrics path above, and `prometheus.io/scheme: "http"`. Use `--set metrics.enabled=true` or a values file:
 
 ```yaml
 metrics:
-  scrape: true
+  enabled: true
 ```
 
-The Prometheus scraper or OTel Collector Prometheus receiver must be configured to honor these annotations. Setting `metrics.scrape` changes discovery metadata; it does not disable the metrics endpoints. The example below honors the toggle and annotated path/scheme, using the named `http` container port advertised by `prometheus.io/port`.
+The Prometheus scraper or OTel Collector Prometheus receiver must be configured to honor these annotations. Setting `metrics.enabled` changes discovery metadata; it does not disable the metrics endpoints. The example below honors the toggle and annotated path/scheme, using the named `http` container port advertised by `prometheus.io/port`.
 
 Add this job to an existing in-cluster Prometheus configuration. Its service account needs permission to list/watch pods in the target namespace and network access to their HTTP ports. Replace namespace `mock-fleet`, instance `mock-fleet` (the Helm release name), and name `mock-fleet` (the chart name or `nameOverride`) with your deployment values. No Prometheus installation or ServiceMonitor is supplied by this chart. The configuration uses [Prometheus Kubernetes pod discovery and relabeling](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#kubernetes_sd_config).
 
@@ -353,7 +353,7 @@ The admission policy accepts zero identity projections or exactly one projection
 | `fullnameOverride` | `""` | Override the full release resource name. |
 | `namespaceOverride` | `""` | Override the namespace rendered into namespaced resources. |
 | `clusterDomain` | `cluster.local` | Kubernetes cluster DNS suffix used for internal API and Proxy service URLs. |
-| `metrics.scrape` | `false` | Set `prometheus.io/scrape` on API, proxy, and MCP pods. Requires a scraper configured to honor pod annotations. |
+| `metrics.enabled` | `false` | Add Prometheus scrape annotations to API, proxy, and MCP pods only when enabled. Requires a scraper configured to honor pod annotations. |
 
 ### Proxy
 

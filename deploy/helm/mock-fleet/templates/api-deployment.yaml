@@ -24,10 +24,12 @@ spec:
   template:
     metadata:
       annotations:
-        prometheus.io/scrape: {{ .Values.metrics.scrape | quote }}
+        {{- if .Values.metrics.enabled }}
+        prometheus.io/scrape: "true"
         prometheus.io/port: {{ .Values.fleet.api.service.ports.targetHttp | quote }}
         prometheus.io/path: "/__fleet/api/metrics"
         prometheus.io/scheme: "http"
+        {{- end }}
         checksum/wiremock-config: {{ include (print $.Template.BasePath "/wiremock-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
