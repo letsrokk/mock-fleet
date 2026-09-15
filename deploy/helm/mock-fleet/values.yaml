@@ -4,45 +4,50 @@ namespaceOverride: ""
 clusterDomain: cluster.local
 
 fleet:
+  # The configuration name is retained; the container runs Tinyproxy.
   mitmproxy:
     enabled: false
     image:
-      repository: mitmproxy/mitmproxy
-      tag: "12.2.3"
+      repository: ghcr.io/letsrokk/mock-fleet/tinyproxy
+      tag: ""
       pullPolicy: IfNotPresent
     replicas: 1
-    caSecretName: ""
     ingress:
-      enabled: false
+      enabled: true
       className: traefik
-      entryPoint: websecure
-      webHost: mitmweb.localhost
-      proxyHost: mitmproxy.localhost
+      httpEntryPoint: tinyproxy-http
+      httpsEntryPoint: tinyproxy-https
+      hostname: tinyproxy.localhost
       tlsSecretName: ""
     service:
-      type: ClusterIP
+      ports:
+        http: 8080
+        https: 8433
+      loadBalancerClass: ""
+      annotations: {}
+      loadBalancerSourceRanges: []
     networkPolicy:
       dnsNamespace: kube-system
       dnsPodSelector:
         k8s-app: kube-dns
+      ingressNamespace: ingress-nginx
+      ingressPodSelector:
+        app.kubernetes.io/name: ingress-nginx
+        app.kubernetes.io/component: controller
+      ingressPorts: [80, 443]
+      allowedCidrs: []
+    # Native Tinyproxy tuning directives; routing/listener directives are fixed.
     config:
-      mode: [regular]
-      listen_host: 0.0.0.0
-      listen_port: 8888
-      connection_strategy: lazy
-      upstream_cert: false
-      block_global: false
-      web_host: 0.0.0.0
-      web_port: 8081
-      web_open_browser: false
-      web_password: mitmweb
+      Timeout: 600
+      MaxClients: 100
+      LogLevel: Connect
     resources:
       requests:
-        cpu: "0.1"
-        memory: 128Mi
+        cpu: 10m
+        memory: 16Mi
       limits:
         cpu: "1"
-        memory: 512Mi
+        memory: 64Mi
   proxy:
     dev:
       enabled: false

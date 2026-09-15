@@ -1,4 +1,22 @@
 {{- if .Values.fleet.mitmproxy.enabled }}
+{{- $proxy := .Values.fleet.mitmproxy }}
+{{- if eq (int $proxy.service.ports.http) (int $proxy.service.ports.https) }}
+{{- fail "Tinyproxy HTTP and HTTPS ports must differ" }}
+{{- end }}
+{{- if not $proxy.ingress.enabled }}
+{{- if not $proxy.service.loadBalancerSourceRanges }}
+{{- fail "fleet.mitmproxy.service.loadBalancerSourceRanges is required for LoadBalancer exposure" }}
+{{- end }}
+{{- if eq $proxy.service.loadBalancerClass "service.k8s.aws/nlb" }}
+{{- $_ := required "AWS NLB requires the aws-load-balancer-ssl-cert annotation" (index $proxy.service.annotations "service.beta.kubernetes.io/aws-load-balancer-ssl-cert") }}
+{{- if ne (index $proxy.service.annotations "service.beta.kubernetes.io/aws-load-balancer-ssl-ports") (toString $proxy.service.ports.https) }}
+{{- fail "AWS NLB ssl-ports annotation must match only the Tinyproxy HTTPS port" }}
+{{- end }}
+{{- if ne (index $proxy.service.annotations "service.beta.kubernetes.io/aws-load-balancer-backend-protocol") "tcp" }}
+{{- fail "AWS NLB backend protocol must be tcp" }}
+{{- end }}
+{{- end }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,17 +25,30 @@ metadata:
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
     app.kubernetes.io/component: mitmproxy
+  {{- if and (not $proxy.ingress.enabled) $proxy.service.annotations }}
+  annotations:
+    {{- toYaml $proxy.service.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  type: {{ .Values.fleet.mitmproxy.service.type }}
+  type: {{ ternary "ClusterIP" "LoadBalancer" $proxy.ingress.enabled }}
+  {{- if not $proxy.ingress.enabled }}
+  {{- with $proxy.service.loadBalancerClass }}
+  loadBalancerClass: {{ . | quote }}
+  {{- end }}
+  loadBalancerSourceRanges:
+    {{- toYaml $proxy.service.loadBalancerSourceRanges | nindent 4 }}
+  {{- end }}
   selector:
     {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 4 }}
   ports:
-    - name: proxy
-      port: 8888
+    - name: http
+      port: {{ $proxy.service.ports.http }}
       targetPort: proxy
       protocol: TCP
-    - name: web
-      port: 8081
-      targetPort: web
+    {{- if not $proxy.ingress.enabled }}
+    - name: https
+      port: {{ $proxy.service.ports.https }}
+      targetPort: proxy
       protocol: TCP
+    {{- end }}
 {{- end }}

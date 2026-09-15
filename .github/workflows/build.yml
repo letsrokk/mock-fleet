@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
+      tinyproxy: ${{ inputs.build_all || steps.filter.outputs.tinyproxy == 'true' }}
       proxy: ${{ inputs.build_all || steps.filter.outputs.proxy == 'true' }}
       api: ${{ inputs.build_all || steps.filter.outputs.api == 'true' }}
       mcp: ${{ inputs.build_all || steps.filter.outputs.mcp == 'true' }}
@@ -53,6 +54,10 @@ jobs:
         with:
           base: ${{ github.event.created && github.event.repository.default_branch || github.ref }}
           filters: |
+            tinyproxy:
+              - 'fleet-tinyproxy/**'
+              - 'deploy/helm/mock-fleet/**'
+              - '.github/workflows/build.yml'
             proxy:
               - 'fleet-proxy/**'
               - '.github/workflows/build.yml'
@@ -243,3 +248,16 @@ jobs:
           name: fleet-dash-package
           path: fleet-dash/dist
           if-no-files-found: error
+
+  fleet-tinyproxy:
+    name: Build Tinyproxy and check chart
+    needs: changes
+    if: needs.changes.outputs.tinyproxy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: docker build -t mock-fleet-tinyproxy:test fleet-tinyproxy
+      - run: helm dependency build deploy/helm/mock-fleet
+      - run: helm lint deploy/helm/mock-fleet
+      - run: python3 deploy/helm/mock-fleet/tests/mitmproxy-chart.py

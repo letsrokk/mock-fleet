@@ -9,13 +9,18 @@ ingress:
 fleet:
   mitmproxy:
     enabled: true
-    caSecretName: mock-fleet-mitmproxy-ca
+    image:
+      tag: latest
     ingress:
       enabled: true
-      webHost: mitmweb.minikube.localhost
-      proxyHost: mitmproxy.minikube.localhost
-    service:
-      type: ClusterIP
+      hostname: tinyproxy.minikube.localhost
+    networkPolicy:
+      ingressNamespace: traefik
+      ingressPodSelector:
+        app.kubernetes.io/name: traefik
+        app.kubernetes.io/component: null
+        app.kubernetes.io/instance: traefik-traefik
+      ingressPorts: [8000, 8443]
   mcp:
     enabled: true
     allowedOrigins:

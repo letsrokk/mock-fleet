@@ -16,16 +16,31 @@ spec:
     - ports:
         - protocol: TCP
           port: 8888
-        - protocol: TCP
-          port: 8081
   egress:
+    {{- if .Values.fleet.mitmproxy.networkPolicy.ingressPodSelector }}
     - to:
-        - podSelector:
+        - namespaceSelector:
             matchLabels:
-              {{- include "mock-fleet.proxySelectorLabels" . | nindent 14 }}
+              kubernetes.io/metadata.name: {{ .Values.fleet.mitmproxy.networkPolicy.ingressNamespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.fleet.mitmproxy.networkPolicy.ingressPodSelector | nindent 14 }}
+      ports:
+        {{- range .Values.fleet.mitmproxy.networkPolicy.ingressPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- range .Values.fleet.mitmproxy.networkPolicy.allowedCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
       ports:
         - protocol: TCP
-          port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+          port: 80
+        - protocol: TCP
+          port: 443
+    {{- end }}
     - to:
         - namespaceSelector:
             matchLabels:

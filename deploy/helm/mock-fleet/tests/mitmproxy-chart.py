@@ -22,53 +22,65 @@ def render(values, valid=True, minikube=False):
     return result.stdout
 
 
+
+def document(output, source):
+    return next(doc for doc in output.split("---\n") if f"# Source: mock-fleet/templates/{source}" in doc)
+
 assert "name: mock-fleet-mitmproxy" not in render({})
 local = render({}, minikube=True)
-assert "name: mock-fleet-mitmproxy" in local
-assert 'host: "mitmweb.minikube.localhost"' in local
-assert 'HostSNI(`mitmproxy.minikube.localhost`)' in local
-assert "kind: IngressRouteTCP" in local and "tls: {}" in local
-assert 'ingressClassName: "traefik"' in local
-assert '    - "websecure"' in local
-assert "type: LoadBalancer" not in local
-assert "kind: IngressRouteTCP" not in render({"fleet": {"mitmproxy": {"ingress": {"enabled": False}}}}, minikube=True)
-render({"fleet": {"mitmproxy": {"ingress": {"webHost": "same.localhost", "proxyHost": "same.localhost"}}}}, valid=False, minikube=True)
-custom_tls = render({"fleet": {"mitmproxy": {"ingress": {"tlsSecretName": "ingress-cert"}}}}, minikube=True)
-assert custom_tls.count('secretName: "ingress-cert"') == 2
-assert "name: mock-fleet-mitmproxy" not in render({"fleet": {"mitmproxy": {"enabled": False}}}, minikube=True)
-values = {"fleet": {"mitmproxy": {"enabled": True, "caSecretName": "test-ca"}}}
-output = render(values)
-assert "name: mock-fleet-mitmproxy" in output
-assert "command: [mitmweb]" in output
-assert "web_password: mitmweb" in output
-assert "port: 8888" in output
-assert "secretName: \"test-ca\"" in output
-assert "/home/mitmproxy/.mitmproxy/config.yaml" in output
-assert "checksum/config:" in output
-render({"fleet": {"mitmproxy": {"enabled": True}}}, valid=False)
-for config in ({"listen_port": 9999}, {"mode": ["reverse:http://example.com"]},
-               {"connection_strategy": "eager"}, {"upstream_cert": True}):
-    render({"fleet": {"mitmproxy": {"enabled": True, "caSecretName": "test-ca", "config": config}}}, valid=False)
-policy = next(doc for doc in output.split("---\n") if "# Source: mock-fleet/templates/mitmproxy-networkpolicy.yaml" in doc)
-assert "policyTypes: [Ingress, Egress]" in policy
-assert policy.count("    - to:") == 2
-assert "ipBlock:" not in policy
-assert "app.kubernetes.io/instance: proxy-test" in policy
-assert "app.kubernetes.io/component: proxy" in policy
-assert 'kubernetes.io/metadata.name: "kube-system"' in policy
-assert "k8s-app: kube-dns" in policy
+assert local.count("kind: IngressRouteTCP") == 2
+assert 'HostSNI(`tinyproxy.minikube.localhost`)' in local
+assert 'HostSNI(`*`)' in local
+assert '"tinyproxy-http"' in local and '"tinyproxy-https"' in local
+assert "tls: {}" in local
+service = document(local, "mitmproxy-service.yaml")
+assert "type: ClusterIP" in service and "port: 8080" in service
+assert "port: 8433" not in service and "loadBalancerClass:" not in service
+assert "mitmproxy-ca" not in local and "route.py" not in local
+assert "web_password" not in local and "containerPort: 8081" not in local
+assert 'image: "ghcr.io/letsrokk/mock-fleet/tinyproxy:latest"' in local
+assert "mountPath: /etc/tinyproxy" in local
+policy = document(local, "mitmproxy-networkpolicy.yaml")
+assert 'kubernetes.io/metadata.name: "traefik"' in policy
+assert "app.kubernetes.io/name: traefik" in policy
+assert "app.kubernetes.io/component: controller" not in policy
+assert "port: 8000" in policy and "port: 8443" in policy
 assert policy.count("port: 53") == 2
-assert "port: 8080" in policy
-service = next(doc for doc in output.split("---\n") if "# Source: mock-fleet/templates/mitmproxy-service.yaml" in doc)
-assert "port: 8081" in service and "port: 8888" in service
-assert "port: 8081" in policy
-assert "web_host: 0.0.0.0" in output
-custom = render({"fullnameOverride": "custom", "namespaceOverride": "custom-ns", "clusterDomain": "example.internal",
-                 "fleet": {"mitmproxy": {"enabled": True, "caSecretName": "custom-ca", "config": {"termlog_verbosity": "debug"}}}})
-assert 'value: "custom-proxy.custom-ns.svc.example.internal"' in custom
-assert "namespace: custom-ns" in custom
-assert "termlog_verbosity: debug" in custom
-checksum = lambda text: next(line.strip() for line in text.splitlines() if "checksum/config:" in line)
-changed = render({"fleet": {"mitmproxy": {"enabled": True, "caSecretName": "test-ca", "config": {"web_password": "different"}}}})
-assert checksum(output) != checksum(changed)
-print("Mitmproxy render checks passed")
+assert "ipBlock:" not in policy
+assert "name: mock-fleet-mitmproxy" not in render({"fleet": {"mitmproxy": {"enabled": False}}}, minikube=True)
+aws_annotations = {
+    "service.beta.kubernetes.io/aws-load-balancer-ssl-cert": "arn:aws:acm:test",
+    "service.beta.kubernetes.io/aws-load-balancer-ssl-ports": "8433",
+    "service.beta.kubernetes.io/aws-load-balancer-backend-protocol": "tcp",
+}
+aws = {"fleet": {"mitmproxy": {
+    "enabled": True, "ingress": {"enabled": False},
+    "service": {"loadBalancerClass": "service.k8s.aws/nlb", "annotations": aws_annotations,
+                "loadBalancerSourceRanges": ["10.20.0.0/16"]},
+    "networkPolicy": {"ingressPodSelector": None, "allowedCidrs": ["10.30.0.0/24"]},
+}}}
+output = render(aws)
+assert "kind: IngressRouteTCP" not in output
+service = document(output, "mitmproxy-service.yaml")
+assert "type: LoadBalancer" in service and 'loadBalancerClass: "service.k8s.aws/nlb"' in service
+assert "port: 8080" in service and "port: 8433" in service
+policy = document(output, "mitmproxy-networkpolicy.yaml")
+assert 'cidr: "10.30.0.0/24"' in policy and "ingress-nginx" not in policy
+render({"fleet": {"mitmproxy": {"enabled": True, "ingress": {"enabled": False}}}}, valid=False)
+for annotation in list(aws_annotations):
+    removed = aws_annotations.pop(annotation)
+    render(aws, valid=False)
+    aws_annotations[annotation] = removed
+for change in ({"service": {"ports": {"http": 8433}}},
+               {"ingress": {"enabled": "yes"}},
+               {"ingress": {"httpEntryPoint": "tinyproxy-https"}},
+               {"config": {"Port": 1234}}, {"config": {"pOrT": 1234}}, {"config": {"FilterDefaultDeny": "No"}},
+               {"config": {"LogLevel": "Info\nPort 1234"}}):
+    render({"fleet": {"mitmproxy": change}}, valid=False, minikube=True)
+changed = render({"fleet": {"mitmproxy": {"config": {"Timeout": 300}}}}, minikube=True)
+checksum = lambda text: next(line for line in text.splitlines() if "checksum/config:" in line)
+assert checksum(local) != checksum(changed)
+assert '^mock-fleet\\.minikube\\.localhost$' in local
+host = render({"fleet": {"proxy": {"routing": {"mode": "HOST"}}}}, minikube=True)
+assert '([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)?' in host
+print("Tinyproxy chart checks passed")

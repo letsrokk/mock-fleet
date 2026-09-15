@@ -27,8 +27,8 @@ Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy|--no-mitmproxy] [
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
-  --mitmproxy         Enable mitmweb with HTTPS ingress (default); create its local CA Secret if absent.
-  --no-mitmproxy      Disable mitmweb for this local deployment.
+  --mitmproxy         Enable Tinyproxy with HTTP/HTTPS Traefik listeners (default).
+  --no-mitmproxy      Disable Tinyproxy for this local deployment.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
@@ -391,30 +391,10 @@ helm dependency build "${CHART_DIR}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 label_namespace_for_restricted_psa "${NAMESPACE}"
 if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
-    existing_ca=$(kubectl get secret mock-fleet-mitmproxy-ca --namespace "${NAMESPACE}" --ignore-not-found -o name)
-    if [[ -z "${existing_ca}" ]]; then
-        (
-            ca_dir=$(mktemp -d)
-            trap 'rm -rf "${ca_dir}"' EXIT
-            umask 077
-            cat > "${ca_dir}/openssl.cnf" <<'EOF'
-[req]
-distinguished_name = dn
-x509_extensions = ca
-[dn]
-[ca]
-basicConstraints = critical,CA:TRUE
-keyUsage = critical,keyCertSign,cRLSign
-EOF
-            openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
-                -subj "/CN=Mock Fleet mitmproxy local CA" -config "${ca_dir}/openssl.cnf" \
-                -keyout "${ca_dir}/ca.key" -out "${ca_dir}/ca.crt"
-            cat "${ca_dir}/ca.key" "${ca_dir}/ca.crt" > "${ca_dir}/mitmproxy-ca.pem"
-            kubectl create secret generic mock-fleet-mitmproxy-ca --namespace "${NAMESPACE}" \
-                --from-file="mitmproxy-ca.pem=${ca_dir}/mitmproxy-ca.pem" \
-                --from-file="mitmproxy-ca-cert.pem=${ca_dir}/ca.crt"
-        )
-    fi
+    use_minikube_docker_daemon
+    docker build -t ghcr.io/letsrokk/mock-fleet/tinyproxy:latest "${REPO_ROOT}/fleet-tinyproxy"
+    reset_docker_daemon
+    "${SCRIPT_DIR}/setup-tinyproxy.sh"
 fi
 HELM_ARGS=(
     upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"
@@ -457,6 +437,10 @@ fi
 
 echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, MCP image=${LOCAL_MCP_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, Mock Ops image=${LOCAL_MOCK_OPS_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
+
+if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
+    rollout_component mitmproxy "$(deployment_name_for_component mitmproxy)"
+fi
 
 if has_module proxy ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then
     rollout_component proxy "$(deployment_name_for_component proxy)"

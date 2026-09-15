@@ -8,8 +8,18 @@ metadata:
     {{- include "mock-fleet.labels" . | nindent 4 }}
     app.kubernetes.io/component: mitmproxy
 data:
-  config.yaml: |
-    {{- toYaml .Values.fleet.mitmproxy.config | nindent 4 }}
-  route.py: |
-    {{- .Files.Get "files/mitmproxy-route.py" | nindent 4 }}
+  tinyproxy.conf: |
+    Port 8888
+    Listen 0.0.0.0
+    PidFile "/tmp/tinyproxy.pid"
+    ConnectPort 443
+    Filter "/etc/tinyproxy/allowed-hosts"
+    FilterType ere
+    FilterDefaultDeny Yes
+    FilterCaseSensitive No
+    {{- range $key, $value := .Values.fleet.mitmproxy.config }}
+    {{ $key }} {{ $value }}
+    {{- end }}
+  allowed-hosts: |
+    ^{{ if eq .Values.fleet.proxy.routing.mode "HOST" }}([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)?{{ end }}{{ regexQuoteMeta (required "ingress.host is required for Tinyproxy" .Values.ingress.host) }}$
 {{- end }}

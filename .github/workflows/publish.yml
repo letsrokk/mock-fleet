@@ -247,6 +247,13 @@ jobs:
           require_tag "Mock Ops" "${MOCK_OPS_TAGS}" "${MOCK_OPS_IMAGE_NAME}:${IMAGE_TAG}"
           require_tag "dashboard" "${DASH_TAGS}" "${DASH_IMAGE_NAME}:${IMAGE_TAG}"
 
+      - name: Build and push Tinyproxy Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: fleet-tinyproxy
+          push: true
+          tags: ghcr.io/letsrokk/mock-fleet/tinyproxy:${{ needs.resolve-version.outputs.image_tag }}
+
       - name: Build and push proxy Docker image
         uses: docker/build-push-action@v6
         with:
@@ -330,7 +337,12 @@ jobs:
             exit 1
           fi
 
-          rendered="$(helm template mock-fleet "${chart_package}" --set fleet.mcp.enabled=true --set mockOps.enabled=true)"
+          rendered="$(helm template mock-fleet "${chart_package}" --set fleet.mcp.enabled=true --set mockOps.enabled=true --set fleet.mitmproxy.enabled=true)"
+
+          if ! grep -Fq "ghcr.io/letsrokk/mock-fleet/tinyproxy:${IMAGE_TAG}" <<< "${rendered}"; then
+            echo "Rendered chart Tinyproxy image tag does not match the release" >&2
+            exit 1
+          fi
 
           for image in "${PROXY_IMAGE_NAME}" "${API_IMAGE_NAME}" "${MCP_IMAGE_NAME}" "${MOCK_OPS_IMAGE_NAME}" "${DASH_IMAGE_NAME}"; do
             if ! grep -Fq "image: ${image}:${IMAGE_TAG}" <<< "${rendered}"; then

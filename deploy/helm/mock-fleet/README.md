@@ -6,7 +6,7 @@ This chart deploys `mock-fleet` as three core Kubernetes services and two option
 - `fleet-api`: manages mock pods, WireMock config, lifecycle cleanup, Hazelcast state, and persisted mappings.
 - `fleet-dash`: serves the dashboard under `/__fleet/`.
 - `fleet-mcp`: exposes typed MCP tools under `/__fleet/mcp` when enabled.
-- `mitmproxy`: runs mitmweb as a forward proxy on port 8888 when enabled.
+- `mitmproxy`: runs Tinyproxy as a forward proxy on port 8888 when enabled.
 
 ## Install
 
@@ -174,103 +174,109 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 
 Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary mock URLs without authentication. MCP uses the same external access boundary as the Fleet API and does not change that behavior.
 
-## Optional forward proxy (mitmweb)
+## Optional forward proxy (Tinyproxy)
 
-Enable mitmweb when a client requires an HTTP proxy:
+The `fleet.mitmproxy` configuration name and `MITMPROXY` local flag are retained,
+but the deployment runs Tinyproxy. It forwards HTTP and tunnels HTTPS with CONNECT;
+it has no interception CA or web UI. Clients keep existing Fleet URLs, and Fleet's
+ingress handles HOST/PATH routing. Only Fleet hostnames are accepted.
 
 ```text
-client → mitmproxy:8888 → Fleet Proxy → WireMock pod
+client -> Traefik or NLB -> Tinyproxy -> Fleet ingress -> Fleet Proxy -> mock pod
 ```
 
-Clients keep their existing Fleet URLs. PATH mode accepts `ingress.host` and preserves the mock ID prefix. HOST mode also accepts `<mockId>.<ingress.host>` and preserves that hostname for Fleet routing. Other destinations receive HTTP 403. HTTPS CONNECT is intercepted and forwarded to the internal Fleet Proxy Service over HTTP; clients must trust the mitmproxy CA. The Fleet ingress certificate and the interception CA are separate.
+The base chart disables the proxy. `make local-deploy` enables it, builds its
+Alpine-based image, configures Traefik listeners, and adds a scoped CoreDNS rewrite
+for the local Fleet domain (including mock subdomains). Keep `minikube tunnel`
+running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `MITMPROXY=false` or `--no-mitmproxy`.
+The shared Traefik listeners and DNS rewrite remain installed when disabled.
 
-### Install and configure
+| Setting | Behavior |
+| --- | --- |
+| `fleet.mitmproxy.enabled` | Enable proxy resources; defaults to false, true locally. |
+| `fleet.mitmproxy.ingress.enabled: true` | ClusterIP Service plus two Traefik IngressRouteTCP resources. |
+| `fleet.mitmproxy.ingress.enabled: false` | LoadBalancer Service; configure its controller using native Service settings. |
+| `fleet.mitmproxy.service.ports` | HTTP 8080 and HTTPS 8433; Service type is derived, not separately configured. |
+| `fleet.mitmproxy.ingress.tlsSecretName` | Certificate Secret in Fleet's namespace; empty uses Traefik's default certificate. |
+| `fleet.mitmproxy.service.loadBalancerClass` | AWS profile uses `service.k8s.aws/nlb`. |
+| `fleet.mitmproxy.service.annotations` | Native controller annotations; applied only in LoadBalancer mode. |
+| `fleet.mitmproxy.service.loadBalancerSourceRanges` | Required allowed client CIDRs in LoadBalancer mode. |
+| `fleet.mitmproxy.config` | Native Tinyproxy tuning directives mounted at `/etc/tinyproxy/tinyproxy.conf`. |
 
-Create a Secret in the deployment namespace containing `mitmproxy-ca.pem` (CA private key and certificate together) and `mitmproxy-ca-cert.pem` (public certificate for clients). Use a dedicated CA with certificate-signing key usage; see [mitmproxy's CA format](https://docs.mitmproxy.org/stable/concepts/certificates/#using-a-custom-certificate-authority). The chart requires an existing Secret so replicas and replacement pods share the same CA.
+The chart fixes listener and routing/filter directives. Configure tuning such as
+`Timeout: 600`, `MaxClients: 100`, and `LogLevel: Connect`. ConfigMap changes through
+Helm roll the pods. The image tag defaults to the chart appVersion; Minikube builds
+`latest` locally. Old interception CA Secrets are no longer used or deleted.
+
+### Client configuration
+
+Use either proxy endpoint for both HTTP and HTTPS destinations:
 
 ```bash
-kubectl -n mock-fleet create secret generic mock-fleet-mitmproxy-ca \
-  --from-file=mitmproxy-ca.pem --from-file=mitmproxy-ca-cert.pem
-helm upgrade --install mock-fleet deploy/helm/mock-fleet \
-  --namespace mock-fleet --create-namespace \
-  --set fleet.mitmproxy.enabled=true \
-  --set fleet.mitmproxy.caSecretName=mock-fleet-mitmproxy-ca
+export HTTP_PROXY=http://tinyproxy.minikube.localhost:8080
+export HTTPS_PROXY=http://tinyproxy.minikube.localhost:8080
+# Or, for clients supporting TLS connections to proxies:
+export HTTP_PROXY=https://tinyproxy.minikube.localhost:8433
+export HTTPS_PROXY=https://tinyproxy.minikube.localhost:8433
+
+curl --noproxy '' --proxy "$HTTPS_PROXY" \
+  https://mock-fleet.minikube.localhost/__fleet/proxy/health/ready
 ```
 
-The namespace must exist before creating the Secret. For Minikube, `make local-deploy` enables mitmweb by default, creates a local CA Secret if absent, and enables Traefik ingress for the UI and HTTPS proxy. Use `make local-deploy MITMPROXY=false` or `bin/local/deploy.sh --no-mitmproxy` to disable it. Keep `minikube tunnel` running. The UI is `https://mitmweb.minikube.localhost` and the proxy endpoint is `https://mitmproxy.minikube.localhost:443`. Both names must resolve to Traefik. The local CA survives Helm uninstall; deleting the namespace deletes it.
+Remove Fleet hosts from `NO_PROXY`. Clients trust Fleet's ingress certificate;
+HTTPS proxy clients also trust the proxy listener certificate. No additional
+Tinyproxy CA is needed. HOST routing also requires the destination certificate to
+cover `*.mock-fleet.minikube.localhost`; the existing local `*.minikube.localhost`
+certificate covers PATH routing only. Supply the appropriate ingress certificate
+before using HOST-mode HTTPS locally. In-cluster clients can directly use
+`http://mock-fleet-mitmproxy.mock-fleet.svc.cluster.local:8080`.
 
-| Value | Default | Purpose |
-| --- | --- | --- |
-| `fleet.mitmproxy.enabled` | `false` (`true` in Minikube) | Render the Deployment, Service, ConfigMap, and NetworkPolicy. |
-| `fleet.mitmproxy.image` | `mitmproxy/mitmproxy:12.2.3`, `IfNotPresent` | Pinned mitmweb image, independent of the Fleet application version. |
-| `fleet.mitmproxy.replicas` | `1` | Number of proxy pods; each UI shows only that pod's traffic. |
-| `fleet.mitmproxy.caSecretName` | `""` | Required existing CA Secret when enabled. |
-| `fleet.mitmproxy.service.type` | `ClusterIP` | Service type; Minikube uses `ClusterIP` behind Traefik. |
-| `fleet.mitmproxy.ingress.enabled` | `false` (`true` in Minikube) | Render UI Ingress and Traefik `IngressRouteTCP` for the HTTPS proxy. |
-| `fleet.mitmproxy.ingress.className` | `traefik` | Ingress controller class for both routes. |
-| `fleet.mitmproxy.ingress.entryPoint` | `websecure` | Traefik TLS listener; normally public port 443. |
-| `fleet.mitmproxy.ingress.webHost` | `mitmweb.localhost` | UI hostname; Minikube uses `mitmweb.minikube.localhost`. |
-| `fleet.mitmproxy.ingress.proxyHost` | `mitmproxy.localhost` | HTTPS proxy hostname; Minikube uses `mitmproxy.minikube.localhost`. |
-| `fleet.mitmproxy.ingress.tlsSecretName` | `""` | TLS Secret covering both ingress hostnames in this namespace; empty uses Traefik's default certificate. |
-| `fleet.mitmproxy.config` | See `values.yaml` | Native mitmproxy options serialized into `~/.mitmproxy/config.yaml`. |
-| `fleet.mitmproxy.networkPolicy.dnsNamespace` | `kube-system` | Namespace containing cluster DNS. |
-| `fleet.mitmproxy.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | DNS pod selector. |
-| `fleet.mitmproxy.resources` | Requests: 100m CPU / 128Mi; limits: 1 CPU / 512Mi | Pod resources; include replicas in namespace quota sizing. |
+### Traefik and AWS
 
-Override native options through values, for example:
+Traefik needs the CRD provider and two dedicated entry points. The local helper
+`bin/local/setup-tinyproxy.sh` applies
+`deploy/helm/traefik/values.tinyproxy.minikube.yaml` to the installed controller,
+keeping its chart version and existing values. Port 8080 uses container port 18080
+to avoid Traefik's administrative listener. Port 8433 uses container port 18433.
+A standard HTTP Ingress cannot expose the CONNECT tunnel.
 
-```yaml
-fleet:
-  mitmproxy:
-    config:
-      web_password: mitmweb
-      termlog_verbosity: info
-      stream_large_bodies: 5m
-```
+For AWS, merge `values.aws-nlb.example.yaml` with your Fleet AWS values. Replace
+the example ACM ARN, client CIDRs, and ALB subnet CIDRs. The AWS Load Balancer
+Controller provisions an internal NLB with TCP on 8080 and TLS on 8433. Both
+forward plaintext TCP to Tinyproxy's port 8888. Leave PROXY protocol disabled.
+Fleet keeps its ALB Ingress. Configure DNS for the proxy NLB and private resolution
+of Fleet's ALB. EKS Auto Mode is not the targeted controller.
 
-The web password defaults to `mitmweb`. The UI listens on port 8081, and the ClusterIP Service exposes proxy port 8888 and UI port 8081. The chart fixes `mode`, listener addresses/ports, `connection_strategy: lazy`, `upstream_cert: false`, and `web_open_browser: false` to preserve its routing and exposure contract. Other [native options](https://docs.mitmproxy.org/stable/concepts/options/) remain configurable. File-valued options require files already present in the container. ConfigMap changes through Helm roll pods; manual ConfigMap edits and CA Secret rotation require a rollout restart. Changes made in the UI are per-pod and are not persisted to Helm values.
-
-### Use the proxy and UI
-
-In-cluster clients set both `HTTP_PROXY` and `HTTPS_PROXY` to `http://mock-fleet-mitmproxy.mock-fleet.svc.cluster.local:8888` (adjust namespace, chart name, and cluster domain as needed). Remove Fleet hosts from `NO_PROXY` so clients do not bypass the proxy.
-
-With Minikube ingress, open `https://mitmweb.minikube.localhost` and enter password `mitmweb`. Configure clients with `HTTPS_PROXY=https://mitmproxy.minikube.localhost:443` and `HTTP_PROXY=https://mitmproxy.minikube.localhost:443`. The `https://` proxy scheme is required: Traefik selects the TCP route from the proxy hostname in the TLS handshake, then forwards the decrypted proxy protocol to mitmweb. This supports HTTP requests and HTTPS CONNECT; an ordinary HTTP Ingress cannot provide that forward-proxy route.
-
-Ingress requires Traefik with its `IngressRouteTCP` CRD and Kubernetes CRD provider enabled. TLS terminates at Traefik. Both ingress hostnames need a matching ingress certificate, separate from the interception CA used for mocked HTTPS destinations. Clients must support HTTPS proxies and trust both CAs. The existing Minikube wildcard ingress certificate covers both names. The UI route also forwards its WebSocket connection for live traffic updates.
-
-Export the public interception CA and test a Minikube PATH URL (assuming the ingress CA is already trusted):
-
-```bash
-kubectl -n mock-fleet get secret mock-fleet-mitmproxy-ca \
-  -o jsonpath='{.data.mitmproxy-ca-cert\.pem}' | openssl base64 -d -A > mitmproxy-ca-cert.pem
-curl --noproxy '' --proxy https://mitmproxy.minikube.localhost:443 \
-  --cacert mitmproxy-ca-cert.pem \
-  https://mock-fleet.minikube.localhost/wiremock/__admin/health
-```
-
-For clients with a separate proxy trust store, configure the ingress CA there; curl supports `--proxy-cacert`. For direct local debugging or clients without HTTPS proxy support, port-forward one pod:
-
-```bash
-kubectl -n mock-fleet port-forward deployment/mock-fleet-mitmproxy 8888:8888 8081:8081
-```
-
-This provides an HTTP proxy at `http://127.0.0.1:8888` and UI at `http://127.0.0.1:8081`. Direct in-cluster proxy access on 8888 also remains available.
+Changing `ingress.enabled` selects the Service type. Switching an existing
+Service's loadBalancerClass may require explicit Service replacement and DNS
+cutover; do not use a force upgrade of the entire release. Connections can drop.
 
 ### Network boundary and checks
 
-The NetworkPolicy permits ingress from the same unrestricted sources as Fleet Proxy, on TCP 8888 (proxy) and 8081 (UI). Egress permits the same release's Fleet Proxy pods on their HTTP container port and cluster DNS on TCP/UDP 53. It does not permit direct access to the API, WireMock pods, other workloads, or the internet. Fleet Proxy retains its existing downstream behavior, including WireMock-configured proxying.
+Tinyproxy ingress allows its proxy port, matching Fleet's open application-port
+policy. Egress allows DNS (TCP/UDP 53) and the configured Fleet ingress only:
 
-A policy-capable CNI is required, and other additive policies must not broaden these permissions. Node-local DNS requires a cluster-specific policy design; the default targets DNS pods. Port-forward verifies application behavior, not NetworkPolicy enforcement. On the target cluster, test from mitmproxy pods that DNS and Fleet Proxy work, then confirm connections to unrelated pods, the Kubernetes API, and external IPs fail. First prove those targets are reachable from an unselected control pod; otherwise a timeout does not establish enforcement.
+- Locally, namespace/pod selectors select Traefik on actual pod ports 8000/8443.
+- AWS uses `networkPolicy.allowedCidrs` for private ALB subnets on ports 80/443.
+  Set `ingressPodSelector: null` to omit the Kubernetes ingress destination.
+  Subnet rules alone permit other hosts in those subnets. To enforce ALB-only
+  egress, infrastructure must attach a dedicated Tinyproxy pod security group
+  allowing application egress only to Fleet's ALB security group, plus DNS.
 
-Run chart and routing checks locally:
+A policy-capable CNI and compatible EKS pod security-group setup are required.
+Other additive policies must not broaden access. The hostname filter does not
+inspect encrypted paths or inner SNI: isolation from other virtual hosts sharing
+Fleet's ingress requires destination-side controls or a dedicated Fleet ingress.
 
 ```bash
-helm lint deploy/helm/mock-fleet
 python3 deploy/helm/mock-fleet/tests/mitmproxy-chart.py
-uv run --with mitmproxy==12.2.3 python deploy/helm/mock-fleet/tests/mitmproxy-smoke.py
+# With the local deployment running and its CA trusted:
+python3 deploy/helm/mock-fleet/tests/tinyproxy-smoke.py
 ```
 
-The smoke test uses actual mitmweb with a local HTTP backend. It checks PATH/HOST forwarding, HTTPS CONNECT with CA verification, rejected destinations, the web password, and CA reuse across restarts. It does not deploy Kubernetes resources or prove CNI enforcement.
+The checks cover both exposure modes, configuration validation, filters, and
+network-policy rendering. Real AWS NLB TLS and security-group enforcement require
+an EKS test; Minikube verification cannot establish those properties.
 
 ## Lifecycle and API contracts
 

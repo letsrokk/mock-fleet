@@ -12,54 +12,189 @@
       "properties": {
         "mitmproxy": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "image": { "$ref": "#/definitions/image" },
-            "replicas": { "type": "integer", "minimum": 1 },
-            "caSecretName": { "type": "string" },
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "$ref": "#/definitions/image"
+            },
+            "replicas": {
+              "type": "integer",
+              "minimum": 1
+            },
             "ingress": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
-                "enabled": { "type": "boolean" },
-                "className": { "type": "string", "minLength": 1 },
-                "entryPoint": { "type": "string", "minLength": 1 },
-                "webHost": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
-                "proxyHost": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
-                "tlsSecretName": { "type": "string" }
+                "enabled": {
+                  "type": "boolean"
+                },
+                "className": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "httpEntryPoint": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "httpsEntryPoint": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "hostname": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
+                },
+                "tlsSecretName": {
+                  "type": "string"
+                }
               },
-              "required": ["enabled", "className", "entryPoint", "webHost", "proxyHost", "tlsSecretName"]
+              "required": [
+                "enabled",
+                "className",
+                "httpEntryPoint",
+                "httpsEntryPoint",
+                "hostname",
+                "tlsSecretName"
+              ]
             },
             "service": {
               "type": "object",
-              "properties": { "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] } },
-              "required": ["type"]
+              "additionalProperties": false,
+              "properties": {
+                "ports": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "http": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    },
+                    "https": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "http",
+                    "https"
+                  ]
+                },
+                "loadBalancerClass": {
+                  "type": "string"
+                },
+                "annotations": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "loadBalancerSourceRanges": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "ports",
+                "loadBalancerClass",
+                "annotations",
+                "loadBalancerSourceRanges"
+              ]
             },
             "networkPolicy": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
-                "dnsNamespace": { "type": "string", "minLength": 1 },
-                "dnsPodSelector": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string" } }
+                "dnsNamespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "dnsPodSelector": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "ingressNamespace": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ingressPodSelector": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "ingressPorts": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  }
+                },
+                "allowedCidrs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               },
-              "required": ["dnsNamespace", "dnsPodSelector"]
+              "required": [
+                "dnsNamespace",
+                "dnsPodSelector",
+                "ingressNamespace",
+                "ingressPorts",
+                "allowedCidrs"
+              ]
             },
             "config": {
               "type": "object",
-              "properties": {
-                "mode": { "const": ["regular"] },
-                "listen_host": { "const": "0.0.0.0" },
-                "listen_port": { "const": 8888 },
-                "connection_strategy": { "const": "lazy" },
-                "upstream_cert": { "const": false },
-                "web_host": { "const": "0.0.0.0" },
-                "web_port": { "const": 8081 },
-                "web_open_browser": { "const": false },
-                "web_password": { "type": "string", "minLength": 1 }
+              "propertyNames": {
+                "pattern": "^[A-Za-z][A-Za-z0-9]*$",
+                "not": {
+                  "pattern": "^([pP][oO][rR][tT]|[lL][iI][sS][tT][eE][nN]|[pP][iI][dD][fF][iI][lL][eE]|[lL][oO][gG][fF][iI][lL][eE]|[cC][oO][nN][nN][eE][cC][tT][pP][oO][rR][tT]|[fF][iI][lL][tT][eE][rR]|[fF][iI][lL][tT][eE][rR][tT][yY][pP][eE]|[fF][iI][lL][tT][eE][rR][dD][eE][fF][aA][uU][lL][tT][dD][eE][nN][yY]|[fF][iI][lL][tT][eE][rR][cC][aA][sS][eE][sS][eE][nN][sS][iI][tT][iI][vV][eE]|[fF][iI][lL][tT][eE][rR][uU][rR][lL][sS]|[uU][pP][sS][tT][rR][eE][aA][mM]|[rR][eE][vV][eE][rR][sS][eE][pP][aA][tT][hH]|[rR][eE][vV][eE][rR][sS][eE][oO][nN][lL][yY]|[uU][sS][eE][rR]|[gG][rR][oO][uU][pP])$"
+                }
               },
-              "required": ["mode", "listen_host", "listen_port", "connection_strategy", "upstream_cert", "web_host", "web_port", "web_open_browser", "web_password"]
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^[^\r\n]+$"
+                  }
+                ]
+              }
             },
-            "resources": { "type": "object" }
+            "resources": {
+              "type": "object"
+            }
           },
-          "required": ["enabled", "image", "replicas", "caSecretName", "ingress", "service", "networkPolicy", "config", "resources"]
+          "required": [
+            "enabled",
+            "image",
+            "replicas",
+            "ingress",
+            "service",
+            "networkPolicy",
+            "config",
+            "resources"
+          ]
         },
         "proxy": { "$ref": "#/definitions/app" },
         "api": {
