@@ -1,0 +1,97 @@
+{{- if .Values.fleet.mitmproxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+spec:
+  revisionHistoryLimit: 3
+  replicas: {{ .Values.fleet.mitmproxy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/mitmproxy-configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mitmproxy
+          image: {{ printf "%s:%s" .Values.fleet.mitmproxy.image.repository (required "fleet.mitmproxy.image.tag is required" .Values.fleet.mitmproxy.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.fleet.mitmproxy.image.pullPolicy }}
+          command: [mitmweb]
+          args: ["-s", "/etc/mitmproxy/route.py"]
+          env:
+            - name: HOME
+              value: /home/mitmproxy
+            - name: FLEET_HOST
+              value: {{ required "ingress.host is required for mitmproxy routing" .Values.ingress.host | quote }}
+            - name: FLEET_PROXY_HOST
+              value: {{ printf "%s.%s.svc.%s" (include "mock-fleet.proxyFullname" .) (include "mock-fleet.namespace" .) .Values.clusterDomain | quote }}
+            - name: FLEET_PROXY_PORT
+              value: {{ .Values.fleet.proxy.service.ports.http | quote }}
+            - name: FLEET_ROUTING_MODE
+              value: {{ .Values.fleet.proxy.routing.mode | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: proxy
+              containerPort: 8888
+          startupProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: proxy
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.fleet.mitmproxy.resources | nindent 12 }}
+          volumeMounts:
+            - name: state
+              mountPath: /home/mitmproxy/.mitmproxy
+            - name: config
+              mountPath: /home/mitmproxy/.mitmproxy/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: config
+              mountPath: /etc/mitmproxy/route.py
+              subPath: route.py
+              readOnly: true
+            - name: ca
+              mountPath: /home/mitmproxy/.mitmproxy/mitmproxy-ca.pem
+              subPath: mitmproxy-ca.pem
+              readOnly: true
+      volumes:
+        - name: state
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: {{ include "mock-fleet.mitmproxyFullname" . }}
+        - name: ca
+          secret:
+            secretName: {{ required "fleet.mitmproxy.caSecretName is required when mitmproxy is enabled" .Values.fleet.mitmproxy.caSecretName | quote }}
+            items:
+              - key: mitmproxy-ca.pem
+                path: mitmproxy-ca.pem
+{{- end }}

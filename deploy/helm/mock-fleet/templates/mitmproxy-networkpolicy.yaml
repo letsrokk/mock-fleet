@@ -1,0 +1,39 @@
+{{- if .Values.fleet.mitmproxy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8888
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "mock-fleet.proxySelectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.fleet.proxy.service.ports.targetHttp }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.fleet.mitmproxy.networkPolicy.dnsNamespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.fleet.mitmproxy.networkPolicy.dnsPodSelector | nindent 14 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

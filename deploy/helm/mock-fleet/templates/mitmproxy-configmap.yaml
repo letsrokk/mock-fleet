@@ -1,0 +1,15 @@
+{{- if .Values.fleet.mitmproxy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+data:
+  config.yaml: |
+    {{- toYaml .Values.fleet.mitmproxy.config | nindent 4 }}
+  route.py: |
+    {{- .Files.Get "files/mitmproxy-route.py" | nindent 4 }}
+{{- end }}

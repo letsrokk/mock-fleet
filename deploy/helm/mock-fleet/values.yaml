@@ -4,6 +4,38 @@ namespaceOverride: ""
 clusterDomain: cluster.local
 
 fleet:
+  mitmproxy:
+    enabled: false
+    image:
+      repository: mitmproxy/mitmproxy
+      tag: "12.2.3"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    caSecretName: ""
+    service:
+      type: ClusterIP
+    networkPolicy:
+      dnsNamespace: kube-system
+      dnsPodSelector:
+        k8s-app: kube-dns
+    config:
+      mode: [regular]
+      listen_host: 0.0.0.0
+      listen_port: 8888
+      connection_strategy: lazy
+      upstream_cert: false
+      block_global: false
+      web_host: 127.0.0.1
+      web_port: 8081
+      web_open_browser: false
+      web_password: mitmweb
+    resources:
+      requests:
+        cpu: "0.1"
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
   proxy:
     dev:
       enabled: false

@@ -13,6 +13,7 @@ The local profile uses Traefik, HTTPS, PATH routing, and enables MCP. Run `minik
 Optional Make variables select deployment behavior:
 
 ```bash
+make local-deploy MITMPROXY=true         # Optional forward proxy on port 8888
 make local-deploy LOGS=true
 make local-deploy DEV=true                 # API remote development
 make local-deploy DEV=proxy
@@ -28,6 +29,8 @@ make local-destroy DELETE_NAMESPACE=true
 ```
 
 `DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. The Minikube profile enables Fleet Mock Ops. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, `mock-ops`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
+
+The optional proxy runs mitmweb. `MITMPROXY=true` creates its local CA Secret once and exposes port 8888 through `minikube tunnel`. Clients keep their Fleet URLs and must trust this interception CA for HTTPS. The UI uses port-forward on 8081 with default password `mitmweb`. See [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-mitmweb).
 
 ## Local security setup
 

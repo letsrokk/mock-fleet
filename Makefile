@@ -3,6 +3,7 @@ RELEASE ?= mock-fleet
 LOGS ?= false
 DEV ?= false
 PORT_FORWARD ?= false
+MITMPROXY ?= false
 REBUILD ?= false
 DELETE_NAMESPACE ?= false
 
@@ -15,15 +16,16 @@ shell-quote = '$(subst ','"'"',$(1))'
 
 help:
 	@echo "Local mock-fleet lifecycle targets:"
-	@echo "  make local-deploy [NAMESPACE=name] [LOGS=true] [DEV=true|api|proxy] [PORT_FORWARD=true] [REBUILD=dash|api|proxy|mcp|mock-ops|all]"
+	@echo "  make local-deploy [NAMESPACE=name] [LOGS=true] [DEV=true|api|proxy] [PORT_FORWARD=true] [MITMPROXY=true] [REBUILD=dash|api|proxy|mcp|mock-ops|all]"
 	@echo "  make local-destroy [NAMESPACE=name] [RELEASE=name] [DELETE_NAMESPACE=true]"
 
 local-deploy:
+	$(if $(call is-one-of,$(MITMPROXY),true false),,$(error MITMPROXY must be true or false))
 	$(if $(call is-one-of,$(LOGS),true false),,$(error LOGS must be true or false))
 	$(if $(call is-one-of,$(PORT_FORWARD),true false),,$(error PORT_FORWARD must be true or false))
 	$(if $(call is-one-of,$(DEV),false true api proxy),,$(error DEV must be false, true, api, or proxy))
 	$(if $(call is-one-of,$(REBUILD),false dash api proxy mcp mock-ops all),,$(error REBUILD must be false, dash, api, proxy, mcp, mock-ops, or all))
-	@bin/local/deploy.sh --namespace $(call shell-quote,$(NAMESPACE))$(if $(filter true,$(LOGS)), --logs)$(if $(filter true,$(DEV)), --remote-dev api,$(if $(filter api proxy,$(DEV)), --remote-dev $(DEV)))$(if $(filter true,$(PORT_FORWARD)), --port-forward)$(if $(filter-out false,$(REBUILD)), --rebuild $(call shell-quote,$(REBUILD)))
+	@bin/local/deploy.sh --namespace $(call shell-quote,$(NAMESPACE))$(if $(filter true,$(MITMPROXY)), --mitmproxy)$(if $(filter true,$(LOGS)), --logs)$(if $(filter true,$(DEV)), --remote-dev api,$(if $(filter api proxy,$(DEV)), --remote-dev $(DEV)))$(if $(filter true,$(PORT_FORWARD)), --port-forward)$(if $(filter-out false,$(REBUILD)), --rebuild $(call shell-quote,$(REBUILD)))
 
 local-destroy:
 	$(if $(call is-one-of,$(DELETE_NAMESPACE),true false),,$(error DELETE_NAMESPACE must be true or false))

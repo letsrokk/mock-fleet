@@ -1,11 +1,12 @@
 # mock-fleet Helm Chart
 
-This chart deploys `mock-fleet` as three core Kubernetes services and one optional service:
+This chart deploys `mock-fleet` as three core Kubernetes services and two optional services:
 
 - `fleet-proxy`: routes incoming HTTP requests to per-mock WireMock pods.
 - `fleet-api`: manages mock pods, WireMock config, lifecycle cleanup, Hazelcast state, and persisted mappings.
 - `fleet-dash`: serves the dashboard under `/__fleet/`.
 - `fleet-mcp`: exposes typed MCP tools under `/__fleet/mcp` when enabled.
+- `mitmproxy`: runs mitmweb as a forward proxy on port 8888 when enabled.
 
 ## Install
 
@@ -172,6 +173,92 @@ helm upgrade --install mock-fleet oci://ghcr.io/letsrokk/charts/mock-fleet \
 `fleet-mcp` reaches the Fleet API and Fleet Proxy through helper-derived ClusterIP DNS names. It does not call the mock-pod resolver. In `PATH` mode it sends `/<mockId>/__admin/...` to Fleet Proxy. In `HOST` mode it connects to the same Proxy ClusterIP and sets `Host: <mockId>.<fleetHost>`.
 
 Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary mock URLs without authentication. MCP uses the same external access boundary as the Fleet API and does not change that behavior.
+
+## Optional forward proxy (mitmweb)
+
+Enable mitmweb when a client requires an HTTP proxy:
+
+```text
+client → mitmproxy:8888 → Fleet Proxy → WireMock pod
+```
+
+Clients keep their existing Fleet URLs. PATH mode accepts `ingress.host` and preserves the mock ID prefix. HOST mode also accepts `<mockId>.<ingress.host>` and preserves that hostname for Fleet routing. Other destinations receive HTTP 403. HTTPS CONNECT is intercepted and forwarded to the internal Fleet Proxy Service over HTTP; clients must trust the mitmproxy CA. The Fleet ingress certificate and the interception CA are separate.
+
+### Install and configure
+
+Create a Secret in the deployment namespace containing `mitmproxy-ca.pem` (CA private key and certificate together) and `mitmproxy-ca-cert.pem` (public certificate for clients). Use a dedicated CA with certificate-signing key usage; see [mitmproxy's CA format](https://docs.mitmproxy.org/stable/concepts/certificates/#using-a-custom-certificate-authority). The chart requires an existing Secret so replicas and replacement pods share the same CA.
+
+```bash
+kubectl -n mock-fleet create secret generic mock-fleet-mitmproxy-ca \
+  --from-file=mitmproxy-ca.pem --from-file=mitmproxy-ca-cert.pem
+helm upgrade --install mock-fleet deploy/helm/mock-fleet \
+  --namespace mock-fleet --create-namespace \
+  --set fleet.mitmproxy.enabled=true \
+  --set fleet.mitmproxy.caSecretName=mock-fleet-mitmproxy-ca
+```
+
+The namespace must exist before creating the Secret. For Minikube, `make local-deploy MITMPROXY=true` creates a local CA Secret if absent and enables a LoadBalancer Service on port 8888. Keep `minikube tunnel` running and obtain its address with `kubectl -n mock-fleet get service mock-fleet-mitmproxy`. The local CA survives Helm uninstall; deleting the namespace deletes it.
+
+| Value | Default | Purpose |
+| --- | --- | --- |
+| `fleet.mitmproxy.enabled` | `false` | Render the Deployment, Service, ConfigMap, and NetworkPolicy. |
+| `fleet.mitmproxy.image` | `mitmproxy/mitmproxy:12.2.3`, `IfNotPresent` | Pinned mitmweb image, independent of the Fleet application version. |
+| `fleet.mitmproxy.replicas` | `1` | Number of proxy pods; each UI shows only that pod's traffic. |
+| `fleet.mitmproxy.caSecretName` | `""` | Required existing CA Secret when enabled. |
+| `fleet.mitmproxy.service.type` | `ClusterIP` | Service type; Minikube uses `LoadBalancer`. |
+| `fleet.mitmproxy.config` | See `values.yaml` | Native mitmproxy options serialized into `~/.mitmproxy/config.yaml`. |
+| `fleet.mitmproxy.networkPolicy.dnsNamespace` | `kube-system` | Namespace containing cluster DNS. |
+| `fleet.mitmproxy.networkPolicy.dnsPodSelector` | `{k8s-app: kube-dns}` | DNS pod selector. |
+| `fleet.mitmproxy.resources` | Requests: 100m CPU / 128Mi; limits: 1 CPU / 512Mi | Pod resources; include replicas in namespace quota sizing. |
+
+Override native options through values, for example:
+
+```yaml
+fleet:
+  mitmproxy:
+    config:
+      web_password: mitmweb
+      termlog_verbosity: info
+      stream_large_bodies: 5m
+```
+
+The web password defaults to `mitmweb`. The UI listens only on pod loopback port 8081, and the Service exposes only port 8888. The chart fixes `mode`, listener addresses/ports, `connection_strategy: lazy`, `upstream_cert: false`, and `web_open_browser: false` to preserve its routing and exposure contract. Other [native options](https://docs.mitmproxy.org/stable/concepts/options/) remain configurable. File-valued options require files already present in the container. ConfigMap changes through Helm roll pods; manual ConfigMap edits and CA Secret rotation require a rollout restart. Changes made in the UI are per-pod and are not persisted to Helm values.
+
+### Use the proxy and UI
+
+In-cluster clients set both `HTTP_PROXY` and `HTTPS_PROXY` to `http://mock-fleet-mitmproxy.mock-fleet.svc.cluster.local:8888` (adjust namespace, chart name, and cluster domain as needed). Remove Fleet hosts from `NO_PROXY` so clients do not bypass the proxy.
+
+For local access to one pod's proxy and UI:
+
+```bash
+kubectl -n mock-fleet port-forward deployment/mock-fleet-mitmproxy 8888:8888 8081:8081
+```
+
+Open `http://127.0.0.1:8081` and enter password `mitmweb`. In another terminal, export the public CA and test the Minikube PATH URL:
+
+```bash
+kubectl -n mock-fleet get secret mock-fleet-mitmproxy-ca \
+  -o jsonpath='{.data.mitmproxy-ca-cert\.pem}' | openssl base64 -d -A > mitmproxy-ca-cert.pem
+curl --noproxy '' --proxy http://127.0.0.1:8888 \
+  --cacert mitmproxy-ca-cert.pem \
+  https://mock-fleet.minikube.localhost/wiremock/__admin/health
+```
+
+### Network boundary and checks
+
+The NetworkPolicy permits ingress from the same unrestricted sources as Fleet Proxy, on TCP 8888 only. Egress permits the same release's Fleet Proxy pods on their HTTP container port and cluster DNS on TCP/UDP 53. It does not permit direct access to the API, WireMock pods, other workloads, or the internet. Fleet Proxy retains its existing downstream behavior, including WireMock-configured proxying.
+
+A policy-capable CNI is required, and other additive policies must not broaden these permissions. Node-local DNS requires a cluster-specific policy design; the default targets DNS pods. Port-forward verifies application behavior, not NetworkPolicy enforcement. On the target cluster, test from mitmproxy pods that DNS and Fleet Proxy work, then confirm connections to unrelated pods, the Kubernetes API, and external IPs fail. First prove those targets are reachable from an unselected control pod; otherwise a timeout does not establish enforcement.
+
+Run chart and routing checks locally:
+
+```bash
+helm lint deploy/helm/mock-fleet
+python3 deploy/helm/mock-fleet/tests/mitmproxy-chart.py
+uv run --with mitmproxy==12.2.3 python deploy/helm/mock-fleet/tests/mitmproxy-smoke.py
+```
+
+The smoke test uses actual mitmweb with a local HTTP backend. It checks PATH/HOST forwarding, HTTPS CONNECT with CA verification, rejected destinations, the web password, and CA reuse across restarts. It does not deploy Kubernetes resources or prove CNI enforcement.
 
 ## Lifecycle and API contracts
 

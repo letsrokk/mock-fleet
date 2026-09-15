@@ -17,15 +17,17 @@ REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
+ENABLE_MITMPROXY=false
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
+  --mitmproxy         Enable mitmweb on port 8888 and create its local CA Secret if absent.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
@@ -209,6 +211,10 @@ while [[ $# -gt 0 ]]; do
             ENABLE_LOGS=true
             shift
             ;;
+        --mitmproxy)
+            ENABLE_MITMPROXY=true
+            shift
+            ;;
         --port-forward)
             ENABLE_PORT_FORWARD=true
             shift
@@ -379,6 +385,32 @@ fi
 helm dependency build "${CHART_DIR}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 label_namespace_for_restricted_psa "${NAMESPACE}"
+if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
+    existing_ca=$(kubectl get secret mock-fleet-mitmproxy-ca --namespace "${NAMESPACE}" --ignore-not-found -o name)
+    if [[ -z "${existing_ca}" ]]; then
+        (
+            ca_dir=$(mktemp -d)
+            trap 'rm -rf "${ca_dir}"' EXIT
+            umask 077
+            cat > "${ca_dir}/openssl.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+x509_extensions = ca
+[dn]
+[ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+EOF
+            openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+                -subj "/CN=Mock Fleet mitmproxy local CA" -config "${ca_dir}/openssl.cnf" \
+                -keyout "${ca_dir}/ca.key" -out "${ca_dir}/ca.crt"
+            cat "${ca_dir}/ca.key" "${ca_dir}/ca.crt" > "${ca_dir}/mitmproxy-ca.pem"
+            kubectl create secret generic mock-fleet-mitmproxy-ca --namespace "${NAMESPACE}" \
+                --from-file="mitmproxy-ca.pem=${ca_dir}/mitmproxy-ca.pem" \
+                --from-file="mitmproxy-ca-cert.pem=${ca_dir}/ca.crt"
+        )
+    fi
+fi
 HELM_ARGS=(
     upgrade --install "${RELEASE_NAME}" "${CHART_DIR}"
     --namespace "${NAMESPACE}"
@@ -396,6 +428,10 @@ HELM_ARGS=(
     --set "mockOps.image.repository=ghcr.io/letsrokk/mock-fleet/mock-ops"
     --set "mockOps.image.tag=latest"
 )
+
+if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
+    HELM_ARGS+=(--set "fleet.mitmproxy.enabled=true")
+fi
 
 if [[ "${REMOTE_DEV_MODULE}" == "proxy" ]]; then
     HELM_ARGS+=(--set "fleet.proxy.dev.enabled=true")

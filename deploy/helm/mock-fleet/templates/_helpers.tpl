@@ -440,3 +440,12 @@ app.kubernetes.io/component: mock-ops
 {{- fail "wiremock.config.default.resources.requests.memory must not exceed wiremock.config.default.resources.limits.memory" -}}
 {{- end -}}
 {{- end -}}
+
+{{- define "mock-fleet.mitmproxyFullname" -}}
+{{- printf "%s-mitmproxy" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "mock-fleet.mitmproxySelectorLabels" -}}
+{{ include "mock-fleet.selectorLabels" . }}
+app.kubernetes.io/component: mitmproxy
+{{- end -}}

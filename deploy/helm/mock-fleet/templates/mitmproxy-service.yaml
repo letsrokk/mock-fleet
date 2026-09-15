@@ -1,0 +1,19 @@
+{{- if .Values.fleet.mitmproxy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+spec:
+  type: {{ .Values.fleet.mitmproxy.service.type }}
+  selector:
+    {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 4 }}
+  ports:
+    - name: proxy
+      port: 8888
+      targetPort: proxy
+      protocol: TCP
+{{- end }}

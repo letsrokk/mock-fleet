@@ -10,6 +10,45 @@
     "fleet": {
       "type": "object",
       "properties": {
+        "mitmproxy": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "image": { "$ref": "#/definitions/image" },
+            "replicas": { "type": "integer", "minimum": 1 },
+            "caSecretName": { "type": "string" },
+            "service": {
+              "type": "object",
+              "properties": { "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] } },
+              "required": ["type"]
+            },
+            "networkPolicy": {
+              "type": "object",
+              "properties": {
+                "dnsNamespace": { "type": "string", "minLength": 1 },
+                "dnsPodSelector": { "type": "object", "minProperties": 1, "additionalProperties": { "type": "string" } }
+              },
+              "required": ["dnsNamespace", "dnsPodSelector"]
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "mode": { "const": ["regular"] },
+                "listen_host": { "const": "0.0.0.0" },
+                "listen_port": { "const": 8888 },
+                "connection_strategy": { "const": "lazy" },
+                "upstream_cert": { "const": false },
+                "web_host": { "const": "127.0.0.1" },
+                "web_port": { "const": 8081 },
+                "web_open_browser": { "const": false },
+                "web_password": { "type": "string", "minLength": 1 }
+              },
+              "required": ["mode", "listen_host", "listen_port", "connection_strategy", "upstream_cert", "web_host", "web_port", "web_open_browser", "web_password"]
+            },
+            "resources": { "type": "object" }
+          },
+          "required": ["enabled", "image", "replicas", "caSecretName", "service", "networkPolicy", "config", "resources"]
+        },
         "proxy": { "$ref": "#/definitions/app" },
         "api": {
           "allOf": [

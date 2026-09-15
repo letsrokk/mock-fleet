@@ -7,6 +7,10 @@ ingress:
     traefik.ingress.kubernetes.io/router.tls: "true"
 
 fleet:
+  mitmproxy:
+    caSecretName: mock-fleet-mitmproxy-ca
+    service:
+      type: LoadBalancer
   mcp:
     enabled: true
     allowedOrigins:
