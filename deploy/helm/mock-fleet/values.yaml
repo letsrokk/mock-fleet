@@ -3,6 +3,9 @@ fullnameOverride: ""
 namespaceOverride: ""
 clusterDomain: cluster.local
 
+metrics:
+  scrape: false
+
 fleet:
   proxy:
     dev:

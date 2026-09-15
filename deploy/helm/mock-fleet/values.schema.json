@@ -7,6 +7,13 @@
     "fullnameOverride": { "type": "string" },
     "namespaceOverride": { "type": "string" },
     "clusterDomain": { "type": "string", "minLength": 1 },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "scrape": { "type": "boolean" }
+      },
+      "required": ["scrape"]
+    },
     "fleet": {
       "type": "object",
       "properties": {

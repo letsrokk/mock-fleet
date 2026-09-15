@@ -18,6 +18,11 @@ spec:
       {{- include "mock-fleet.mcpSelectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: {{ .Values.metrics.scrape | quote }}
+        prometheus.io/port: {{ .Values.fleet.mcp.service.ports.targetHttp | quote }}
+        prometheus.io/path: "/mcp/metrics"
+        prometheus.io/scheme: "http"
       labels:
         {{- include "mock-fleet.mcpSelectorLabels" . | nindent 8 }}
     spec:

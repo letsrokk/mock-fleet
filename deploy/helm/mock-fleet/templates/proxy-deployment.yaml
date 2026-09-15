@@ -14,6 +14,11 @@ spec:
       {{- include "mock-fleet.proxySelectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        prometheus.io/scrape: {{ .Values.metrics.scrape | quote }}
+        prometheus.io/port: {{ .Values.fleet.proxy.service.ports.targetHttp | quote }}
+        prometheus.io/path: "/__fleet/proxy/metrics"
+        prometheus.io/scheme: "http"
       labels:
         {{- include "mock-fleet.proxySelectorLabels" . | nindent 8 }}
     spec:
