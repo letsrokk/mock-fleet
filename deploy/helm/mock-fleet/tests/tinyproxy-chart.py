@@ -35,7 +35,7 @@ assert '"tinyproxy-http"' in local and '"tinyproxy-https"' in local
 assert "tls: {}" in local
 service = document(local, "tinyproxy-service.yaml")
 assert "type: ClusterIP" in service and "port: 8080" in service
-assert "port: 8433" not in service and "loadBalancerClass:" not in service
+assert "port: 8443" not in service and "loadBalancerClass:" not in service
 assert "tinyproxy-ca" not in local and "route.py" not in local
 assert "web_password" not in local and "containerPort: 8081" not in local
 assert 'image: "ghcr.io/letsrokk/mock-fleet/tinyproxy:latest"' in local
@@ -50,7 +50,7 @@ assert "ipBlock:" not in policy
 assert "name: mock-fleet-tinyproxy" not in render({"fleet": {"tinyproxy": {"enabled": False}}}, minikube=True)
 aws_annotations = {
     "service.beta.kubernetes.io/aws-load-balancer-ssl-cert": "arn:aws:acm:test",
-    "service.beta.kubernetes.io/aws-load-balancer-ssl-ports": "8433",
+    "service.beta.kubernetes.io/aws-load-balancer-ssl-ports": "8443",
     "service.beta.kubernetes.io/aws-load-balancer-backend-protocol": "tcp",
 }
 aws = {"fleet": {"tinyproxy": {
@@ -63,7 +63,7 @@ output = render(aws)
 assert "kind: IngressRouteTCP" not in output
 service = document(output, "tinyproxy-service.yaml")
 assert "type: LoadBalancer" in service and 'loadBalancerClass: "service.k8s.aws/nlb"' in service
-assert "port: 8080" in service and "port: 8433" in service
+assert "port: 8080" in service and "port: 8443" in service
 policy = document(output, "tinyproxy-networkpolicy.yaml")
 assert 'cidr: "10.30.0.0/24"' in policy and "ingress-nginx" not in policy
 render({"fleet": {"tinyproxy": {"enabled": True, "ingress": {"enabled": False}}}}, valid=False)
@@ -71,7 +71,7 @@ for annotation in list(aws_annotations):
     removed = aws_annotations.pop(annotation)
     render(aws, valid=False)
     aws_annotations[annotation] = removed
-for change in ({"service": {"ports": {"http": 8433}}},
+for change in ({"service": {"ports": {"http": 8443}}},
                {"ingress": {"enabled": "yes"}},
                {"ingress": {"httpEntryPoint": "tinyproxy-https"}},
                {"config": {"Port": 1234}}, {"config": {"pOrT": 1234}}, {"config": {"FilterDefaultDeny": "No"}},

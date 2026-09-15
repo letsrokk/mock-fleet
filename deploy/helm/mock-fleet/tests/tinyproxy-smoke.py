@@ -9,7 +9,7 @@ import sys
 
 proxy_host = sys.argv[1] if len(sys.argv) > 1 else "tinyproxy.minikube.localhost"
 fleet_host = sys.argv[2] if len(sys.argv) > 2 else "mock-fleet.minikube.localhost"
-for proxy in (f"http://{proxy_host}:8080", f"https://{proxy_host}:8433"):
+for proxy in (f"http://{proxy_host}:8080", f"https://{proxy_host}:8443"):
     for scheme, expected in (("http", {301, 302, 307, 308}), ("https", {200})):
         result = subprocess.run([
             "curl", "--noproxy", "", "--proxy", proxy, "--max-time", "15",

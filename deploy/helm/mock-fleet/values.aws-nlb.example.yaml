@@ -10,7 +10,7 @@ fleet:
         service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
         service.beta.kubernetes.io/aws-load-balancer-scheme: internal
         service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:eu-west-1:123456789012:certificate/replace-me
-        service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "8433"
+        service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "8443"
         service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
       loadBalancerSourceRanges: [10.20.0.0/16]
     networkPolicy:

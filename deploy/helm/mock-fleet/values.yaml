@@ -22,7 +22,7 @@ fleet:
     service:
       ports:
         http: 8080
-        https: 8433
+        https: 8443
       loadBalancerClass: ""
       annotations: {}
       loadBalancerSourceRanges: []

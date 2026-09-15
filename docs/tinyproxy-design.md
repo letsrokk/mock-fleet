@@ -14,7 +14,7 @@ Expose both client protocols in either environment:
 | Client endpoint | Traefik | AWS NLB |
 | --- | --- | --- |
 | HTTP proxy, port 8080 | TCP forwarding | TCP listener |
-| HTTPS proxy, port 8433 | TLS termination and TCP forwarding | TLS listener with ACM certificate |
+| HTTPS proxy, port 8443 | TLS termination and TCP forwarding | TLS listener with ACM certificate |
 
 Both listeners forward to the same unprivileged Tinyproxy container port 8888.
 HTTPS destinations use CONNECT; Tinyproxy does not decrypt destination TLS.
@@ -23,8 +23,8 @@ proxy endpoint, the proxy listener certificate. HTTPS proxy support is a client
 requirement, even if the destination itself uses HTTP.
 
 ```text
-Minikube: client -> Traefik :8080/:8433 -> Tinyproxy -> Fleet Traefik :80/:443 -> Fleet
-AWS:      client -> NLB     :8080/:8433 -> Tinyproxy -> Fleet ALB     :80/:443 -> Fleet
+Minikube: client -> Traefik :8080/:8443 -> Tinyproxy -> Fleet Traefik :80/:443 -> Fleet
+AWS:      client -> NLB     :8080/:8443 -> Tinyproxy -> Fleet ALB     :80/:443 -> Fleet
 ```
 
 ## Helm interface and switching
@@ -55,7 +55,7 @@ fleet:
     service:
       ports:
         http: 8080
-        https: 8433
+        https: 8443
 ```
 
 AWS profile uses the same ports and native Service configuration:
@@ -72,7 +72,7 @@ fleet:
         service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
         service.beta.kubernetes.io/aws-load-balancer-scheme: internal
         service.beta.kubernetes.io/aws-load-balancer-ssl-cert: <ACM certificate ARN>
-        service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "8433"
+        service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "8443"
         service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
       loadBalancerSourceRanges: [] # supply the permitted client CIDRs
 ```
@@ -111,9 +111,9 @@ point. Both target the Tinyproxy ClusterIP Service. Render these CRDs only when
 `fleet.tinyproxy.ingress.enabled` is true.
 
 The shared Minikube workloads repository owns Traefik's Helm values and its
-8080/8433 Service ports. Mock Fleet owns only its TCP routes and does not upgrade
+8080/8443 Service ports. Mock Fleet owns only its TCP routes and does not upgrade
 Traefik during local deployment. The dedicated container listener ports are
-18080/18433, avoiding Traefik's administrative port. Existing public ports 80/443
+18080/18443, avoiding Traefik's administrative port. Existing public ports 80/443
 continue serving Fleet. Apply the shared workloads stack before using Tinyproxy.
 
 Minikube supports PATH routing only. Local deployment reads Traefik's Service
@@ -127,8 +127,8 @@ can support HOST routing with the appropriate wildcard DNS and certificates.
 
 Target the AWS Load Balancer Controller with LoadBalancer class
 `service.k8s.aws/nlb` and IP targets. The NLB Service declares ports 8080 and
-8433, both targeting container port 8888. Set the ACM certificate annotation,
-enable TLS only on port 8433, and use plaintext TCP to the backend. Use TCP
+8443, both targeting container port 8888. Set the ACM certificate annotation,
+enable TLS only on port 8443, and use plaintext TCP to the backend. Use TCP
 health checks and leave PROXY protocol disabled.
 
 Use an internal NLB by default. Deployment configuration supplies allowed

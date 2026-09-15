@@ -197,7 +197,7 @@ if Traefik’s Service is recreated with a different ClusterIP.
 | `fleet.tinyproxy.enabled` | Enable proxy resources; defaults to false, true locally. |
 | `fleet.tinyproxy.ingress.enabled: true` | ClusterIP Service plus two Traefik IngressRouteTCP resources. |
 | `fleet.tinyproxy.ingress.enabled: false` | LoadBalancer Service; configure its controller using native Service settings. |
-| `fleet.tinyproxy.service.ports` | HTTP 8080 and HTTPS 8433; Service type is derived, not separately configured. |
+| `fleet.tinyproxy.service.ports` | HTTP 8080 and HTTPS 8443; Service type is derived, not separately configured. |
 | `fleet.tinyproxy.ingress.tlsSecretName` | Certificate Secret in Fleet's namespace; empty uses Traefik's default certificate. |
 | `fleet.tinyproxy.service.loadBalancerClass` | AWS profile uses `service.k8s.aws/nlb`. |
 | `fleet.tinyproxy.service.annotations` | Native controller annotations; applied only in LoadBalancer mode. |
@@ -218,8 +218,8 @@ Use either proxy endpoint for both HTTP and HTTPS destinations:
 export HTTP_PROXY=http://tinyproxy.minikube.localhost:8080
 export HTTPS_PROXY=http://tinyproxy.minikube.localhost:8080
 # Or, for clients supporting TLS connections to proxies:
-export HTTP_PROXY=https://tinyproxy.minikube.localhost:8433
-export HTTPS_PROXY=https://tinyproxy.minikube.localhost:8433
+export HTTP_PROXY=https://tinyproxy.minikube.localhost:8443
+export HTTPS_PROXY=https://tinyproxy.minikube.localhost:8443
 
 curl --noproxy '' --proxy "$HTTPS_PROXY" \
   https://mock-fleet.minikube.localhost/__fleet/proxy/health/ready
@@ -238,13 +238,13 @@ Traefik needs the CRD provider and two dedicated entry points. Configure them in
 `environments/minikube/traefik-values.yaml.gotmpl`, and apply that stack before
 using Tinyproxy. Mock Fleet does not install or upgrade Traefik. The required
 entry points are `tinyproxy-http` (Service 8080, container 18080) and
-`tinyproxy-https` (Service 8433, container 18433). Mock Fleet owns the TCP routes
+`tinyproxy-https` (Service 8443, container 18443). Mock Fleet owns the TCP routes
 and selects Traefik's default TLS certificate unless another Secret is supplied.
 A standard HTTP Ingress cannot expose the CONNECT tunnel.
 
 For AWS, merge `values.aws-nlb.example.yaml` with your Fleet AWS values. Replace
 the example ACM ARN, client CIDRs, and ALB subnet CIDRs. The AWS Load Balancer
-Controller provisions an internal NLB with TCP on 8080 and TLS on 8433. Both
+Controller provisions an internal NLB with TCP on 8080 and TLS on 8443. Both
 forward plaintext TCP to Tinyproxy's port 8888. Leave PROXY protocol disabled.
 Fleet keeps its ALB Ingress. Configure DNS for the proxy NLB and private resolution
 of Fleet's ALB. EKS Auto Mode is not the targeted controller.
