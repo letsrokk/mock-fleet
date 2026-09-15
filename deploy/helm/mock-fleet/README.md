@@ -176,7 +176,7 @@ Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary 
 
 ## Optional forward proxy (Tinyproxy)
 
-Configure the deployment with `fleet.tinyproxy` or the local `TINYPROXY` flag. It forwards HTTP and tunnels HTTPS with CONNECT;
+Configure the deployment with `fleet.tinyproxy` Helm values. It forwards HTTP and tunnels HTTPS with CONNECT;
 it has no interception CA or web UI. Clients keep existing Fleet URLs, and Fleet's
 ingress handles HOST/PATH routing. Only Fleet hostnames are accepted.
 
@@ -188,7 +188,7 @@ The base chart disables the proxy. `make local-deploy` enables it, builds its
 Alpine-based image and maps the Fleet hostname to
 Traefik’s current ClusterIP using `hostAliases` only on Tinyproxy pods. Minikube
 supports PATH routing only; local setup does not modify shared CoreDNS. Keep `minikube tunnel`
-running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `TINYPROXY=false` or `--no-tinyproxy`.
+running; restart an existing tunnel after adding the new Service ports. Disable the deployment by setting `fleet.tinyproxy.enabled: false` in `values.minikube.yaml`.
 The shared Traefik listeners remain installed when disabled. Re-run local deployment
 if Traefik’s Service is recreated with a different ClusterIP.
 

@@ -186,8 +186,8 @@ access controls.
 3. Validate the AWS rendered Service and annotations locally. Real NLB TLS,
    target health, DNS, and security-group isolation require an EKS smoke test;
    local tests are not evidence those AWS paths work.
-4. Use Tinyproxy names for resources, `fleet.tinyproxy` configuration, and local
-   enable/disable flags. Update the existing PR after implementation and local
+4. Use Tinyproxy names for resources and `fleet.tinyproxy` configuration.
+   Local deployment reads proxy enablement from the Minikube Helm values. Update the existing PR after implementation and local
    verification.
    Do not remove CA Secrets that may be user-managed.
 

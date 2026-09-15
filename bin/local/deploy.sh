@@ -17,18 +17,15 @@ REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
-ENABLE_TINYPROXY=true
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--tinyproxy|--no-tinyproxy] [--cleanup] [--namespace <name>] [--routing <PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
-  --tinyproxy         Enable Tinyproxy with HTTP/HTTPS Traefik listeners (default).
-  --no-tinyproxy      Disable Tinyproxy for this local deployment.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
@@ -212,14 +209,6 @@ while [[ $# -gt 0 ]]; do
             ENABLE_LOGS=true
             shift
             ;;
-        --tinyproxy)
-            ENABLE_TINYPROXY=true
-            shift
-            ;;
-        --no-tinyproxy)
-            ENABLE_TINYPROXY=false
-            shift
-            ;;
         --port-forward)
             ENABLE_PORT_FORWARD=true
             shift
@@ -388,6 +377,9 @@ else
 fi
 
 helm dependency build "${CHART_DIR}"
+ENABLE_TINYPROXY=$(helm template "${RELEASE_NAME}" "${CHART_DIR}" \
+    --namespace "${NAMESPACE}" -f "${MINIKUBE_VALUES_FILE}" \
+    | awk '$1 == "app.kubernetes.io/component:" && $2 == "tinyproxy" { enabled = 1 } END { print enabled ? "true" : "false" }')
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 label_namespace_for_restricted_psa "${NAMESPACE}"
 if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
@@ -412,8 +404,6 @@ HELM_ARGS=(
     --set "mockOps.image.repository=ghcr.io/letsrokk/mock-fleet/mock-ops"
     --set "mockOps.image.tag=latest"
 )
-
-HELM_ARGS+=(--set "fleet.tinyproxy.enabled=${ENABLE_TINYPROXY}")
 
 if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
     ingress_ip=$(kubectl get service traefik --namespace traefik -o jsonpath='{.spec.clusterIP}')
