@@ -1,4 +1,8 @@
 quarkus:
+  micrometer:
+    export:
+      prometheus:
+        path: /mcp/metrics
   application:
     name: mock-fleet-mcp
   http:

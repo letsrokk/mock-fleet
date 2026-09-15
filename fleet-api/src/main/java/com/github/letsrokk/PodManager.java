@@ -9,6 +9,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.utils.Utils;
 import io.quarkus.scheduler.Scheduled;
+import io.quarkus.runtime.Startup;
+import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.PostConstruct;
@@ -43,6 +45,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 @ApplicationScoped
+@Startup
 public class PodManager {
 
     private static final Logger LOG = Logger.getLogger(PodManager.class);
@@ -68,6 +71,9 @@ public class PodManager {
 
     @Inject
     MockCapacity mockCapacity;
+
+    @Inject
+    FleetMetrics metrics;
 
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
     Duration inactivityThreshold;
@@ -95,6 +101,7 @@ public class PodManager {
                     return thread;
                 },
                 new ThreadPoolExecutor.AbortPolicy());
+        metrics.bindExecutor((ThreadPoolExecutor) startExecutor);
         if (mockCapacity != null) {
             long heartbeatIntervalMillis = Math.max(1L, mockCapacity.reservationLeaseMillis() / 3L);
             reservationHeartbeatExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
@@ -170,7 +177,8 @@ public class PodManager {
             startExecutor.execute(task);
         } catch (RejectedExecutionException rejection) {
             PodCreationException failure = new PodCreationException("Mock start queue is full.");
-            task.cancelBeforeStart(failure);
+            metrics.startRejected("queue_full");
+            task.cancelBeforeStart(failure, "rejected");
             throw new StartQueueFullException(mockId, stateMayHaveChanged);
         }
         return completion;
@@ -334,7 +342,7 @@ public class PodManager {
             abandoned.forEach(task -> {
                 if (task instanceof StartTask startTask) {
                     startTask.cancelBeforeStart(
-                            new PodCreationException("Mock start cancelled during shutdown."));
+                            new PodCreationException("Mock start cancelled during shutdown."), "cancelled");
                 } else {
                     LOG.warnf("Start executor abandoned an unowned task of type '%s'.",
                             task.getClass().getName());
@@ -359,6 +367,7 @@ public class PodManager {
         private final String previousPodName;
         private final CompletableFuture<MockPodRef> completion;
         private final Consumer<PodCreationException> cancelAttempt;
+        private String failureOutcome = "error";
 
         private StartTask(String mockId, String attemptId, String previousPodName,
                           CompletableFuture<MockPodRef> completion,
@@ -368,6 +377,9 @@ public class PodManager {
             this.previousPodName = previousPodName;
             this.completion = completion;
             this.cancelAttempt = cancelAttempt;
+            Timer.Sample sample = metrics.start();
+            completion.whenComplete((pod, failure) ->
+                    metrics.finishStart(sample, failure == null ? "success" : failureOutcome));
         }
 
         @Override
@@ -382,7 +394,8 @@ public class PodManager {
             }
         }
 
-        private void cancelBeforeStart(PodCreationException failure) {
+        private void cancelBeforeStart(PodCreationException failure, String outcome) {
+            failureOutcome = outcome;
             try {
                 cancelAttempt.accept(failure);
             } catch (RuntimeException cleanupFailure) {
@@ -753,6 +766,7 @@ public class PodManager {
 
     boolean deletePod(Pod pod, String mockId) {
         if (pod == null || pod.getMetadata() == null) {
+            metrics.podDeleted("error");
             return false;
         }
         return deletePod(pod.getMetadata().getName(), mockId);
@@ -763,6 +777,7 @@ public class PodManager {
     }
 
     boolean deletePod(String podName, String mockId) {
+        String outcome = "error";
         try {
             String namespace = currentNamespace();
             var podResource = kubernetesClient.pods()
@@ -770,6 +785,7 @@ public class PodManager {
                     .withName(podName);
             Pod currentPod = podResource.get();
             if (currentPod == null) {
+                outcome = "already_absent";
                 return true;
             }
             if (!isOwnedManagedPod(currentPod, mockId)) {
@@ -790,9 +806,12 @@ public class PodManager {
                     .endPreconditions()
                     .build();
             kubernetesClient.raw(podDeletePath(namespace, podName), "DELETE", deleteOptions);
-            return waitForPodToBeDeleted(podName, podResource::get);
+            boolean deleted = waitForPodToBeDeleted(podName, podResource::get);
+            outcome = deleted ? "deleted" : "error";
+            return deleted;
         } catch (KubernetesClientException failure) {
             if (failure.getCode() == 404) {
+                outcome = "already_absent";
                 return true;
             }
             LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
@@ -800,6 +819,8 @@ public class PodManager {
         } catch (RuntimeException failure) {
             LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
             return false;
+        } finally {
+            metrics.podDeleted(outcome);
         }
     }
 

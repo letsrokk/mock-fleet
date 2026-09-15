@@ -187,6 +187,116 @@ Each configuration row exposes the baseline, user, and effective `version`, plus
 
 The full REST schema is checked in at `fleet-api/src/main/resources/META-INF/openapi.yaml` and is served by the running API at `/__fleet/api/openapi?format=json`.
 
+## Prometheus metrics
+
+API, proxy, and MCP expose Prometheus metrics on their existing HTTP listener (the chart's named container port `http`, default `8080`):
+
+| Service | Direct pod scrape path |
+| --- | --- |
+| `fleet-api` | `/__fleet/api/metrics` |
+| `fleet-proxy` | `/__fleet/proxy/metrics` |
+| `fleet-mcp` (when enabled) | `/mcp/metrics` |
+
+Each includes JVM memory, garbage collection, threads, class loading, and process/system metrics through [Quarkus Micrometer's standard binders](https://quarkus.io/guides/telemetry-micrometer/), plus HTTP metrics. MCP retains its existing tool metrics. The dashboard, managed WireMock containers, and short-lived Mock Ops command are excluded.
+
+Scrape every replica directly: a load-balanced Service address hides individual process counters. These paths work with a pod IP as the host in both HOST and PATH routing modes; they require no mock subdomain and do not resolve or start a mock. The paths above are direct pod endpoints, not ingress route guarantees.
+
+### Scrape configuration
+
+Add this job to an existing in-cluster Prometheus configuration. Its service account needs permission to list/watch pods in the target namespace and network access to their HTTP ports. Replace namespace `mock-fleet`, instance `mock-fleet` (the Helm release name), and name `mock-fleet` (the chart name or `nameOverride`) with your deployment values. No Prometheus installation or ServiceMonitor is supplied by this chart. The configuration uses [Prometheus Kubernetes pod discovery and relabeling](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#kubernetes_sd_config).
+
+```yaml
+scrape_configs:
+  - job_name: mock-fleet
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [mock-fleet]
+        selectors:
+          - role: pod
+            label: app.kubernetes.io/name=mock-fleet,app.kubernetes.io/instance=mock-fleet,app.kubernetes.io/component in (api,proxy,mcp)
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: http
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        regex: (api|proxy)
+        target_label: __metrics_path__
+        replacement: /__fleet/$1/metrics
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        regex: mcp
+        target_label: __metrics_path__
+        replacement: /mcp/metrics
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_instance]
+        target_label: fleet
+      - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+        target_label: component
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+```
+
+Confirm one target per API/proxy/MCP replica in Prometheus and `up{job="mock-fleet"} == 1` for each. A direct request with `Accept: text/plain` returns HTTP 200 and Prometheus text containing `jvm_memory_used_bytes`; API scrapes also contain `mock_fleet_mocks`. A missing target indicates discovery/label selection trouble; a discovered target with `up == 0` needs its scrape error inspected for connectivity or endpoint failures.
+
+### API lifecycle metrics
+
+All fixed label combinations are registered before their first event. Labels omit mock IDs, pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `mock_fleet_mocks{state="running\|starting\|failed"}` | Shared gauge | Current mock counts. A published pod takes precedence over lifecycle state. Starting includes queued and executing starts. Failed state expires after 30 seconds; use the error counter for historical failures. |
+| `mock_fleet_capacity_used` | Shared gauge | Distinct mock IDs in the union of capacity reservations, published pods, and RUNNING lifecycle records. |
+| `mock_fleet_capacity_limit` | Gauge | Configured cluster-wide maximum active mocks. |
+| `mock_fleet_start_queue_depth` | Local gauge | Tasks waiting in this API replica's startup executor. |
+| `mock_fleet_start_workers_active` | Local gauge | Startup tasks executing on this replica. |
+| `mock_fleet_start_attempts_total{outcome="success\|error\|rejected\|cancelled"}` | Counter | One terminal outcome per submitted startup attempt; callers sharing an existing attempt add no event. Executor rejection is `rejected`; shutdown cancellation of queued tasks is `cancelled`; interrupted executing starts are `error`. |
+| `mock_fleet_start_rejections_total{reason="capacity\|queue_full"}` | Counter | Admission rejections at the cluster capacity limit or the local executor queue. |
+| `mock_fleet_start_duration_seconds{outcome="success\|error\|cancelled"}` | Histogram | Accepted startup time from submission through completion, including time in the queue. Rejected attempts are excluded. |
+| `mock_fleet_pod_deletions_total{outcome="deleted\|already_absent\|error"}` | Counter | Deletion operation outcomes, including idempotent requests; not a count of distinct deleted pods. |
+| `mock_fleet_start_reservations_reclaimed_total` | Counter | Stale/expired startup reservations successfully removed by reconciliation. |
+
+The `|` notation in the table lists allowed label values. Startup duration exports `_bucket`, `_count`, and `_sum` series, with bucket boundaries of 0.1, 0.5, 1, 2, 5, 10, 30, 60, and 120 seconds, plus `+Inf`.
+
+Shared gauges read Hazelcast state without reconciliation, state changes, or Kubernetes calls. They are non-atomic observations and can temporarily include stale reservations until ordinary reconciliation removes them. There is no stopped gauge because retained stopped records are not a complete mock inventory. Counters and histograms record events on the handling replica and reset on process restart; they are operational telemetry, not a durable audit log.
+
+### PromQL examples
+
+The discovery labels above identify a deployment by `namespace` and `fleet`. Use `max` across API replicas for shared gauges, and sum local gauges or per-replica counter rates. If querying several clusters, also retain your externally supplied cluster label in every grouping.
+
+```promql
+# Active mocks; use state="starting" for pending mocks (queued + executing).
+max by (namespace, fleet) (mock_fleet_mocks{state="running"})
+
+# Capacity utilization, percent.
+100 * max by (namespace, fleet) (mock_fleet_capacity_used)
+  / max by (namespace, fleet) (mock_fleet_capacity_limit)
+
+# Total queued starts across API replicas.
+sum by (namespace, fleet) (mock_fleet_start_queue_depth)
+
+# Startup errors per second; a failed gauge can miss short-lived failures.
+sum by (namespace, fleet) (rate(mock_fleet_start_attempts_total{outcome="error"}[5m]))
+
+# Admission rejections per second, split by reason.
+sum by (namespace, fleet, reason) (rate(mock_fleet_start_rejections_total[5m]))
+
+# Pod deletion errors per second.
+sum by (namespace, fleet) (rate(mock_fleet_pod_deletions_total{outcome="error"}[5m]))
+
+# Successful startup p95 in seconds, including queue time.
+histogram_quantile(0.95,
+  sum by (namespace, fleet, le) (
+    rate(mock_fleet_start_duration_seconds_bucket{outcome="success"}[5m])
+  )
+)
+```
+
+The latency query returns `NaN` when no successful starts occurred in the window. Rates need at least two scrapes; choose a window appropriate to your scrape interval.
+
 ## Upgrade And Security Notes
 
 - Runtime dependencies now use Quarkus 3.33.3.1 and Hazelcast 5.7.0. Fleet Proxy also rejects absolute, scheme-relative, fragmented, malformed-percent, and backslash-bearing request targets before resolution or outbound I/O, and it removes inbound authority, framing, and hop-by-hop headers before forwarding. These changes do not add API, Admin-route, or MCP authentication.
