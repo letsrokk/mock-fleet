@@ -1,4 +1,8 @@
 quarkus:
+  micrometer:
+    export:
+      prometheus:
+        path: /__fleet/api/metrics
   log:
     console:
       json: ${QUARKUS_LOG_CONSOLE_JSON:false}

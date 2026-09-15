@@ -96,6 +96,24 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
+    void exposesJvmMetricsForDirectPodScrapesWithoutResolvingOrContactingMocks() {
+        given()
+                .header("Host", "10.42.0.17:8080")
+                .accept("text/plain")
+        .when()
+                .get("/__fleet/proxy/metrics")
+        .then()
+                .statusCode(200)
+                .contentType(containsString("text/plain"))
+                .body(containsString("jvm_memory_used_bytes"))
+                .body(containsString("jvm_threads_live_threads"))
+                .body(containsString("process_uptime_seconds"));
+
+        verifyNoInteractions(fleetApiClient);
+        assertEquals(null, capturedRequest.get());
+    }
+
+    @Test
     void stripsMockIdPrefixBeforeForwardingToUpstream() {
         mockUpstream("demo");
 

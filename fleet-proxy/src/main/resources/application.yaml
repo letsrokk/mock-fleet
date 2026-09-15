@@ -1,4 +1,12 @@
 quarkus:
+  micrometer:
+    export:
+      prometheus:
+        path: /__fleet/proxy/metrics
+    binder:
+      http-server:
+        match-patterns:
+          - '.*=/proxy'
   log:
     console:
       json: ${QUARKUS_LOG_CONSOLE_JSON:false}

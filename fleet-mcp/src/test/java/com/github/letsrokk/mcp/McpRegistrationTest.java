@@ -42,6 +42,26 @@ class McpRegistrationTest {
     @Inject
     MeterRegistry meterRegistry;
 
+    @Inject
+    McpMetrics metrics;
+
+    @Test
+    void exposesJvmAndExistingCustomMetricsInPrometheusFormat() {
+        metrics.targetBlocked();
+
+        given()
+                .accept("text/plain")
+        .when()
+                .get("/mcp/metrics")
+        .then()
+                .statusCode(200)
+                .contentType(containsString("text/plain"))
+                .body(containsString("jvm_memory_used_bytes"))
+                .body(containsString("jvm_threads_live_threads"))
+                .body(containsString("process_uptime_seconds"))
+                .body(containsString("mock_fleet_mcp_target_blocks_total"));
+    }
+
     @Test
     void registersTheExactRetainedToolSurfaceWithoutTheRemovedConfigListing() {
         Set<String> actual = new HashSet<>();

@@ -22,6 +22,7 @@ import io.fabric8.kubernetes.client.dsl.NamespaceableResource;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.PodResource;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.time.Duration;
 import java.util.ArrayDeque;
@@ -56,6 +57,39 @@ import static org.mockito.Mockito.when;
 
 class PodManagerTest {
 
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final FleetMetrics metrics = new FleetMetrics(registry);
+
+    @Test
+    void concurrentCallersShareOneMeasuredStartAttempt() throws Exception {
+        HazelcastInstance hazelcast = newTestHazelcast("metrics-shared-start-");
+        PodState state = new PodState(hazelcast);
+        AtomicReference<Runnable> task = new AtomicReference<>();
+        PodManager podManager = new PodManager() {
+            @Override
+            MockPodRef spawnPod(String mockId, String attemptId) {
+                return new MockPodRef("pod", "10.0.0.1");
+            }
+        };
+        podManager.metrics = metrics;
+        podManager.podState = state;
+        podManager.podCreationTimeout = Duration.ofSeconds(5);
+        podManager.startExecutor = task::set;
+        try {
+            var first = podManager.getUpstreamBaseUrlAsync("demo");
+            var second = podManager.getUpstreamBaseUrlAsync("demo");
+            assertEquals(0, registry.get("mock_fleet_start_attempts").tag("outcome", "success").counter().count());
+            task.get().run();
+            assertEquals("http://10.0.0.1:8080", first.toCompletableFuture().get(5, TimeUnit.SECONDS));
+            assertEquals("http://10.0.0.1:8080", second.toCompletableFuture().get(5, TimeUnit.SECONDS));
+            assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "success").counter().count());
+            assertEquals(1, registry.get("mock_fleet_start_duration").tag("outcome", "success").timer().count());
+        } finally {
+            state.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
     @Test
     void boundedStartExecutorLimitsWorkersAndQueuedStarts() throws Exception {
         PodState podState = mock(PodState.class);
@@ -78,6 +112,7 @@ class PodManagerTest {
                 return new MockPodRef("mock-fleet-" + mockId + "-1", "10.0.0.1");
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.config = config;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -111,6 +146,10 @@ class PodManagerTest {
             ThreadPoolExecutor executor = (ThreadPoolExecutor) podManager.startExecutor;
             assertEquals(1, executor.getActiveCount());
             assertEquals(1, executor.getQueue().size());
+            assertEquals(1, registry.get("mock_fleet_start_queue_depth").gauge().value());
+            assertEquals(1, registry.get("mock_fleet_start_workers_active").gauge().value());
+            assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "rejected").counter().count());
+            assertEquals(1, registry.get("mock_fleet_start_rejections").tag("reason", "queue_full").counter().count());
             verify(podState).failStart(eq("third"), eq("attempt-third"), any());
         } finally {
             releaseWorker.countDown();
@@ -118,6 +157,10 @@ class PodManagerTest {
             verify(podState, times(2)).completeStart(any(), any(), any(), any());
             podManager.closeStartExecutor();
             assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isShutdown());
+            assertEquals(2, registry.get("mock_fleet_start_attempts").tag("outcome", "success").counter().count());
+            assertEquals(2, registry.get("mock_fleet_start_duration").tag("outcome", "success").timer().count());
+            assertEquals(0, registry.get("mock_fleet_start_queue_depth").gauge().value());
+            assertEquals(0, registry.get("mock_fleet_start_workers_active").gauge().value());
         }
     }
 
@@ -138,6 +181,7 @@ class PodManagerTest {
         when(config.queuedStartCapacity()).thenReturn(1);
         when(config.podCreationTimeout()).thenReturn(Duration.ofSeconds(1));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         CountDownLatch runningEntered = new CountDownLatch(1);
@@ -156,6 +200,7 @@ class PodManagerTest {
                 }
             }
         };
+        podManager.metrics = metrics;
         podManager.config = config;
         podManager.podState = podState;
         podManager.mockCapacity = capacity;
@@ -177,6 +222,9 @@ class PodManagerTest {
             assertEquals(MockLifecycleStatus.FAILED, podState.lifecycle("queued").status());
             assertEquals(0, capacity.activeCount());
             assertTrue(((ThreadPoolExecutor) podManager.startExecutor).isTerminated());
+            assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "cancelled").counter().count());
+            assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "error").counter().count());
+            assertEquals(1, registry.get("mock_fleet_start_duration").tag("outcome", "cancelled").timer().count());
         } finally {
             podManager.closeStartExecutor();
             podState.removePodListener();
@@ -201,6 +249,7 @@ class PodManagerTest {
         when(config.queuedStartCapacity()).thenReturn(1);
         when(config.podCreationTimeout()).thenReturn(Duration.ofMillis(5));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         AtomicReference<Runnable> queuedTask = new AtomicReference<>();
@@ -217,6 +266,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.config = config;
         podManager.podState = podState;
         podManager.mockCapacity = capacity;
@@ -255,6 +305,7 @@ class PodManagerTest {
         when(config.queuedStartCapacity()).thenReturn(1);
         when(config.podCreationTimeout()).thenReturn(Duration.ofMillis(10));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         AtomicReference<Runnable> queuedTask = new AtomicReference<>();
@@ -266,6 +317,7 @@ class PodManagerTest {
                 return new MockPodRef("mock-fleet-" + mockId + "-1", "10.0.0.1");
             }
         };
+        podManager.metrics = metrics;
         podManager.config = config;
         podManager.podState = podState;
         podManager.mockCapacity = capacity;
@@ -307,6 +359,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.startExecutor = Runnable::run;
@@ -328,6 +381,8 @@ class PodManagerTest {
         assertTrue(deletionAttempted.get());
         verify(podState).failStart("demo", "attempt-1", createFailure);
         verify(podState).removeLastAccessTime("mock-fleet-demo-attempt-1");
+        assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "error").counter().count());
+        assertEquals(1, registry.get("mock_fleet_start_duration").tag("outcome", "error").timer().count());
     }
 
     @Test
@@ -345,6 +400,7 @@ class PodManagerTest {
                 return false;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.startExecutor = Runnable::run;
@@ -379,6 +435,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.startExecutor = Runnable::run;
@@ -402,6 +459,7 @@ class PodManagerTest {
     void waitForPodToBeRunningTimesOutCleanly() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
 
         Pod pod = pod("mock-fleet-test-1", "Pending", false);
@@ -414,6 +472,7 @@ class PodManagerTest {
     void waitForPodToBeRunningRequiresReadyCondition() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
 
         Pod createdPod = pod("mock-fleet-test-1", "Pending", false);
@@ -432,6 +491,7 @@ class PodManagerTest {
     void waitForPodToBeRunningReportsTerminalContainerFailureImmediately() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class, RETURNS_DEEP_STUBS);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
 
         Pod createdPod = pod("mock-fleet-test-1", "Pending", false);
@@ -456,6 +516,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         IMap<String, MockPodRef> pods = mock(IMap.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
 
         when(podState.getPods()).thenReturn(pods);
@@ -478,6 +539,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
 
         when(podState.getPods()).thenReturn(pods);
@@ -511,6 +573,7 @@ class PodManagerTest {
         Pod live = new PodBuilder().withNewSpec().addNewContainer()
                 .withName("wiremock").withImage("wiremock/wiremock:3.13.2-2").endContainer().endSpec().build();
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.kubernetesClient = client;
         podManager.config = config;
@@ -538,6 +601,7 @@ class PodManagerTest {
         MockFleetConfig config = mock(MockFleetConfig.class);
         MockPodRef legacy = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.kubernetesClient = client;
         podManager.config = config;
@@ -558,6 +622,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked") IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
         KubernetesClient client = mock(KubernetesClient.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.kubernetesClient = client;
         when(podState.getPods()).thenReturn(pods);
@@ -578,6 +643,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         IMap<String, MockPodLifecycle> lifecycles = mock(IMap.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
         when(podState.getPods()).thenReturn(pods);
         when(podState.getPodLifecycles()).thenReturn(lifecycles);
@@ -592,6 +658,7 @@ class PodManagerTest {
     void restartActiveDoesNotStartAReplacementForFailedMock() {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
         MockPodLifecycle failed = MockPodLifecycle.failed(
                 "attempt-1", "mock-fleet-demo-1", "image pull failed");
@@ -616,6 +683,7 @@ class PodManagerTest {
         Queue<Runnable> queued = new ArrayDeque<>();
         AtomicBoolean deletionCalled = new AtomicBoolean();
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
@@ -657,6 +725,7 @@ class PodManagerTest {
         when(config.queuedStartCapacity()).thenReturn(1);
         when(config.podCreationTimeout()).thenReturn(Duration.ofSeconds(1));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         MockPodRef priorPod = new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
@@ -665,6 +734,7 @@ class PodManagerTest {
                 "attempt-old", priorPod.podName()));
         podState.setLastAccessTime(priorPod.podName(), 1_234L);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.config = config;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -702,6 +772,7 @@ class PodManagerTest {
                 return false;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.startExecutor = Runnable::run;
         MockPodLifecycle starting = MockPodLifecycle.starting(
@@ -728,6 +799,7 @@ class PodManagerTest {
                 throw failure;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
         podManager.startExecutor = task -> {
@@ -773,6 +845,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.podState = podState;
         podManager.podTransitionCoordinator = transitions;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -831,6 +904,7 @@ class PodManagerTest {
                 return false;
             }
         };
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = podState;
@@ -941,6 +1015,7 @@ class PodManagerTest {
     void deleteMockReturnsNotFoundWhenMockIsMissing() {
         PodState podState = mock(PodState.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.podState = podState;
 
         when(podState.stop("demo")).thenReturn(new PodState.StopClaim(null, null));
@@ -958,6 +1033,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -975,6 +1051,7 @@ class PodManagerTest {
         verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
                 eq("DELETE"), any(DeleteOptions.class));
         verify(kubernetesClient, never()).services();
+        assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "deleted").counter().count());
     }
 
     @Test
@@ -987,6 +1064,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1021,6 +1099,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1035,6 +1114,7 @@ class PodManagerTest {
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
         verify(kubernetesClient, never()).raw(anyString(), eq("DELETE"), any(DeleteOptions.class));
         verify(podState).confirmStopped("demo", pod.podName());
+        assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "already_absent").counter().count());
     }
 
     @Test
@@ -1047,6 +1127,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1063,6 +1144,7 @@ class PodManagerTest {
 
         assertEquals(PodManager.DeleteMockResult.DELETED, podManager.deleteMock("demo"));
         verify(podState).confirmStopped("demo", pod.podName());
+        assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "already_absent").counter().count());
     }
 
     @Test
@@ -1092,6 +1174,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1136,6 +1219,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1163,6 +1247,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1189,6 +1274,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -1217,6 +1303,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ZERO;
@@ -1234,6 +1321,7 @@ class PodManagerTest {
         verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
                 eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
+        assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "error").counter().count());
     }
 
     @Test
@@ -1246,6 +1334,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -1273,6 +1362,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource podResource = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
 
@@ -1297,6 +1387,7 @@ class PodManagerTest {
         PodState podState = mock(PodState.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
@@ -1325,6 +1416,7 @@ class PodManagerTest {
         PodResource stalePodResource = mock(PodResource.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
@@ -1378,6 +1470,7 @@ class PodManagerTest {
         PodResource orphanPodResource = mock(PodResource.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
@@ -1432,6 +1525,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.podCreationTimeout = Duration.ofSeconds(1);
@@ -1465,6 +1559,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = podState;
@@ -1504,6 +1599,7 @@ class PodManagerTest {
         HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-race-");
         MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         CountDownLatch podNamePublished = new CountDownLatch(1);
         CountDownLatch resumeCreate = new CountDownLatch(1);
         CountDownLatch taskFinished = new CountDownLatch(1);
@@ -1546,6 +1642,7 @@ class PodManagerTest {
                 return true;
             }
         };
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = podState;
@@ -1587,6 +1684,7 @@ class PodManagerTest {
         HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-lost-");
         MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         PodState.StartClaim claim = podState.claimStart("demo", System.currentTimeMillis(), 2_000L);
@@ -1609,6 +1707,7 @@ class PodManagerTest {
         HazelcastInstance hazelcast = newTestHazelcast("pod-manager-create-fence-owner-");
         MockFleetConfig config = capacityTestConfig(Duration.ofSeconds(1));
         MockCapacity capacity = new MockCapacity(hazelcast, config);
+        capacity.metrics = metrics;
         PodState podState = new PodState(hazelcast);
         podState.mockCapacity = capacity;
         PodState.StartClaim claim = podState.claimStart("demo", System.currentTimeMillis(), 2_000L);
@@ -1641,6 +1740,7 @@ class PodManagerTest {
         NonNamespaceOperation<Pod, PodList, PodResource> namespacedPods = mock(NonNamespaceOperation.class);
         PodResource deleteHandle = mock(PodResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = podState;
@@ -1682,6 +1782,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = mock(PodState.class);
@@ -1720,6 +1821,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = mock(PodState.class);
@@ -1757,6 +1859,7 @@ class PodManagerTest {
                 return new MockPodRef("mock-fleet-demo-1", "10.0.0.1");
             }
         };
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podState = podState;
         podManager.config = config;
@@ -1782,6 +1885,7 @@ class PodManagerTest {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.config = config;
 
@@ -1796,6 +1900,7 @@ class PodManagerTest {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         MockFleetConfig config = mock(MockFleetConfig.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.config = config;
 
@@ -2060,6 +2165,7 @@ class PodManagerTest {
         @SuppressWarnings("unchecked")
         NamespaceableResource<Pod> podHandle = mock(NamespaceableResource.class);
         PodManager podManager = new PodManager();
+        podManager.metrics = metrics;
         podManager.kubernetesClient = kubernetesClient;
         podManager.podFactory = podFactory;
         podManager.podState = podState;

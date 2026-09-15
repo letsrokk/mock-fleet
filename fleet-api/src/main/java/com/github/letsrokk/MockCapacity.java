@@ -37,6 +37,9 @@ public class MockCapacity {
     private final String ownerId;
 
     @Inject
+    FleetMetrics metrics;
+
+    @Inject
     public MockCapacity(HazelcastInstance hazelcastInstance, MockFleetConfig config) {
         validate(config);
         this.reservations = hazelcastInstance.getMap(RESERVATION_MAP_NAME);
@@ -73,6 +76,7 @@ public class MockCapacity {
                     activeMockIds = activeMockIds();
                     if (!activeMockIds.contains(mockId)
                             && activeMockIds.size() >= maxActiveMocks) {
+                        metrics.startRejected("capacity");
                         throw new CapacityExceededException(maxActiveMocks);
                     }
                 }
@@ -257,7 +261,9 @@ public class MockCapacity {
                             attemptId, lifecycle.podName(), RECLAIMED_START_MESSAGE),
                             30L, TimeUnit.SECONDS);
                 }
-                reservations.remove(mockId, attemptId);
+                if (reservations.remove(mockId, attemptId)) {
+                    metrics.reservationReclaimed();
+                }
                 removeLiveness(mockId, attemptId);
             }
         } finally {

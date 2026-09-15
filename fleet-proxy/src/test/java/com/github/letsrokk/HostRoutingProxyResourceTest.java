@@ -25,6 +25,8 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -78,6 +80,41 @@ class HostRoutingProxyResourceTest {
     void setUp() {
         nextResponse.set(new UpstreamResponse(200, "ok", Map.of()));
         capturedRequest.set(null);
+    }
+
+    @Test
+    void boundsHttpMetricLabelsAcrossArbitraryMockPaths() {
+        mockUpstream("metrics-test");
+        for (String path : List.of("/orders/customer-one", "/customers/customer-two")) {
+            given().header("Host", "metrics-test.mock-fleet.localhost")
+                    .get(path).then().statusCode(200);
+        }
+
+        String scrape = given().header("Host", "10.42.0.17:8080").accept("text/plain")
+                .get("/__fleet/proxy/metrics").then().statusCode(200).extract().asString();
+        assertTrue(scrape.contains("uri=\"/proxy\""));
+        assertFalse(scrape.contains("customer-one"));
+        assertFalse(scrape.contains("customer-two"));
+        assertFalse(scrape.contains("metrics-test"));
+        assertFalse(scrape.contains("address=\"127.0.0.1:"));
+    }
+
+    @Test
+    void exposesJvmMetricsForDirectPodScrapesWithoutResolvingOrContactingMocks() {
+        given()
+                .header("Host", "10.42.0.17:8080")
+                .accept("text/plain")
+        .when()
+                .get("/__fleet/proxy/metrics")
+        .then()
+                .statusCode(200)
+                .contentType(containsString("text/plain"))
+                .body(containsString("jvm_memory_used_bytes"))
+                .body(containsString("jvm_threads_live_threads"))
+                .body(containsString("process_uptime_seconds"));
+
+        verifyNoInteractions(fleetApiClient);
+        assertEquals(null, capturedRequest.get());
     }
 
     @Test

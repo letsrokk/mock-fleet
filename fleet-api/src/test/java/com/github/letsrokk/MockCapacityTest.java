@@ -6,6 +6,7 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -27,6 +28,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MockCapacityTest {
+
+    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final FleetMetrics metrics = new FleetMetrics(registry);
 
     private HazelcastInstance hazelcast;
     private HazelcastInstance secondHazelcast;
@@ -55,7 +59,12 @@ class MockCapacityTest {
         assertEquals(2, secondHazelcast.getCluster().getMembers().size());
         awaitClusterSafe(hazelcast);
         MockCapacity firstReplica = new MockCapacity(hazelcast, config(2, 2, 2));
+        firstReplica.metrics = metrics;
         MockCapacity secondReplica = new MockCapacity(secondHazelcast, config(2, 2, 2));
+        SimpleMeterRegistry secondRegistry = new SimpleMeterRegistry();
+        secondReplica.metrics = new FleetMetrics(secondRegistry);
+        metrics.bindState(hazelcast, config(2, 2, 2));
+        secondReplica.metrics.bindState(secondHazelcast, config(2, 2, 2));
         CountDownLatch ready = new CountDownLatch(3);
         CountDownLatch claim = new CountDownLatch(1);
         CountDownLatch completed = new CountDownLatch(3);
@@ -93,6 +102,12 @@ class MockCapacityTest {
             assertEquals(2, accepted.get());
             assertEquals(1, exhausted.get());
             assertEquals(2, firstReplica.activeCount());
+            assertEquals(2, registry.get("mock_fleet_mocks").tag("state", "starting").gauge().value());
+            assertEquals(2, secondRegistry.get("mock_fleet_mocks").tag("state", "starting").gauge().value());
+            assertEquals(2, registry.get("mock_fleet_capacity_used").gauge().value());
+            assertEquals(2, secondRegistry.get("mock_fleet_capacity_used").gauge().value());
+            assertEquals(1, registry.get("mock_fleet_start_rejections").tag("reason", "capacity").counter().count()
+                    + secondRegistry.get("mock_fleet_start_rejections").tag("reason", "capacity").counter().count());
         } finally {
             claim.countDown();
             callers.shutdownNow();
@@ -100,9 +115,44 @@ class MockCapacityTest {
     }
 
     @Test
+    void metricsReadSharedStateWithoutReconciliationAndReflectFailureExpiry() throws Exception {
+        hazelcast = newHazelcast();
+        metrics.bindState(hazelcast, config(5, 1, 1));
+        var pods = hazelcast.<String, MockPodRef>getMap(HazelcastMemberConfig.POD_MAP_NAME);
+        var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
+        var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
+        pods.put("running", new MockPodRef("pod", "10.0.0.1"));
+        lifecycles.put("running", MockPodLifecycle.starting("old-attempt", null, 1L));
+        lifecycles.put("starting", MockPodLifecycle.starting("attempt", null, 1L));
+        lifecycles.put("failed", MockPodLifecycle.failed("failed-attempt", null, "failure"));
+        lifecycles.put("stopped", MockPodLifecycle.stopped());
+        reservations.put("running", "old-attempt");
+        reservations.put("starting", "attempt");
+        reservations.put("stale", "stale-attempt");
+
+        assertEquals(1, registry.get("mock_fleet_mocks").tag("state", "running").gauge().value());
+        assertEquals(1, registry.get("mock_fleet_mocks").tag("state", "starting").gauge().value());
+        assertEquals(1, registry.get("mock_fleet_mocks").tag("state", "failed").gauge().value());
+        assertEquals(3, registry.get("mock_fleet_capacity_used").gauge().value());
+        assertEquals(5, registry.get("mock_fleet_capacity_limit").gauge().value());
+        assertEquals(3, reservations.size());
+        assertEquals(MockLifecycleStatus.STARTING, lifecycles.get("starting").status());
+        assertEquals(0, registry.get("mock_fleet_start_reservations_reclaimed").counter().count());
+
+        lifecycles.setTtl("failed", 1, TimeUnit.SECONDS);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (registry.get("mock_fleet_mocks").tag("state", "failed").gauge().value() != 0) {
+            assertTrue(System.nanoTime() < deadline, "Expired failures still counted");
+            Thread.sleep(10);
+        }
+        assertEquals(1, registry.get("mock_fleet_mocks").tag("state", "running").gauge().value());
+    }
+
+    @Test
     void reserveAndReleaseAreIdempotentByMockAndAttempt() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        capacity.metrics = metrics;
 
         reserve(capacity, hazelcast, "demo", "attempt-1");
         reserve(capacity, hazelcast, "demo", "attempt-1");
@@ -120,6 +170,7 @@ class MockCapacityTest {
     void aReplacementAttemptKeepsOneSlotAndCannotBeReleasedByItsPredecessor() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        capacity.metrics = metrics;
 
         reserve(capacity, hazelcast, "demo", "attempt-1");
         reserve(capacity, hazelcast, "demo", "attempt-2");
@@ -135,6 +186,7 @@ class MockCapacityTest {
     void activeAccountingRequiresStartOwnershipAndIncludesRunningState() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 1, 1));
+        capacity.metrics = metrics;
         hazelcast.<String, MockPodLifecycle>getMap(HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME)
                 .put("starting", MockPodLifecycle.starting("attempt-starting", null, System.currentTimeMillis()));
         hazelcast.<String, MockPodRef>getMap(HazelcastMemberConfig.POD_MAP_NAME)
@@ -149,6 +201,7 @@ class MockCapacityTest {
     void startupReconciliationDropsReservationsWithoutACurrentStartingAttempt() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 1, 1));
+        capacity.metrics = metrics;
         hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME)
                 .put("stale", "attempt-stale");
         hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME)
@@ -165,6 +218,9 @@ class MockCapacityTest {
         assertEquals(MockLifecycleStatus.FAILED,
                 hazelcast.<String, MockPodLifecycle>getMap(
                         HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME).get("current").status());
+        assertEquals(2, registry.get("mock_fleet_start_reservations_reclaimed").counter().count());
+        capacity.reconcile();
+        assertEquals(2, registry.get("mock_fleet_start_reservations_reclaimed").counter().count());
     }
 
     @Test
@@ -172,6 +228,7 @@ class MockCapacityTest {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast,
                 config(1, 1, 1, Duration.ofMillis(5)));
+        capacity.metrics = metrics;
         var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
@@ -191,6 +248,7 @@ class MockCapacityTest {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast,
                 config(1, 1, 1, Duration.ofMillis(5)));
+        capacity.metrics = metrics;
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
         long expiredLifecycleStart = System.currentTimeMillis() - 20L;
@@ -209,6 +267,7 @@ class MockCapacityTest {
     void renewingAReservationDoesNotWaitForAnUnrelatedLifecycleLock() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        capacity.metrics = metrics;
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
         reserve(capacity, hazelcast, "alpha", "attempt-alpha");
@@ -231,6 +290,7 @@ class MockCapacityTest {
     void reservingAvailableCapacityDoesNotWaitForAnUnrelatedLifecycleLock() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        capacity.metrics = metrics;
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
         reserve(capacity, hazelcast, "alpha", "attempt-alpha");
@@ -252,6 +312,7 @@ class MockCapacityTest {
     void reservationFenceDoesNotHoldTheGlobalCapacityLockDuringItsAction() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        capacity.metrics = metrics;
         reserve(capacity, hazelcast, "alpha", "attempt-alpha");
         CountDownLatch actionEntered = new CountDownLatch(1);
         CountDownLatch finishAction = new CountDownLatch(1);
@@ -286,6 +347,7 @@ class MockCapacityTest {
     void renewalDoesNotWaitForItsReservationFence() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(2, 2, 2));
+        capacity.metrics = metrics;
         reserve(capacity, hazelcast, "alpha", "attempt-alpha");
         CountDownLatch actionEntered = new CountDownLatch(1);
         CountDownLatch finishAction = new CountDownLatch(1);
@@ -343,6 +405,7 @@ class MockCapacityTest {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast,
                 config(1, 1, 1, Duration.ofMillis(5)));
+        capacity.metrics = metrics;
         var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
@@ -360,6 +423,7 @@ class MockCapacityTest {
     void liveReconciliationRemovesALifecycleLessCrashReservation() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        capacity.metrics = metrics;
         var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
 
         capacity.reserve("alpha", "attempt-alpha");
@@ -372,6 +436,7 @@ class MockCapacityTest {
     void reconciledStaleAttemptCannotCompleteAfterAnotherMockTakesItsSlot() {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        capacity.metrics = metrics;
         var reservations = hazelcast.<String, String>getMap(MockCapacity.RESERVATION_MAP_NAME);
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
@@ -399,6 +464,7 @@ class MockCapacityTest {
     void reconciliationCannotObserveTheGapBetweenReservationAndStartingPublication() throws Exception {
         hazelcast = newHazelcast();
         MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
+        capacity.metrics = metrics;
         CountDownLatch publisherEntered = new CountDownLatch(1);
         CountDownLatch publishStarting = new CountDownLatch(1);
         CountDownLatch reconciliationCalled = new CountDownLatch(1);

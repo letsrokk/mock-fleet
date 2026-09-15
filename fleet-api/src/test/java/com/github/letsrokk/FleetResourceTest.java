@@ -17,6 +17,21 @@ import static org.mockito.Mockito.when;
 @QuarkusTest
 class FleetResourceTest {
 
+    @Test
+    void exposesPrometheusJvmAndLifecycleMetricsWithoutCallingMockOperations() {
+        given().accept("text/plain")
+                .when().get("/__fleet/api/metrics")
+                .then().statusCode(200)
+                .contentType(org.hamcrest.Matchers.startsWith("text/plain"))
+                .body(org.hamcrest.Matchers.containsString("jvm_memory_used_bytes"))
+                .body(org.hamcrest.Matchers.containsString("jvm_threads_live_threads"))
+                .body(org.hamcrest.Matchers.containsString("process_uptime_seconds"))
+                .body(org.hamcrest.Matchers.containsString("mock_fleet_mocks"))
+                .body(org.hamcrest.Matchers.containsString("mock_fleet_start_attempts_total"))
+                .body(org.hamcrest.Matchers.containsString("mock_fleet_start_duration_seconds_bucket"));
+        org.mockito.Mockito.verifyNoInteractions(podManager, podState);
+    }
+
     @InjectMock
     PodManager podManager;
 
@@ -72,6 +87,9 @@ class FleetResourceTest {
                 .body("retryAfterMs", is(1000));
 
         verify(podManager).startMock("demo");
+        String scrape = given().accept("text/plain").get("/__fleet/api/metrics").asString();
+        org.junit.jupiter.api.Assertions.assertTrue(scrape.contains("uri=\"/__fleet/api/mocks/{mockId}/start\""));
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("/__fleet/api/mocks/demo/start"));
     }
 
     @Test
