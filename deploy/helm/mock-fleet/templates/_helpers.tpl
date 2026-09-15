@@ -441,11 +441,11 @@ app.kubernetes.io/component: mock-ops
 {{- end -}}
 {{- end -}}
 
-{{- define "mock-fleet.mitmproxyFullname" -}}
-{{- printf "%s-mitmproxy" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- define "mock-fleet.tinyproxyFullname" -}}
+{{- printf "%s-tinyproxy" (include "mock-fleet.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "mock-fleet.mitmproxySelectorLabels" -}}
+{{- define "mock-fleet.tinyproxySelectorLabels" -}}
 {{ include "mock-fleet.selectorLabels" . }}
-app.kubernetes.io/component: mitmproxy
+app.kubernetes.io/component: tinyproxy
 {{- end -}}

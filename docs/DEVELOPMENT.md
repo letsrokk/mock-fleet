@@ -13,7 +13,7 @@ The local profile uses Traefik, HTTPS, PATH routing, and enables MCP. Run `minik
 Optional Make variables select deployment behavior:
 
 ```bash
-make local-deploy MITMPROXY=false        # Disable the default local forward proxy
+make local-deploy TINYPROXY=false        # Disable the default local forward proxy
 make local-deploy LOGS=true
 make local-deploy DEV=true                 # API remote development
 make local-deploy DEV=proxy
@@ -34,8 +34,8 @@ Local deployments enable Tinyproxy by default. Traefik exposes the HTTP proxy at
 `http://tinyproxy.minikube.localhost:8080` and HTTPS proxy at
 `https://tinyproxy.minikube.localhost:8433`. Both tunnel HTTPS destinations without
 interception. Clients trust the existing ingress CA; there is no web UI or proxy
-CA to install. Keep `minikube tunnel` running. Use `MITMPROXY=false` or
-`bin/local/deploy.sh --no-mitmproxy` to disable it. See
+CA to install. Keep `minikube tunnel` running. Use `TINYPROXY=false` or
+`bin/local/deploy.sh --no-tinyproxy` to disable it. See
 [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-tinyproxy).
 
 ## Local security setup

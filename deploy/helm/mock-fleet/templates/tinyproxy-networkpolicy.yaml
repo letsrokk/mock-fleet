@@ -1,37 +1,37 @@
-{{- if .Values.fleet.mitmproxy.enabled }}
+{{- if .Values.fleet.tinyproxy.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  name: {{ include "mock-fleet.tinyproxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: mitmproxy
+    app.kubernetes.io/component: tinyproxy
 spec:
   podSelector:
     matchLabels:
-      {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 6 }}
+      {{- include "mock-fleet.tinyproxySelectorLabels" . | nindent 6 }}
   policyTypes: [Ingress, Egress]
   ingress:
     - ports:
         - protocol: TCP
           port: 8888
   egress:
-    {{- if .Values.fleet.mitmproxy.networkPolicy.ingressPodSelector }}
+    {{- if .Values.fleet.tinyproxy.networkPolicy.ingressPodSelector }}
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.fleet.mitmproxy.networkPolicy.ingressNamespace | quote }}
+              kubernetes.io/metadata.name: {{ .Values.fleet.tinyproxy.networkPolicy.ingressNamespace | quote }}
           podSelector:
             matchLabels:
-              {{- toYaml .Values.fleet.mitmproxy.networkPolicy.ingressPodSelector | nindent 14 }}
+              {{- toYaml .Values.fleet.tinyproxy.networkPolicy.ingressPodSelector | nindent 14 }}
       ports:
-        {{- range .Values.fleet.mitmproxy.networkPolicy.ingressPorts }}
+        {{- range .Values.fleet.tinyproxy.networkPolicy.ingressPorts }}
         - protocol: TCP
           port: {{ . }}
         {{- end }}
     {{- end }}
-    {{- range .Values.fleet.mitmproxy.networkPolicy.allowedCidrs }}
+    {{- range .Values.fleet.tinyproxy.networkPolicy.allowedCidrs }}
     - to:
         - ipBlock:
             cidr: {{ . | quote }}
@@ -44,10 +44,10 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.fleet.mitmproxy.networkPolicy.dnsNamespace | quote }}
+              kubernetes.io/metadata.name: {{ .Values.fleet.tinyproxy.networkPolicy.dnsNamespace | quote }}
           podSelector:
             matchLabels:
-              {{- toYaml .Values.fleet.mitmproxy.networkPolicy.dnsPodSelector | nindent 14 }}
+              {{- toYaml .Values.fleet.tinyproxy.networkPolicy.dnsPodSelector | nindent 14 }}
       ports:
         - protocol: UDP
           port: 53

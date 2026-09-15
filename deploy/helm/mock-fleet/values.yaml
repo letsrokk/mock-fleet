@@ -4,8 +4,7 @@ namespaceOverride: ""
 clusterDomain: cluster.local
 
 fleet:
-  # The configuration name is retained; the container runs Tinyproxy.
-  mitmproxy:
+  tinyproxy:
     enabled: false
     image:
       repository: ghcr.io/letsrokk/mock-fleet/tinyproxy

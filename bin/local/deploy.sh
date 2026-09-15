@@ -17,18 +17,18 @@ REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
-ENABLE_MITMPROXY=true
+ENABLE_TINYPROXY=true
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy|--no-mitmproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--tinyproxy|--no-tinyproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
-  --mitmproxy         Enable Tinyproxy with HTTP/HTTPS Traefik listeners (default).
-  --no-mitmproxy      Disable Tinyproxy for this local deployment.
+  --tinyproxy         Enable Tinyproxy with HTTP/HTTPS Traefik listeners (default).
+  --no-tinyproxy      Disable Tinyproxy for this local deployment.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
@@ -212,12 +212,12 @@ while [[ $# -gt 0 ]]; do
             ENABLE_LOGS=true
             shift
             ;;
-        --mitmproxy)
-            ENABLE_MITMPROXY=true
+        --tinyproxy)
+            ENABLE_TINYPROXY=true
             shift
             ;;
-        --no-mitmproxy)
-            ENABLE_MITMPROXY=false
+        --no-tinyproxy)
+            ENABLE_TINYPROXY=false
             shift
             ;;
         --port-forward)
@@ -390,7 +390,7 @@ fi
 helm dependency build "${CHART_DIR}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 label_namespace_for_restricted_psa "${NAMESPACE}"
-if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
+if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
     use_minikube_docker_daemon
     docker build -t ghcr.io/letsrokk/mock-fleet/tinyproxy:latest "${REPO_ROOT}/fleet-tinyproxy"
     reset_docker_daemon
@@ -414,7 +414,7 @@ HELM_ARGS=(
     --set "mockOps.image.tag=latest"
 )
 
-HELM_ARGS+=(--set "fleet.mitmproxy.enabled=${ENABLE_MITMPROXY}")
+HELM_ARGS+=(--set "fleet.tinyproxy.enabled=${ENABLE_TINYPROXY}")
 
 if [[ "${REMOTE_DEV_MODULE}" == "proxy" ]]; then
     HELM_ARGS+=(--set "fleet.proxy.dev.enabled=true")
@@ -438,8 +438,8 @@ fi
 echo "Deploying ${RELEASE_NAME} to namespace ${NAMESPACE} with proxy image=${LOCAL_PROXY_IMAGE}, API image=${LOCAL_API_IMAGE}, MCP image=${LOCAL_MCP_IMAGE}, dashboard image=${LOCAL_DASH_IMAGE}, Mock Ops image=${LOCAL_MOCK_OPS_IMAGE}, ${routing_message}, ${profile_message}, and Minikube values from ${MINIKUBE_VALUES_FILE}."
 helm "${HELM_ARGS[@]}"
 
-if [[ "${ENABLE_MITMPROXY}" == "true" ]]; then
-    rollout_component mitmproxy "$(deployment_name_for_component mitmproxy)"
+if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
+    rollout_component tinyproxy "$(deployment_name_for_component tinyproxy)"
 fi
 
 if has_module proxy ${CHANGED_MODULES[@]+"${CHANGED_MODULES[@]}"}; then

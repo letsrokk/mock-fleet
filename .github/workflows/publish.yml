@@ -337,7 +337,7 @@ jobs:
             exit 1
           fi
 
-          rendered="$(helm template mock-fleet "${chart_package}" --set fleet.mcp.enabled=true --set mockOps.enabled=true --set fleet.mitmproxy.enabled=true)"
+          rendered="$(helm template mock-fleet "${chart_package}" --set fleet.mcp.enabled=true --set mockOps.enabled=true --set fleet.tinyproxy.enabled=true)"
 
           if ! grep -Fq "ghcr.io/letsrokk/mock-fleet/tinyproxy:${IMAGE_TAG}" <<< "${rendered}"; then
             echo "Rendered chart Tinyproxy image tag does not match the release" >&2

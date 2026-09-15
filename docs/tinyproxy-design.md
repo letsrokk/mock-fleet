@@ -4,7 +4,7 @@ Status: implemented in the chart and local setup. AWS deployment verification re
 
 ## Behavior
 
-Replace the optional mitmweb deployment with one Tinyproxy deployment. Keep it
+Run one optional Tinyproxy deployment. Keep it
 disabled in the base chart and enabled in the Minikube profile. Mount native
 Tinyproxy configuration from a ConfigMap. Remove the interception addon, CA
 Secret requirement, web UI, and web password.
@@ -29,10 +29,9 @@ AWS:      client -> NLB     :8080/:8433 -> Tinyproxy -> Fleet ALB     :80/:443 -
 
 ## Helm interface and switching
 
-Use `fleet.mitmproxy.ingress.enabled` as the switch. Retain the existing
-`mitmproxy` configuration name as requested, although the process is Tinyproxy.
+Use `fleet.tinyproxy.ingress.enabled` as the switch.
 There is no `exposure.provider` field or independently configurable Service type.
-When `fleet.mitmproxy.enabled` is false, render no proxy resources.
+When `fleet.tinyproxy.enabled` is false, render no proxy resources.
 
 | Proxy enabled | Ingress enabled | Service type | Exposure |
 | --- | --- | --- | --- |
@@ -44,7 +43,7 @@ Minikube profile:
 
 ```yaml
 fleet:
-  mitmproxy:
+  tinyproxy:
     enabled: true
     ingress:
       enabled: true
@@ -63,7 +62,7 @@ AWS profile uses the same ports and native Service configuration:
 
 ```yaml
 fleet:
-  mitmproxy:
+  tinyproxy:
     enabled: true
     ingress:
       enabled: false
@@ -109,7 +108,7 @@ code change. Switching a live installation is not a zero-downtime operation.
 Create two IngressRouteTCP resources: a non-TLS catch-all on the dedicated HTTP
 entry point, and a TLS route matching the proxy hostname on the HTTPS entry
 point. Both target the Tinyproxy ClusterIP Service. Render these CRDs only when
-`fleet.mitmproxy.ingress.enabled` is true.
+`fleet.tinyproxy.ingress.enabled` is true.
 
 Provide a small Traefik Helm values overlay declaring and exposing ports 8080
 and 8433. The local setup applies this overlay to the existing Traefik release;
@@ -192,8 +191,7 @@ access controls.
 3. Validate the AWS rendered Service and annotations locally. Real NLB TLS,
    target health, DNS, and security-group isolation require an EKS smoke test;
    local tests are not evidence those AWS paths work.
-4. Replace the mitmweb process and interception resources with Tinyproxy while
-   retaining the requested `fleet.mitmproxy` configuration namespace and local
+4. Use Tinyproxy names for resources, `fleet.tinyproxy` configuration, and local
    enable/disable flags. Update the existing PR after implementation and local
    verification.
    Do not remove CA Secrets that may be user-managed.

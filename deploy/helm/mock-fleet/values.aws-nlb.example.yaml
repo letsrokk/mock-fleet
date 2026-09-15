@@ -1,6 +1,6 @@
 # Merge with your Fleet AWS values; replace all example network/certificate values.
 fleet:
-  mitmproxy:
+  tinyproxy:
     enabled: true
     ingress:
       enabled: false

@@ -1,11 +1,11 @@
-{{- if .Values.fleet.mitmproxy.enabled }}
-{{- $proxy := .Values.fleet.mitmproxy }}
+{{- if .Values.fleet.tinyproxy.enabled }}
+{{- $proxy := .Values.fleet.tinyproxy }}
 {{- if eq (int $proxy.service.ports.http) (int $proxy.service.ports.https) }}
 {{- fail "Tinyproxy HTTP and HTTPS ports must differ" }}
 {{- end }}
 {{- if not $proxy.ingress.enabled }}
 {{- if not $proxy.service.loadBalancerSourceRanges }}
-{{- fail "fleet.mitmproxy.service.loadBalancerSourceRanges is required for LoadBalancer exposure" }}
+{{- fail "fleet.tinyproxy.service.loadBalancerSourceRanges is required for LoadBalancer exposure" }}
 {{- end }}
 {{- if eq $proxy.service.loadBalancerClass "service.k8s.aws/nlb" }}
 {{- $_ := required "AWS NLB requires the aws-load-balancer-ssl-cert annotation" (index $proxy.service.annotations "service.beta.kubernetes.io/aws-load-balancer-ssl-cert") }}
@@ -20,11 +20,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  name: {{ include "mock-fleet.tinyproxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: mitmproxy
+    app.kubernetes.io/component: tinyproxy
   {{- if and (not $proxy.ingress.enabled) $proxy.service.annotations }}
   annotations:
     {{- toYaml $proxy.service.annotations | nindent 4 }}
@@ -39,7 +39,7 @@ spec:
     {{- toYaml $proxy.service.loadBalancerSourceRanges | nindent 4 }}
   {{- end }}
   selector:
-    {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 4 }}
+    {{- include "mock-fleet.tinyproxySelectorLabels" . | nindent 4 }}
   ports:
     - name: http
       port: {{ $proxy.service.ports.http }}

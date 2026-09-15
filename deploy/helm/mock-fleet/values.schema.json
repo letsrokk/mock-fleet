@@ -10,7 +10,7 @@
     "fleet": {
       "type": "object",
       "properties": {
-        "mitmproxy": {
+        "tinyproxy": {
           "type": "object",
           "additionalProperties": false,
           "properties": {

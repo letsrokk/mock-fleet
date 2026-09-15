@@ -6,7 +6,7 @@ This chart deploys `mock-fleet` as three core Kubernetes services and two option
 - `fleet-api`: manages mock pods, WireMock config, lifecycle cleanup, Hazelcast state, and persisted mappings.
 - `fleet-dash`: serves the dashboard under `/__fleet/`.
 - `fleet-mcp`: exposes typed MCP tools under `/__fleet/mcp` when enabled.
-- `mitmproxy`: runs Tinyproxy as a forward proxy on port 8888 when enabled.
+- `tinyproxy`: runs Tinyproxy as a forward proxy on port 8888 when enabled.
 
 ## Install
 
@@ -176,8 +176,7 @@ Fleet Proxy continues to expose direct WireMock `/__admin` requests on ordinary 
 
 ## Optional forward proxy (Tinyproxy)
 
-The `fleet.mitmproxy` configuration name and `MITMPROXY` local flag are retained,
-but the deployment runs Tinyproxy. It forwards HTTP and tunnels HTTPS with CONNECT;
+Configure the deployment with `fleet.tinyproxy` or the local `TINYPROXY` flag. It forwards HTTP and tunnels HTTPS with CONNECT;
 it has no interception CA or web UI. Clients keep existing Fleet URLs, and Fleet's
 ingress handles HOST/PATH routing. Only Fleet hostnames are accepted.
 
@@ -188,20 +187,20 @@ client -> Traefik or NLB -> Tinyproxy -> Fleet ingress -> Fleet Proxy -> mock po
 The base chart disables the proxy. `make local-deploy` enables it, builds its
 Alpine-based image, configures Traefik listeners, and adds a scoped CoreDNS rewrite
 for the local Fleet domain (including mock subdomains). Keep `minikube tunnel`
-running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `MITMPROXY=false` or `--no-mitmproxy`.
+running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `TINYPROXY=false` or `--no-tinyproxy`.
 The shared Traefik listeners and DNS rewrite remain installed when disabled.
 
 | Setting | Behavior |
 | --- | --- |
-| `fleet.mitmproxy.enabled` | Enable proxy resources; defaults to false, true locally. |
-| `fleet.mitmproxy.ingress.enabled: true` | ClusterIP Service plus two Traefik IngressRouteTCP resources. |
-| `fleet.mitmproxy.ingress.enabled: false` | LoadBalancer Service; configure its controller using native Service settings. |
-| `fleet.mitmproxy.service.ports` | HTTP 8080 and HTTPS 8433; Service type is derived, not separately configured. |
-| `fleet.mitmproxy.ingress.tlsSecretName` | Certificate Secret in Fleet's namespace; empty uses Traefik's default certificate. |
-| `fleet.mitmproxy.service.loadBalancerClass` | AWS profile uses `service.k8s.aws/nlb`. |
-| `fleet.mitmproxy.service.annotations` | Native controller annotations; applied only in LoadBalancer mode. |
-| `fleet.mitmproxy.service.loadBalancerSourceRanges` | Required allowed client CIDRs in LoadBalancer mode. |
-| `fleet.mitmproxy.config` | Native Tinyproxy tuning directives mounted at `/etc/tinyproxy/tinyproxy.conf`. |
+| `fleet.tinyproxy.enabled` | Enable proxy resources; defaults to false, true locally. |
+| `fleet.tinyproxy.ingress.enabled: true` | ClusterIP Service plus two Traefik IngressRouteTCP resources. |
+| `fleet.tinyproxy.ingress.enabled: false` | LoadBalancer Service; configure its controller using native Service settings. |
+| `fleet.tinyproxy.service.ports` | HTTP 8080 and HTTPS 8433; Service type is derived, not separately configured. |
+| `fleet.tinyproxy.ingress.tlsSecretName` | Certificate Secret in Fleet's namespace; empty uses Traefik's default certificate. |
+| `fleet.tinyproxy.service.loadBalancerClass` | AWS profile uses `service.k8s.aws/nlb`. |
+| `fleet.tinyproxy.service.annotations` | Native controller annotations; applied only in LoadBalancer mode. |
+| `fleet.tinyproxy.service.loadBalancerSourceRanges` | Required allowed client CIDRs in LoadBalancer mode. |
+| `fleet.tinyproxy.config` | Native Tinyproxy tuning directives mounted at `/etc/tinyproxy/tinyproxy.conf`. |
 
 The chart fixes listener and routing/filter directives. Configure tuning such as
 `Timeout: 600`, `MaxClients: 100`, and `LogLevel: Connect`. ConfigMap changes through
@@ -229,7 +228,7 @@ Tinyproxy CA is needed. HOST routing also requires the destination certificate t
 cover `*.mock-fleet.minikube.localhost`; the existing local `*.minikube.localhost`
 certificate covers PATH routing only. Supply the appropriate ingress certificate
 before using HOST-mode HTTPS locally. In-cluster clients can directly use
-`http://mock-fleet-mitmproxy.mock-fleet.svc.cluster.local:8080`.
+`http://mock-fleet-tinyproxy.mock-fleet.svc.cluster.local:8080`.
 
 ### Traefik and AWS
 
@@ -269,7 +268,7 @@ inspect encrypted paths or inner SNI: isolation from other virtual hosts sharing
 Fleet's ingress requires destination-side controls or a dedicated Fleet ingress.
 
 ```bash
-python3 deploy/helm/mock-fleet/tests/mitmproxy-chart.py
+python3 deploy/helm/mock-fleet/tests/tinyproxy-chart.py
 # With the local deployment running and its CA trusted:
 python3 deploy/helm/mock-fleet/tests/tinyproxy-smoke.py
 ```

@@ -1,12 +1,12 @@
-{{- if .Values.fleet.mitmproxy.enabled }}
+{{- if .Values.fleet.tinyproxy.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  name: {{ include "mock-fleet.tinyproxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: mitmproxy
+    app.kubernetes.io/component: tinyproxy
 data:
   tinyproxy.conf: |
     Port 8888
@@ -17,7 +17,7 @@ data:
     FilterType ere
     FilterDefaultDeny Yes
     FilterCaseSensitive No
-    {{- range $key, $value := .Values.fleet.mitmproxy.config }}
+    {{- range $key, $value := .Values.fleet.tinyproxy.config }}
     {{ $key }} {{ $value }}
     {{- end }}
   allowed-hosts: |

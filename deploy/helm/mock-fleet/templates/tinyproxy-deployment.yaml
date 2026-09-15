@@ -1,24 +1,24 @@
-{{- if .Values.fleet.mitmproxy.enabled }}
+{{- if .Values.fleet.tinyproxy.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  name: {{ include "mock-fleet.tinyproxyFullname" . }}
   namespace: {{ include "mock-fleet.namespace" . }}
   labels:
     {{- include "mock-fleet.labels" . | nindent 4 }}
-    app.kubernetes.io/component: mitmproxy
+    app.kubernetes.io/component: tinyproxy
 spec:
   revisionHistoryLimit: 3
-  replicas: {{ .Values.fleet.mitmproxy.replicas }}
+  replicas: {{ .Values.fleet.tinyproxy.replicas }}
   selector:
     matchLabels:
-      {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 6 }}
+      {{- include "mock-fleet.tinyproxySelectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "mock-fleet.mitmproxySelectorLabels" . | nindent 8 }}
+        {{- include "mock-fleet.tinyproxySelectorLabels" . | nindent 8 }}
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/mitmproxy-configmap.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/tinyproxy-configmap.yaml") . | sha256sum }}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -29,9 +29,9 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: mitmproxy
-          image: {{ printf "%s:%s" .Values.fleet.mitmproxy.image.repository (default .Chart.AppVersion .Values.fleet.mitmproxy.image.tag) | quote }}
-          imagePullPolicy: {{ .Values.fleet.mitmproxy.image.pullPolicy }}
+        - name: tinyproxy
+          image: {{ printf "%s:%s" .Values.fleet.tinyproxy.image.repository (default .Chart.AppVersion .Values.fleet.tinyproxy.image.tag) | quote }}
+          imagePullPolicy: {{ .Values.fleet.tinyproxy.image.pullPolicy }}
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -54,7 +54,7 @@ spec:
               port: proxy
             periodSeconds: 20
           resources:
-            {{- toYaml .Values.fleet.mitmproxy.resources | nindent 12 }}
+            {{- toYaml .Values.fleet.tinyproxy.resources | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/tinyproxy
@@ -66,5 +66,5 @@ spec:
           emptyDir: {}
         - name: config
           configMap:
-            name: {{ include "mock-fleet.mitmproxyFullname" . }}
+            name: {{ include "mock-fleet.tinyproxyFullname" . }}
 {{- end }}

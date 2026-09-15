@@ -1,5 +1,5 @@
-{{- if and .Values.fleet.mitmproxy.enabled .Values.fleet.mitmproxy.ingress.enabled }}
-{{- $proxy := .Values.fleet.mitmproxy }}
+{{- if and .Values.fleet.tinyproxy.enabled .Values.fleet.tinyproxy.ingress.enabled }}
+{{- $proxy := .Values.fleet.tinyproxy }}
 {{- if eq $proxy.ingress.httpEntryPoint $proxy.ingress.httpsEntryPoint }}
 {{- fail "Tinyproxy HTTP and HTTPS entry points must differ" }}
 {{- end }}
@@ -8,11 +8,11 @@
 apiVersion: traefik.io/v1alpha1
 kind: IngressRouteTCP
 metadata:
-  name: {{ include "mock-fleet.mitmproxyFullname" $ }}-{{ ternary "https" "http" $tls }}
+  name: {{ include "mock-fleet.tinyproxyFullname" $ }}-{{ ternary "https" "http" $tls }}
   namespace: {{ include "mock-fleet.namespace" $ }}
   labels:
     {{- include "mock-fleet.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: mitmproxy
+    app.kubernetes.io/component: tinyproxy
 spec:
   ingressClassName: {{ $proxy.ingress.className | quote }}
   entryPoints:
@@ -20,7 +20,7 @@ spec:
   routes:
     - match: {{ ternary (printf "HostSNI(`%s`)" $proxy.ingress.hostname) "HostSNI(`*`)" $tls | quote }}
       services:
-        - name: {{ include "mock-fleet.mitmproxyFullname" $ }}
+        - name: {{ include "mock-fleet.tinyproxyFullname" $ }}
           port: {{ $proxy.service.ports.http }}
   {{- if $tls }}
   {{- if $proxy.ingress.tlsSecretName }}

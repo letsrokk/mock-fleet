@@ -7,7 +7,7 @@ ingress:
     traefik.ingress.kubernetes.io/router.tls: "true"
 
 fleet:
-  mitmproxy:
+  tinyproxy:
     enabled: true
     image:
       tag: latest

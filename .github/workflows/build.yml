@@ -260,4 +260,4 @@ jobs:
       - run: docker build -t mock-fleet-tinyproxy:test fleet-tinyproxy
       - run: helm dependency build deploy/helm/mock-fleet
       - run: helm lint deploy/helm/mock-fleet
-      - run: python3 deploy/helm/mock-fleet/tests/mitmproxy-chart.py
+      - run: python3 deploy/helm/mock-fleet/tests/tinyproxy-chart.py
