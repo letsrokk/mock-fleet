@@ -56,6 +56,8 @@ jobs:
           filters: |
             tinyproxy:
               - 'fleet-tinyproxy/**'
+              - 'bin/local/**'
+              - 'Makefile'
               - 'deploy/helm/mock-fleet/**'
               - '.github/workflows/build.yml'
             proxy:
@@ -261,3 +263,4 @@ jobs:
       - run: helm dependency build deploy/helm/mock-fleet
       - run: helm lint deploy/helm/mock-fleet
       - run: python3 deploy/helm/mock-fleet/tests/tinyproxy-chart.py
+      - run: python3 bin/local/test-deploy-options.py

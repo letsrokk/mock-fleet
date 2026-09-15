@@ -187,8 +187,10 @@ client -> Traefik or NLB -> Tinyproxy -> Fleet ingress -> Fleet Proxy -> mock po
 The base chart disables the proxy. `make local-deploy` enables it, builds its
 Alpine-based image and maps the Fleet hostname to
 Traefik’s current ClusterIP using `hostAliases` only on Tinyproxy pods. Minikube
-supports PATH routing only; local setup does not modify shared CoreDNS. Keep `minikube tunnel`
-running; restart an existing tunnel after adding the new Service ports. Disable the deployment by setting `fleet.tinyproxy.enabled: false` in `values.minikube.yaml`.
+supports PATH routing only when Tinyproxy is enabled; local setup does not modify shared CoreDNS. Keep `minikube tunnel`
+running; restart an existing tunnel after adding the new Service ports. Local deployment defaults to Tinyproxy enabled and PATH routing. Disable it with
+`make local-deploy TINYPROXY=false` or `bin/local/deploy.sh --no-tinyproxy`.
+Use `--no-tinyproxy --routing HOST` for HOST routing, with suitable DNS and certificates.
 The shared Traefik listeners remain installed when disabled. Re-run local deployment
 if Traefik’s Service is recreated with a different ClusterIP.
 
@@ -227,7 +229,7 @@ curl --noproxy '' --proxy "$HTTPS_PROXY" \
 
 Remove Fleet hosts from `NO_PROXY`. Clients trust Fleet's ingress certificate;
 HTTPS proxy clients also trust the proxy listener certificate. No additional
-Tinyproxy CA is needed. Minikube supports PATH routing only. Other environments
+Tinyproxy CA is needed. With Tinyproxy enabled, Minikube supports PATH routing only. Other environments
 can use HOST routing with normal DNS resolution and certificates covering mock subdomains. In-cluster clients can directly use
 `http://mock-fleet-tinyproxy.mock-fleet.svc.cluster.local:8080`.
 

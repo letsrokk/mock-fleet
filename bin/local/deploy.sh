@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 RELEASE_NAME=${RELEASE_NAME:-mock-fleet}
 NAMESPACE=${MOCK_FLEET_NAMESPACE:-mock-fleet}
-ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-}
+ROUTING_MODE=${MOCK_FLEET_ROUTING_MODE:-PATH}
 CHART_DIR="${REPO_ROOT}/deploy/helm/mock-fleet"
 MINIKUBE_VALUES_FILE="${CHART_DIR}/values.minikube.yaml"
 LOCAL_PROXY_IMAGE="ghcr.io/letsrokk/mock-fleet/proxy:latest"
@@ -17,20 +17,22 @@ REMOTE_DEV_MODULE=""
 REBUILD_TARGET=false
 ENABLE_LOGS=false
 ENABLE_PORT_FORWARD=false
+ENABLE_TINYPROXY=true
 CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--cleanup] [--namespace <name>] [--routing <PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--no-tinyproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
+  --no-tinyproxy      Disable Tinyproxy (enabled by default); permits HOST routing.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
-  --routing <mode>    Override fleet.proxy.routing.mode from Helm values. Only PATH routing is supported locally.
+  --routing <mode>    Set PATH (default) or HOST. HOST requires --no-tinyproxy.
   --remote-dev <module>
                       Enable Quarkus remote dev for one module. Allowed: proxy, api.
   --rebuild <target>  Force one module image, or all module images, to rebuild.
@@ -209,6 +211,10 @@ while [[ $# -gt 0 ]]; do
             ENABLE_LOGS=true
             shift
             ;;
+        --no-tinyproxy)
+            ENABLE_TINYPROXY=false
+            shift
+            ;;
         --port-forward)
             ENABLE_PORT_FORWARD=true
             shift
@@ -249,9 +255,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "${ROUTING_MODE}" && "${ROUTING_MODE}" != "PATH" ]]; then
-    echo "Invalid routing mode: ${ROUTING_MODE}. Only PATH routing is supported in Minikube." >&2
+if [[ "${ROUTING_MODE}" != "HOST" && "${ROUTING_MODE}" != "PATH" ]]; then
+    echo "Invalid routing mode: ${ROUTING_MODE}. Expected HOST or PATH." >&2
     usage >&2
+    exit 1
+fi
+
+if [[ "${ENABLE_TINYPROXY}" == "true" && "${ROUTING_MODE}" == "HOST" ]]; then
+    echo "HOST routing with Tinyproxy is not supported locally. Use PATH or --no-tinyproxy." >&2
     exit 1
 fi
 
@@ -377,9 +388,6 @@ else
 fi
 
 helm dependency build "${CHART_DIR}"
-ENABLE_TINYPROXY=$(helm template "${RELEASE_NAME}" "${CHART_DIR}" \
-    --namespace "${NAMESPACE}" -f "${MINIKUBE_VALUES_FILE}" \
-    | awk '$1 == "app.kubernetes.io/component:" && $2 == "tinyproxy" { enabled = 1 } END { print enabled ? "true" : "false" }')
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 label_namespace_for_restricted_psa "${NAMESPACE}"
 if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
@@ -405,6 +413,8 @@ HELM_ARGS=(
     --set "mockOps.image.tag=latest"
 )
 
+HELM_ARGS+=(--set "fleet.tinyproxy.enabled=${ENABLE_TINYPROXY}")
+
 if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
     ingress_ip=$(kubectl get service traefik --namespace traefik -o jsonpath='{.spec.clusterIP}')
     [[ -n "${ingress_ip}" && "${ingress_ip}" != "None" ]] \
@@ -419,12 +429,8 @@ elif [[ "${REMOTE_DEV_MODULE}" == "api" ]]; then
     HELM_ARGS+=(--set "fleet.api.dev.enabled=true")
 fi
 
-if [[ -n "${ROUTING_MODE}" ]]; then
-    HELM_ARGS+=(--set "fleet.proxy.routing.mode=${ROUTING_MODE}")
-    routing_message="fleet.proxy.routing.mode override=${ROUTING_MODE}"
-else
-    routing_message="fleet.proxy.routing.mode from Helm values"
-fi
+HELM_ARGS+=(--set "fleet.proxy.routing.mode=${ROUTING_MODE}")
+routing_message="fleet.proxy.routing.mode=${ROUTING_MODE}"
 
 if [[ -n "${REMOTE_DEV_MODULE}" ]]; then
     profile_message="Quarkus profile=dev"

@@ -34,10 +34,11 @@ workloads repo, which owns Traefik’s 8080/8443 listeners; Mock Fleet does not
 configure the shared controller. Traefik exposes the HTTP proxy at
 `http://tinyproxy.minikube.localhost:8080` and HTTPS proxy at
 `https://tinyproxy.minikube.localhost:8443`. Both tunnel HTTPS destinations without
-interception. Minikube supports PATH routing only. Tinyproxy pods use a host alias
+interception. With Tinyproxy enabled, Minikube supports PATH routing only. Tinyproxy pods use a host alias
 for Fleet pointing to Traefik’s ClusterIP; shared CoreDNS is not modified. Clients trust the existing ingress CA; there is no web UI or proxy
-CA to install. Keep `minikube tunnel` running. Set `fleet.tinyproxy.enabled: false` in
-`deploy/helm/mock-fleet/values.minikube.yaml` to disable it. See
+CA to install. Keep `minikube tunnel` running. Use `make local-deploy TINYPROXY=false` or `bin/local/deploy.sh --no-tinyproxy`
+to disable it. PATH is the default; `bin/local/deploy.sh --no-tinyproxy --routing HOST`
+enables local HOST routing, with appropriate DNS and certificates. See
 [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-tinyproxy).
 
 ## Local security setup

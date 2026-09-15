@@ -116,7 +116,7 @@ Traefik during local deployment. The dedicated container listener ports are
 18080/18443, avoiding Traefik's administrative port. Existing public ports 80/443
 continue serving Fleet. Apply the shared workloads stack before using Tinyproxy.
 
-Minikube supports PATH routing only. Local deployment reads Traefik's Service
+With Tinyproxy enabled, Minikube supports PATH routing only. Local deployment reads Traefik's Service
 ClusterIP and passes `fleet.tinyproxy.hostAliases` to Helm, mapping the exact
 `mock-fleet.minikube.localhost` name inside Tinyproxy pods. The request Host header
 and TLS SNI remain unchanged. No shared CoreDNS configuration is modified.
@@ -187,7 +187,8 @@ access controls.
    target health, DNS, and security-group isolation require an EKS smoke test;
    local tests are not evidence those AWS paths work.
 4. Use Tinyproxy names for resources and `fleet.tinyproxy` configuration.
-   Local deployment reads proxy enablement from the Minikube Helm values. Update the existing PR after implementation and local
+   Local deployment defaults to Tinyproxy enabled and PATH routing; `--no-tinyproxy`
+   disables the proxy, permitting `--routing HOST`. The Makefile exposes `TINYPROXY=false`. Update the existing PR after implementation and local
    verification.
    Do not remove CA Secrets that may be user-managed.
 
