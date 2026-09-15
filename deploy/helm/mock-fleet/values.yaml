@@ -4,7 +4,7 @@ namespaceOverride: ""
 clusterDomain: cluster.local
 
 metrics:
-  scrape: false
+  enabled: false
 
 fleet:
   proxy:

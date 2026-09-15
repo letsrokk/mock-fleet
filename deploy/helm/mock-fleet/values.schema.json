@@ -10,9 +10,9 @@
     "metrics": {
       "type": "object",
       "properties": {
-        "scrape": { "type": "boolean" }
+        "enabled": { "type": "boolean" }
       },
-      "required": ["scrape"]
+      "required": ["enabled"]
     },
     "fleet": {
       "type": "object",
