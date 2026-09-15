@@ -30,7 +30,7 @@ make local-destroy DELETE_NAMESPACE=true
 
 `DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. The Minikube profile enables Fleet Mock Ops. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, `mock-ops`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
 
-Local deployments enable mitmweb by default, create its local CA Secret once, and expose port 8888 through `minikube tunnel`. Use `MITMPROXY=false` or `bin/local/deploy.sh --no-mitmproxy` to disable it. Clients keep their Fleet URLs and must trust this interception CA for HTTPS. The UI uses port-forward on 8081 with default password `mitmweb`. See [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-mitmweb).
+Local deployments enable mitmweb by default, create its local CA Secret once, and expose the UI at `https://mitmweb.minikube.localhost` and the HTTPS proxy at `https://mitmproxy.minikube.localhost:443` through Traefik. Keep `minikube tunnel` running. Use `MITMPROXY=false` or `bin/local/deploy.sh --no-mitmproxy` to disable it. Clients keep their Fleet URLs and must trust this interception CA for HTTPS. The UI password defaults to `mitmweb`. Clients must support HTTPS proxies and trust the local ingress CA as well as the interception CA. See [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-mitmweb).
 
 ## Local security setup
 

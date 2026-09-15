@@ -27,7 +27,7 @@ Usage: $(basename "$0") [--logs] [--port-forward] [--mitmproxy|--no-mitmproxy] [
 Deploy the hand-maintained Helm chart into Minikube.
 
 Options:
-  --mitmproxy         Enable mitmweb on port 8888 (default); create its local CA Secret if absent.
+  --mitmproxy         Enable mitmweb with HTTPS ingress (default); create its local CA Secret if absent.
   --no-mitmproxy      Disable mitmweb for this local deployment.
   --logs              Tail application logs after deployment.
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.

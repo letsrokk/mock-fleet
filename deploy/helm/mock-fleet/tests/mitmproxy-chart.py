@@ -23,7 +23,18 @@ def render(values, valid=True, minikube=False):
 
 
 assert "name: mock-fleet-mitmproxy" not in render({})
-assert "name: mock-fleet-mitmproxy" in render({}, minikube=True)
+local = render({}, minikube=True)
+assert "name: mock-fleet-mitmproxy" in local
+assert 'host: "mitmweb.minikube.localhost"' in local
+assert 'HostSNI(`mitmproxy.minikube.localhost`)' in local
+assert "kind: IngressRouteTCP" in local and "tls: {}" in local
+assert 'ingressClassName: "traefik"' in local
+assert '    - "websecure"' in local
+assert "type: LoadBalancer" not in local
+assert "kind: IngressRouteTCP" not in render({"fleet": {"mitmproxy": {"ingress": {"enabled": False}}}}, minikube=True)
+render({"fleet": {"mitmproxy": {"ingress": {"webHost": "same.localhost", "proxyHost": "same.localhost"}}}}, valid=False, minikube=True)
+custom_tls = render({"fleet": {"mitmproxy": {"ingress": {"tlsSecretName": "ingress-cert"}}}}, minikube=True)
+assert custom_tls.count('secretName: "ingress-cert"') == 2
 assert "name: mock-fleet-mitmproxy" not in render({"fleet": {"mitmproxy": {"enabled": False}}}, minikube=True)
 values = {"fleet": {"mitmproxy": {"enabled": True, "caSecretName": "test-ca"}}}
 output = render(values)
@@ -49,7 +60,9 @@ assert "k8s-app: kube-dns" in policy
 assert policy.count("port: 53") == 2
 assert "port: 8080" in policy
 service = next(doc for doc in output.split("---\n") if "# Source: mock-fleet/templates/mitmproxy-service.yaml" in doc)
-assert "8081" not in service and "port: 8888" in service
+assert "port: 8081" in service and "port: 8888" in service
+assert "port: 8081" in policy
+assert "web_host: 0.0.0.0" in output
 custom = render({"fullnameOverride": "custom", "namespaceOverride": "custom-ns", "clusterDomain": "example.internal",
                  "fleet": {"mitmproxy": {"enabled": True, "caSecretName": "custom-ca", "config": {"termlog_verbosity": "debug"}}}})
 assert 'value: "custom-proxy.custom-ns.svc.example.internal"' in custom

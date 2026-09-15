@@ -17,6 +17,18 @@
             "image": { "$ref": "#/definitions/image" },
             "replicas": { "type": "integer", "minimum": 1 },
             "caSecretName": { "type": "string" },
+            "ingress": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "className": { "type": "string", "minLength": 1 },
+                "entryPoint": { "type": "string", "minLength": 1 },
+                "webHost": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
+                "proxyHost": { "type": "string", "minLength": 1, "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" },
+                "tlsSecretName": { "type": "string" }
+              },
+              "required": ["enabled", "className", "entryPoint", "webHost", "proxyHost", "tlsSecretName"]
+            },
             "service": {
               "type": "object",
               "properties": { "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] } },
@@ -38,7 +50,7 @@
                 "listen_port": { "const": 8888 },
                 "connection_strategy": { "const": "lazy" },
                 "upstream_cert": { "const": false },
-                "web_host": { "const": "127.0.0.1" },
+                "web_host": { "const": "0.0.0.0" },
                 "web_port": { "const": 8081 },
                 "web_open_browser": { "const": false },
                 "web_password": { "type": "string", "minLength": 1 }
@@ -47,7 +59,7 @@
             },
             "resources": { "type": "object" }
           },
-          "required": ["enabled", "image", "replicas", "caSecretName", "service", "networkPolicy", "config", "resources"]
+          "required": ["enabled", "image", "replicas", "caSecretName", "ingress", "service", "networkPolicy", "config", "resources"]
         },
         "proxy": { "$ref": "#/definitions/app" },
         "api": {

@@ -16,4 +16,8 @@ spec:
       port: 8888
       targetPort: proxy
       protocol: TCP
+    - name: web
+      port: 8081
+      targetPort: web
+      protocol: TCP
 {{- end }}

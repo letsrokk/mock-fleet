@@ -1,0 +1,60 @@
+{{- if and .Values.fleet.mitmproxy.enabled .Values.fleet.mitmproxy.ingress.enabled }}
+{{- $ingress := .Values.fleet.mitmproxy.ingress }}
+{{- if eq $ingress.webHost $ingress.proxyHost }}
+{{- fail "fleet.mitmproxy.ingress.webHost and proxyHost must differ" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{ $ingress.entryPoint | quote }}
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: {{ $ingress.className | quote }}
+  {{- if $ingress.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ $ingress.webHost | quote }}
+      secretName: {{ $ingress.tlsSecretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ $ingress.webHost | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "mock-fleet.mitmproxyFullname" . }}
+                port:
+                  name: web
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: {{ include "mock-fleet.mitmproxyFullname" . }}
+  namespace: {{ include "mock-fleet.namespace" . }}
+  labels:
+    {{- include "mock-fleet.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mitmproxy
+spec:
+  ingressClassName: {{ $ingress.className | quote }}
+  entryPoints:
+    - {{ $ingress.entryPoint | quote }}
+  routes:
+    - match: {{ printf "HostSNI(`%s`)" $ingress.proxyHost | quote }}
+      services:
+        - name: {{ include "mock-fleet.mitmproxyFullname" . }}
+          port: 8888
+  {{- if $ingress.tlsSecretName }}
+  tls:
+    secretName: {{ $ingress.tlsSecretName | quote }}
+  {{- else }}
+  tls: {}
+  {{- end }}
+{{- end }}

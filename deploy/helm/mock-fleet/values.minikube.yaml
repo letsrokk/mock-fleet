@@ -10,8 +10,12 @@ fleet:
   mitmproxy:
     enabled: true
     caSecretName: mock-fleet-mitmproxy-ca
+    ingress:
+      enabled: true
+      webHost: mitmweb.minikube.localhost
+      proxyHost: mitmproxy.minikube.localhost
     service:
-      type: LoadBalancer
+      type: ClusterIP
   mcp:
     enabled: true
     allowedOrigins:

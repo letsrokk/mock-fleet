@@ -12,6 +12,13 @@ fleet:
       pullPolicy: IfNotPresent
     replicas: 1
     caSecretName: ""
+    ingress:
+      enabled: false
+      className: traefik
+      entryPoint: websecure
+      webHost: mitmweb.localhost
+      proxyHost: mitmproxy.localhost
+      tlsSecretName: ""
     service:
       type: ClusterIP
     networkPolicy:
@@ -25,7 +32,7 @@ fleet:
       connection_strategy: lazy
       upstream_cert: false
       block_global: false
-      web_host: 127.0.0.1
+      web_host: 0.0.0.0
       web_port: 8081
       web_open_browser: false
       web_password: mitmweb

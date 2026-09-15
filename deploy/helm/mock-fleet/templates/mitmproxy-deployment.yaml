@@ -52,6 +52,8 @@ spec:
           ports:
             - name: proxy
               containerPort: 8888
+            - name: web
+              containerPort: 8081
           startupProbe:
             tcpSocket:
               port: proxy
