@@ -22,7 +22,7 @@ CLEANUP=false
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--logs] [--port-forward] [--tinyproxy|--no-tinyproxy] [--cleanup] [--namespace <name>] [--routing <HOST|PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
+Usage: $(basename "$0") [--logs] [--port-forward] [--tinyproxy|--no-tinyproxy] [--cleanup] [--namespace <name>] [--routing <PATH>] [--remote-dev <proxy|api>] [--rebuild <dash|api|proxy|mcp|mock-ops|all>]
 
 Deploy the hand-maintained Helm chart into Minikube.
 
@@ -33,7 +33,7 @@ Options:
   --port-forward      Forward the selected remote-dev module debug port, or proxy debug port by default.
   --cleanup           Uninstall the Helm release before exiting.
   --namespace <name>  Kubernetes namespace to use. Defaults to ${NAMESPACE}.
-  --routing <mode>    Override fleet.proxy.routing.mode from Helm values. Allowed: HOST, PATH.
+  --routing <mode>    Override fleet.proxy.routing.mode from Helm values. Only PATH routing is supported locally.
   --remote-dev <module>
                       Enable Quarkus remote dev for one module. Allowed: proxy, api.
   --rebuild <target>  Force one module image, or all module images, to rebuild.
@@ -260,8 +260,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -n "${ROUTING_MODE}" && "${ROUTING_MODE}" != "HOST" && "${ROUTING_MODE}" != "PATH" ]]; then
-    echo "Invalid routing mode: ${ROUTING_MODE}. Expected HOST or PATH." >&2
+if [[ -n "${ROUTING_MODE}" && "${ROUTING_MODE}" != "PATH" ]]; then
+    echo "Invalid routing mode: ${ROUTING_MODE}. Only PATH routing is supported in Minikube." >&2
     usage >&2
     exit 1
 fi
@@ -415,6 +415,14 @@ HELM_ARGS=(
 )
 
 HELM_ARGS+=(--set "fleet.tinyproxy.enabled=${ENABLE_TINYPROXY}")
+
+if [[ "${ENABLE_TINYPROXY}" == "true" ]]; then
+    ingress_ip=$(kubectl get service traefik --namespace traefik -o jsonpath='{.spec.clusterIP}')
+    [[ -n "${ingress_ip}" && "${ingress_ip}" != "None" ]] \
+        || { echo "Traefik requires a ClusterIP for Tinyproxy's local host alias." >&2; exit 1; }
+    HELM_ARGS+=(--set-string "fleet.tinyproxy.hostAliases[0].ip=${ingress_ip}"
+        --set-string "fleet.tinyproxy.hostAliases[0].hostnames[0]=mock-fleet.minikube.localhost")
+fi
 
 if [[ "${REMOTE_DEV_MODULE}" == "proxy" ]]; then
     HELM_ARGS+=(--set "fleet.proxy.dev.enabled=true")

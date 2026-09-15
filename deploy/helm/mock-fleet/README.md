@@ -185,10 +185,12 @@ client -> Traefik or NLB -> Tinyproxy -> Fleet ingress -> Fleet Proxy -> mock po
 ```
 
 The base chart disables the proxy. `make local-deploy` enables it, builds its
-Alpine-based image, configures Traefik listeners, and adds a scoped CoreDNS rewrite
-for the local Fleet domain (including mock subdomains). Keep `minikube tunnel`
+Alpine-based image, configures Traefik listeners, and maps the Fleet hostname to
+Traefik’s current ClusterIP using `hostAliases` only on Tinyproxy pods. Minikube
+supports PATH routing only; local setup does not modify shared CoreDNS. Keep `minikube tunnel`
 running; restart an existing tunnel after adding the new Service ports. Disable the deployment with `TINYPROXY=false` or `--no-tinyproxy`.
-The shared Traefik listeners and DNS rewrite remain installed when disabled.
+The shared Traefik listeners remain installed when disabled. Re-run local deployment
+if Traefik’s Service is recreated with a different ClusterIP.
 
 | Setting | Behavior |
 | --- | --- |
@@ -200,6 +202,7 @@ The shared Traefik listeners and DNS rewrite remain installed when disabled.
 | `fleet.tinyproxy.service.loadBalancerClass` | AWS profile uses `service.k8s.aws/nlb`. |
 | `fleet.tinyproxy.service.annotations` | Native controller annotations; applied only in LoadBalancer mode. |
 | `fleet.tinyproxy.service.loadBalancerSourceRanges` | Required allowed client CIDRs in LoadBalancer mode. |
+| `fleet.tinyproxy.hostAliases` | Pod-local hostname mappings; local deployment fills in Traefik’s current ClusterIP. |
 | `fleet.tinyproxy.config` | Native Tinyproxy tuning directives mounted at `/etc/tinyproxy/tinyproxy.conf`. |
 
 The chart fixes listener and routing/filter directives. Configure tuning such as
@@ -224,10 +227,8 @@ curl --noproxy '' --proxy "$HTTPS_PROXY" \
 
 Remove Fleet hosts from `NO_PROXY`. Clients trust Fleet's ingress certificate;
 HTTPS proxy clients also trust the proxy listener certificate. No additional
-Tinyproxy CA is needed. HOST routing also requires the destination certificate to
-cover `*.mock-fleet.minikube.localhost`; the existing local `*.minikube.localhost`
-certificate covers PATH routing only. Supply the appropriate ingress certificate
-before using HOST-mode HTTPS locally. In-cluster clients can directly use
+Tinyproxy CA is needed. Minikube supports PATH routing only. Other environments
+can use HOST routing with normal DNS resolution and certificates covering mock subdomains. In-cluster clients can directly use
 `http://mock-fleet-tinyproxy.mock-fleet.svc.cluster.local:8080`.
 
 ### Traefik and AWS

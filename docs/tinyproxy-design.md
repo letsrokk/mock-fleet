@@ -117,16 +117,12 @@ values. Port 8080 must use a distinct container listener port if Traefik's
 administrative entry point already occupies container port 8080. Existing
 public ports 80 and 443 continue serving Fleet.
 
-HOST-mode HTTPS additionally requires a Fleet certificate covering
-`*.mock-fleet.minikube.localhost`; a `*.minikube.localhost` certificate alone
-covers PATH mode only. Local setup does not issue a replacement certificate.
-
-The local proxy hostname resolves to the Minikube ingress address. Inside the
-cluster, Fleet's base hostname and wildcard mock subdomains must resolve to
-the Traefik Service, not loopback. Use a narrowly scoped CoreDNS rewrite for
-the configured Fleet domain, managed by local setup. Preserve the original
-HTTP Host header and TLS SNI. Do not rely on /etc/hosts entries for wildcard
-HOST routing.
+Minikube supports PATH routing only. Local deployment reads Traefik's Service
+ClusterIP and passes `fleet.tinyproxy.hostAliases` to Helm, mapping the exact
+`mock-fleet.minikube.localhost` name inside Tinyproxy pods. The request Host header
+and TLS SNI remain unchanged. No shared CoreDNS configuration is modified.
+Re-run local deployment if Traefik's ClusterIP changes. AWS uses normal DNS and
+can support HOST routing with the appropriate wildcard DNS and certificates.
 
 ## AWS profile
 
@@ -185,7 +181,7 @@ access controls.
    load-balancer settings in ClusterIP mode. Invalid boolean values, duplicate
    ports, and missing required AWS TLS settings fail validation.
 2. Locally test HTTP and HTTPS destinations through both proxy endpoints, in
-   HOST and PATH modes. Verify destination certificate trust without a proxy
+   local PATH mode. Check HOST configuration rendering for other environments. Verify destination certificate trust without a proxy
    interception CA, rejected non-Fleet hosts, DNS resolution, and blocked
    egress with a reachable unrestricted control.
 3. Validate the AWS rendered Service and annotations locally. Real NLB TLS,

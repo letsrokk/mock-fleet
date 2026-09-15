@@ -11,6 +11,7 @@ fleet:
       tag: ""
       pullPolicy: IfNotPresent
     replicas: 1
+    hostAliases: []
     ingress:
       enabled: true
       className: traefik

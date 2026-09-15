@@ -33,7 +33,8 @@ make local-destroy DELETE_NAMESPACE=true
 Local deployments enable Tinyproxy by default. Traefik exposes the HTTP proxy at
 `http://tinyproxy.minikube.localhost:8080` and HTTPS proxy at
 `https://tinyproxy.minikube.localhost:8433`. Both tunnel HTTPS destinations without
-interception. Clients trust the existing ingress CA; there is no web UI or proxy
+interception. Minikube supports PATH routing only. Tinyproxy pods use a host alias
+for Fleet pointing to Traefik’s ClusterIP; shared CoreDNS is not modified. Clients trust the existing ingress CA; there is no web UI or proxy
 CA to install. Keep `minikube tunnel` running. Use `TINYPROXY=false` or
 `bin/local/deploy.sh --no-tinyproxy` to disable it. See
 [proxy configuration and client setup](../deploy/helm/mock-fleet/README.md#optional-forward-proxy-tinyproxy).

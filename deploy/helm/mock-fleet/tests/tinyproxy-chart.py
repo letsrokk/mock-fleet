@@ -83,4 +83,9 @@ assert checksum(local) != checksum(changed)
 assert '^mock-fleet\\.minikube\\.localhost$' in local
 host = render({"fleet": {"proxy": {"routing": {"mode": "HOST"}}}}, minikube=True)
 assert '([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)?' in host
+assert "hostAliases:" not in local and "hostAliases:" not in output
+aliased = render({"fleet": {"tinyproxy": {"hostAliases": [{"ip": "10.98.1.2", "hostnames": ["mock-fleet.minikube.localhost"]}]}}}, minikube=True)
+deployment = document(aliased, "tinyproxy-deployment.yaml")
+assert "hostAliases:" in deployment and "ip: 10.98.1.2" in deployment
+assert "- mock-fleet.minikube.localhost" in deployment
 print("Tinyproxy chart checks passed")
