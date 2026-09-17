@@ -41,7 +41,7 @@ class MappingsResourceTest {
 
     @Test
     void getsMappingsView() {
-        when(mappingsService.view()).thenReturn(new MappingsService.MappingsView(
+        when(mappingsService.cachedView()).thenReturn(new MappingsService.MappingsView(
                 true,
                 List.of("demo"),
                 null,
@@ -57,13 +57,13 @@ class MappingsResourceTest {
                 .body("routing.mode", is("HOST"))
                 .body("routing.host", is("mock-fleet.localhost"));
 
-        verify(mappingsService).view();
+        verify(mappingsService).cachedView();
     }
 
     @Test
     void getsMappingTree() {
         MappingsService.FileNode child = new MappingsService.FileNode("mapping.json", "mapping.json", false, List.of());
-        when(mappingsService.tree("demo"))
+        when(mappingsService.cachedTree("demo"))
                 .thenReturn(new MappingsService.FileNode("demo", "", true, List.of(child)));
 
         given()
@@ -74,7 +74,7 @@ class MappingsResourceTest {
                 .body("name", is("demo"))
                 .body("children[0].path", is("mapping.json"));
 
-        verify(mappingsService).tree("demo");
+        verify(mappingsService).cachedTree("demo");
     }
 
     @Test
@@ -130,6 +130,7 @@ class MappingsResourceTest {
                 .statusCode(204);
 
         verify(mappingsService).deleteFile("demo", "mapping.json");
+        verify(mappingsService).refreshCache();
     }
 
     @Test
@@ -141,6 +142,7 @@ class MappingsResourceTest {
                 .statusCode(204);
 
         verify(mappingsService).deleteFolder("demo");
+        verify(mappingsService).refreshCache();
     }
 
     @Test

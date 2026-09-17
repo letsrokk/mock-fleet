@@ -71,6 +71,7 @@ public interface MockFleetConfig {
     }
 
     interface MappingsConfig {
+        String refreshInterval();
         int maxDepth();
         int maxEntries();
     }
