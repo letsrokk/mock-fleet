@@ -113,8 +113,7 @@ export default function App() {
   const [draft, setDraft] = useState<DraftConfig>(emptyDraft());
   const [draftWireMockVersion, setDraftWireMockVersion] = useState<string | null>(null);
   const [activeMocksFilter, setActiveMocksFilter] = useState("");
-  const [mappingsFilter, setMappingsFilter] = useState("");
-  const [newMockId, setNewMockId] = useState("");
+  const [mockIdFilter, setMockIdFilter] = useState("");
   const [loadingMocks, setLoadingMocks] = useState(true);
   const [sseConnected, setSseConnected] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(false);
@@ -502,7 +501,7 @@ export default function App() {
   }
 
   function addMockId() {
-    const mockId = newMockId.trim();
+    const mockId = mockIdFilter.trim();
     if (!mockId || !configView) {
       return;
     }
@@ -513,7 +512,7 @@ export default function App() {
     setError(null);
     if (configView.mockIds.includes(mockId)) {
       void applyConfigSelection(configView, mockId);
-      setNewMockId("");
+      setMockIdFilter("");
       return;
     }
     const data = withLocalMock(configView, mockId);
@@ -522,7 +521,7 @@ export default function App() {
         setConfigDirty(true);
       }
     });
-    setNewMockId("");
+    setMockIdFilter("");
   }
 
   function selectMock(mockId: string) {
@@ -1035,8 +1034,8 @@ export default function App() {
       : [];
     const advancedArgsCollapsed = collapsedOptionGroups.has(ADVANCED_ARGS_GROUP_NAME);
     const summariesCollapsed = collapsedOptionGroups.has(SUMMARY_GROUP_NAME);
-    const filteredMockIds = configView.mockIds.filter((mockId) => matchesMockFilter(mockId, newMockId));
-    const hasConfigFilter = newMockId.trim().length > 0;
+    const filteredMockIds = configView.mockIds.filter((mockId) => matchesMockFilter(mockId, mockIdFilter));
+    const hasConfigFilter = mockIdFilter.trim().length > 0;
 
     return (
       <section className="config-layout">
@@ -1079,8 +1078,8 @@ export default function App() {
           </div>
           <div className="add-row">
             <input
-              value={newMockId}
-              onChange={(event) => setNewMockId(event.target.value)}
+              value={mockIdFilter}
+              onChange={(event) => setMockIdFilter(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" ? addMockId() : undefined}
               placeholder="Filter or add mock-id"
               aria-label="Filter or add mock id"
@@ -1327,8 +1326,8 @@ export default function App() {
       );
     }
 
-    const filteredMockIds = mappingsView.mockIds.filter((mockId) => matchesMockFilter(mockId, mappingsFilter));
-    const hasFilter = mappingsFilter.trim().length > 0;
+    const filteredMockIds = mappingsView.mockIds.filter((mockId) => matchesMockFilter(mockId, mockIdFilter));
+    const hasFilter = mockIdFilter.trim().length > 0;
 
     return (
       <section className="config-layout">
@@ -1357,8 +1356,8 @@ export default function App() {
           </div>
           <div className="filter-row">
             <input
-              value={mappingsFilter}
-              onChange={(event) => setMappingsFilter(event.target.value)}
+              value={mockIdFilter}
+              onChange={(event) => setMockIdFilter(event.target.value)}
               placeholder="Filter mapping folders"
               aria-label="Filter mapping folders"
             />
