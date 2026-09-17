@@ -94,6 +94,8 @@ Inspect persisted mock mapping files.
 
 ![Persisted Mappings tab](docs/screenshots/persisted-mappings.png)
 
+The Mappings tab reads a backend cache of folders and file trees, refreshed at startup and every 30 seconds. Set `MOCK_FLEET_MAPPINGS_REFRESH_INTERVAL` to tune the interval (for example, `1m`). Dashboard deletions refresh the cache immediately; external file changes appear after the next refresh. File downloads always read the current file.
+
 ## Components
 
 | Component | Role |

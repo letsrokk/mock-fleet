@@ -24,19 +24,23 @@ public class MappingsResource {
 
     @GET
     public MappingsService.MappingsView getMappings() {
-        return mappingsService.view();
+        return mappingsService.cachedView();
     }
 
     @GET
     @Path("/{mockId}/tree")
     public MappingsService.FileNode getTree(@PathParam("mockId") String mockId) {
-        return mappingsService.tree(mockId);
+        return mappingsService.cachedTree(mockId);
     }
 
     @DELETE
     @Path("/{mockId}")
     public Response deleteFolder(@PathParam("mockId") String mockId) {
-        mappingsService.deleteFolder(mockId);
+        try {
+            mappingsService.deleteFolder(mockId);
+        } finally {
+            mappingsService.refreshCache();
+        }
         return Response.noContent().build();
     }
 
@@ -60,7 +64,11 @@ public class MappingsResource {
     @DELETE
     @Path("/{mockId}/files")
     public Response deleteFile(@PathParam("mockId") String mockId, @QueryParam("path") String path) {
-        mappingsService.deleteFile(mockId, path);
+        try {
+            mappingsService.deleteFile(mockId, path);
+        } finally {
+            mappingsService.refreshCache();
+        }
         return Response.noContent().build();
     }
 

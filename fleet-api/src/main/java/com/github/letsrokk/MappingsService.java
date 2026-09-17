@@ -1,5 +1,8 @@
 package com.github.letsrokk;
 
+import io.quarkus.runtime.StartupEvent;
+import io.quarkus.scheduler.Scheduled;
+import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -39,7 +42,65 @@ public class MappingsService {
     @Inject
     MockFleetConfig config;
 
+    private volatile MappingSnapshot snapshot;
+
+    void initializeCache(@Observes StartupEvent event) {
+        refreshCache();
+    }
+
+    @Scheduled(every = "${mock-fleet.mappings.refresh-interval:30s}",
+            delayed = "${mock-fleet.mappings.refresh-interval:30s}",
+            concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    synchronized void refreshCache() {
+        Map<String, FileNode> trees = new HashMap<>();
+        try {
+            MappingsView view = scanView(trees);
+            snapshot = new MappingSnapshot(view, view.error() == null ? Map.copyOf(trees) : Map.of(), null);
+        } catch (ApiException e) {
+            snapshot = new MappingSnapshot(null, Map.of(), e);
+        }
+    }
+
+    MappingsView cachedView() {
+        return cachedSnapshot().view();
+    }
+
+    FileNode cachedTree(String mockId) {
+        ensureEnabled();
+        validateMockId(mockId);
+        MappingSnapshot current = cachedSnapshot();
+        if (current.view().error() != null) {
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    current.view().error(), true, false, Map.of("mockId", mockId));
+        }
+        FileNode tree = current.trees().get(mockId);
+        if (tree == null) {
+            throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
+                    false, false, Map.of("mockId", mockId));
+        }
+        return tree;
+    }
+
+    private MappingSnapshot cachedSnapshot() {
+        MappingSnapshot current = snapshot;
+        if (current == null) {
+            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
+                    "Mappings index is not ready yet.", true, false, Map.of());
+        }
+        if (current.failure() != null) {
+            throw current.failure();
+        }
+        return current;
+    }
+
+    private record MappingSnapshot(MappingsView view, Map<String, FileNode> trees, ApiException failure) {
+    }
+
     MappingsView view() {
+        return scanView(new HashMap<>());
+    }
+
+    private MappingsView scanView(Map<String, FileNode> trees) {
         RoutingView routing = routingView();
         if (!enabled()) {
             return new MappingsView(false, List.of(), null, routing);
@@ -59,7 +120,7 @@ public class MappingsService {
                         LinkOption.NOFOLLOW_LINKS);
                 String mockId = child.getFileName().toString();
                 if (attributes.isDirectory() && VALID_MOCK_ID.matcher(mockId).matches()
-                        && containsMappingFile(child, attributes, budget)) {
+                        && containsMappingFile(child, attributes, budget, trees)) {
                     mockIds.add(mockId);
                 }
             }
@@ -76,11 +137,12 @@ public class MappingsService {
     }
 
     private boolean containsMappingFile(Path directory, BasicFileAttributes attributes,
-                                        TraversalBudget budget) throws IOException {
+                                        TraversalBudget budget, Map<String, FileNode> trees) throws IOException {
         TraversalEntry root = entry(directory, "", 0, attributes);
         try (SecureTraversalSession session = openSecureRoot(root)) {
             List<TraversalEntry> manifest = discover(session, root, budget, true);
             validateManifest(session, manifest);
+            trees.put(directory.getFileName().toString(), assembleTree(manifest));
             return manifest.stream().anyMatch(entry -> entry.identity().regularFile());
         } catch (TraversalStorageException e) {
             throw e.ioException();

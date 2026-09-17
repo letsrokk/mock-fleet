@@ -48,6 +48,57 @@ class MappingsServiceTest {
     Path mappingsRoot;
 
     @Test
+    void cachedListingsChangeOnlyWhenRefreshedAndFilesStayLive() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Path mapping = root.resolve("mapping.json");
+        Files.writeString(mapping, "old");
+        MappingsService service = service(true);
+        service.refreshCache();
+
+        Files.writeString(mapping, "new");
+        Files.writeString(root.resolve("added.json"), "{}");
+        Files.createDirectories(mappingsRoot.resolve("other"));
+        Files.writeString(mappingsRoot.resolve("other/mapping.json"), "{}");
+
+        assertEquals(List.of("demo"), service.cachedView().mockIds());
+        assertEquals(List.of("mapping.json"), service.cachedTree("demo").children().stream()
+                .map(MappingsService.FileNode::name).toList());
+        assertEquals("new", readOpenedFile(service.file("demo", "mapping.json")));
+
+        service.refreshCache();
+        assertEquals(List.of("demo", "other"), service.cachedView().mockIds());
+        assertEquals(List.of("added.json", "mapping.json"), service.cachedTree("demo").children().stream()
+                .map(MappingsService.FileNode::name).toList());
+
+        service.deleteFolder("demo");
+        assertEquals("demo", service.cachedTree("demo").name());
+        service.refreshCache();
+        assertEquals(List.of("other"), service.cachedView().mockIds());
+        assertEquals(404, assertThrows(ApiException.class, () -> service.cachedTree("demo"))
+                .getResponse().getStatus());
+    }
+
+    @Test
+    void cacheReportsTraversalFailureAndRecoversOnRefresh() throws IOException {
+        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Files.writeString(root.resolve("mapping.json"), "{}");
+        MappingsService service = service(true, 10, 2);
+        service.refreshCache();
+        assertEquals(List.of("demo"), service.cachedView().mockIds());
+
+        Path extra = Files.writeString(root.resolve("extra.json"), "{}");
+        service.refreshCache();
+        assertApiError(assertThrows(ApiException.class, service::cachedView),
+                400, "MAPPINGS_TRAVERSAL_LIMIT", false,
+                Map.of("limit", "maxEntries", "maximum", 2));
+        assertThrows(ApiException.class, () -> service.cachedTree("demo"));
+
+        Files.delete(extra);
+        service.refreshCache();
+        assertEquals(List.of("demo"), service.cachedView().mockIds());
+    }
+
+    @Test
     void disabledStorageReturnsDisabledView() {
         MappingsService service = service(false);
 
