@@ -512,7 +512,6 @@ export default function App() {
     setError(null);
     if (configView.mockIds.includes(mockId)) {
       void applyConfigSelection(configView, mockId);
-      setMockIdFilter("");
       return;
     }
     const data = withLocalMock(configView, mockId);
@@ -521,7 +520,6 @@ export default function App() {
         setConfigDirty(true);
       }
     });
-    setMockIdFilter("");
   }
 
   function selectMock(mockId: string) {
