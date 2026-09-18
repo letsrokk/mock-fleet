@@ -18,6 +18,7 @@ quarkus:
     root-path: /__fleet/api/health
   smallrye-openapi:
     path: /__fleet/api/openapi
+    info-version: ${quarkus.application.version}
   swagger-ui:
     always-include: true
     path: /__fleet/api/swagger-ui
