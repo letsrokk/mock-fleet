@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.ConfigMapListBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
@@ -25,16 +26,34 @@ import static org.mockito.Mockito.times;
 class WireMockVersionCatalogServiceTest {
 
     @Test
+    void restartsFromFreshListVersionWhenTheCatalogHasNotChanged() {
+        ConfigMap unchanged = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
+        Fixture fixture = fixture(unchanged);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", unchanged), configMapList("200", unchanged));
+        try {
+            fixture.service.loadCatalog();
+            fixture.service.startWatch();
+
+            assertEquals("41", fixture.service.catalog().resourceVersion());
+            verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+            verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        } finally {
+            fixture.service.closeWatch();
+        }
+    }
+
+    @Test
     void loadsAndWatchesOnlyTheConfiguredNamedCatalog() {
         Fixture fixture = fixture(catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2"));
 
         fixture.service.loadCatalog();
 
         assertEquals("41", fixture.service.catalog().resourceVersion());
-        verify(fixture.configMaps, times(2)).inNamespace("testing");
+        verify(fixture.configMaps, times(3)).inNamespace("testing");
         verify(fixture.namespaced, times(2)).withName("catalog-name");
-        verify(fixture.resource, times(2)).get();
-        verify(fixture.resource).watch(resourceVersion("41"), any(Watcher.class));
+        verify(fixture.resource).get();
+        verify(fixture.namespaced).withField("metadata.name", "catalog-name");
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
     }
 
     @Test
@@ -42,12 +61,12 @@ class WireMockVersionCatalogServiceTest {
         ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
         ConfigMap updated = catalog("42", "3.12.1", "wiremock/wiremock:3.12.1-2");
         Fixture fixture = fixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, updated);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", updated));
 
         fixture.service.loadCatalog();
 
         assertEquals("42", fixture.service.catalog().resourceVersion());
-        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
     }
 
     @Test
@@ -55,13 +74,13 @@ class WireMockVersionCatalogServiceTest {
         ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
         ConfigMap updated = catalog("42", "3.12.1", "wiremock/wiremock:3.12.1-2");
         Fixture fixture = fixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, initial, updated);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", initial), configMapList("200", updated));
         fixture.service.loadCatalog();
 
         fixture.service.startWatch();
 
         assertEquals("42", fixture.service.catalog().resourceVersion());
-        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
     }
 
     @Test
@@ -69,15 +88,18 @@ class WireMockVersionCatalogServiceTest {
         ConfigMap initial = catalog("41", "3.13.2", "wiremock/wiremock:3.13.2-2");
         ConfigMap invalid = catalog("42", "3.13.2", "wiremock/wiremock:3.12.1-2");
         Fixture fixture = fixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, initial, null, invalid);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", initial),
+                configMapList("200", null), configMapList("300", invalid));
         fixture.service.loadCatalog();
 
         fixture.service.startWatch();
         fixture.service.startWatch();
 
         assertEquals("41", fixture.service.catalog().resourceVersion());
-        verify(fixture.resource, times(4)).get();
-        verify(fixture.resource, times(3)).watch(resourceVersion("41"), any(Watcher.class));
+        verify(fixture.resource).get();
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("300"), any(Watcher.class));
     }
 
     @Test
@@ -129,12 +151,20 @@ class WireMockVersionCatalogServiceTest {
         when(configMaps.inNamespace("testing")).thenReturn(namespaced);
         when(namespaced.withName("catalog-name")).thenReturn(resource);
         when(resource.get()).thenReturn(catalog);
+        when(namespaced.withField("metadata.name", "catalog-name")).thenReturn(namespaced);
+        when(namespaced.list()).thenReturn(configMapList("100", catalog));
 
         WireMockVersionCatalogService service = new WireMockVersionCatalogService();
         service.config = config;
         service.kubernetesClient = client;
         service.parser = new WireMockVersionCatalogParser();
         return new Fixture(service, configMaps, namespaced, resource);
+    }
+
+    private ConfigMapList configMapList(String version, ConfigMap configMap) {
+        return new ConfigMapListBuilder()
+                .withNewMetadata().withResourceVersion(version).endMetadata()
+                .withItems(configMap == null ? java.util.List.of() : java.util.List.of(configMap)).build();
     }
 
     private ConfigMap catalog(String resourceVersion, String version, String image) {

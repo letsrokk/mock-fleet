@@ -24,6 +24,7 @@ rules:
       - {{ include "mock-fleet.wiremockUserConfigMapName" . }}
     verbs:
       - get
+      - list
       - watch
       - update
       - patch
@@ -35,5 +36,6 @@ rules:
       - {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
     verbs:
       - get
+      - list
       - watch
 {{- end }}
