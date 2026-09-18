@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
+import io.fabric8.kubernetes.api.model.ConfigMapList;
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
@@ -59,7 +60,6 @@ public class WireMockConfigService {
     WireMockResourcePolicy resourcePolicy;
 
     private volatile Watch userConfigWatch;
-    private volatile String userConfigResourceVersion;
     private final ScheduledExecutorService userConfigWatchExecutor = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "wiremock-user-config-watch");
         thread.setDaemon(true);
@@ -72,7 +72,6 @@ public class WireMockConfigService {
     void loadUserConfig() {
         ConfigMap configMap = userConfigMap();
         wireMockOptions.setUserConfig(loadUserConfig(configMap));
-        userConfigResourceVersion = resourceVersion(configMap);
         startUserConfigWatch();
     }
 
@@ -223,10 +222,15 @@ public class WireMockConfigService {
         Resource<ConfigMap> resource = kubernetesClient.configMaps()
                 .inNamespace(currentNamespace())
                 .withName(name.get());
-        resyncUserConfig(resource);
         try {
+            ConfigMapList current = kubernetesClient.configMaps()
+                    .inNamespace(currentNamespace())
+                    .withField("metadata.name", name.get())
+                    .list();
+            resyncUserConfig(current);
+            // An unchanged object's version may have expired from watch history; use the list snapshot.
             userConfigWatch = resource.watch(new ListOptionsBuilder()
-                    .withResourceVersion(userConfigResourceVersion)
+                    .withResourceVersion(current.getMetadata().getResourceVersion())
                     .build(), userConfigWatcher());
             userConfigWatchRestartAttempts = 0;
         } catch (RuntimeException error) {
@@ -235,16 +239,15 @@ public class WireMockConfigService {
         }
     }
 
-    private void resyncUserConfig(Resource<ConfigMap> resource) {
+    private void resyncUserConfig(ConfigMapList resources) {
         try {
-            ConfigMap current = resource.get();
+            ConfigMap current = resources.getItems().stream().findFirst().orElse(null);
             if (current == null) {
                 LOG.warn("WireMock user ConfigMap is missing during watch resync; retaining the last valid snapshot.");
                 return;
             }
             WireMockConfigDocument document = loadUserConfig(current);
             wireMockOptions.setUserConfig(document);
-            userConfigResourceVersion = resourceVersion(current);
         } catch (RuntimeException error) {
             LOG.warn("WireMock user ConfigMap resync failed; retaining the last valid snapshot.", error);
         }
@@ -276,10 +279,6 @@ public class WireMockConfigService {
         }
         try {
             wireMockOptions.setUserConfig(loadUserConfig(resource));
-            String observedResourceVersion = resourceVersion(resource);
-            if (observedResourceVersion != null) {
-                userConfigResourceVersion = observedResourceVersion;
-            }
         } catch (RuntimeException error) {
             LOG.warnf(error, "Ignoring invalid WireMock user ConfigMap resourceVersion=%s.",
                     resourceVersion(resource));

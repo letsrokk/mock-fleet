@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.ConfigMapListBuilder;
 import io.fabric8.kubernetes.api.model.ListOptions;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -506,14 +507,32 @@ class WireMockConfigServiceTest {
         when(configMaps.inNamespace("test")).thenReturn(namespacedConfigMaps);
         when(namespacedConfigMaps.withName("user-config")).thenReturn(configMapResource);
         when(configMapResource.get()).thenReturn(existing);
+        when(namespacedConfigMaps.withField("metadata.name", "user-config")).thenReturn(namespacedConfigMaps);
+        when(namespacedConfigMaps.list()).thenReturn(configMapList("100", existing));
         WireMockConfigService service = service(kubernetesClient, config());
 
         service.loadUserConfig();
 
         verify(namespacedConfigMaps, never()).resource(any());
         verify(namespacedConfigMaps, org.mockito.Mockito.times(2)).withName("user-config");
-        verify(configMapResource).watch(resourceVersion("42"), any(Watcher.class));
+        verify(configMapResource).watch(resourceVersion("100"), any(Watcher.class));
         assertEquals(List.of("--verbose"), service.wireMockOptions.optionsFor("demo"));
+    }
+
+    @Test
+    void restartsFromFreshListVersionWhenUserConfigHasNotChanged() {
+        ConfigMap unchanged = configMap("user-config", "41", "wiremock: {default: {options: []}, mocks: []}");
+        UserConfigWatchFixture fixture = userConfigWatchFixture(unchanged);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", unchanged), configMapList("200", unchanged));
+        try {
+            fixture.service.loadUserConfig();
+            fixture.service.startUserConfigWatch();
+
+            verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+            verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        } finally {
+            fixture.service.closeWatch();
+        }
     }
 
     @Test
@@ -533,12 +552,12 @@ class WireMockConfigServiceTest {
                       options: [--verbose]
                 """);
         UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, updated);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", updated));
 
         fixture.service.loadUserConfig();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
     }
 
     @Test
@@ -558,13 +577,13 @@ class WireMockConfigServiceTest {
                       options: [--verbose]
                 """);
         UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, initial, updated);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", initial), configMapList("200", updated));
         fixture.service.loadUserConfig();
 
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("42"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
     }
 
     @Test
@@ -579,7 +598,8 @@ class WireMockConfigServiceTest {
                 """);
         ConfigMap invalid = configMap("user-config", "42", "wiremock: [");
         UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, initial, null, invalid)
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", initial),
+                configMapList("200", null), configMapList("300", invalid))
                 .thenThrow(new KubernetesClientException("read failed"));
         fixture.service.loadUserConfig();
 
@@ -588,11 +608,15 @@ class WireMockConfigServiceTest {
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource, times(4)).watch(resourceVersion("41"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("300"), any(Watcher.class));
+        verify(fixture.resource, times(3)).watch(any(ListOptions.class), any(Watcher.class));
+        fixture.service.closeWatch();
     }
 
     @Test
-    void deletedWatchEventKeepsLastValidUserConfigAndResourceVersion() {
+    void deletedWatchEventKeepsLastValidUserConfigAndRestartsFromFreshListVersion() {
         ConfigMap initial = configMap("user-config", "41", """
                 wiremock:
                   default:
@@ -602,7 +626,7 @@ class WireMockConfigServiceTest {
                       options: [--verbose]
                 """);
         UserConfigWatchFixture fixture = userConfigWatchFixture(initial);
-        when(fixture.resource.get()).thenReturn(initial, initial, null);
+        when(fixture.namespaced.list()).thenReturn(configMapList("100", initial), configMapList("200", null));
         fixture.service.loadUserConfig();
 
         fixture.service.handleUserConfigWatchEvent(Watcher.Action.DELETED,
@@ -610,7 +634,8 @@ class WireMockConfigServiceTest {
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource, times(2)).watch(resourceVersion("41"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
     }
 
     @Test
@@ -1043,14 +1068,23 @@ class WireMockConfigServiceTest {
         when(configMaps.inNamespace("test")).thenReturn(namespaced);
         when(namespaced.withName("user-config")).thenReturn(resource);
         when(resource.get()).thenReturn(configMap);
-        return new UserConfigWatchFixture(service(client, config()), resource);
+        when(namespaced.withField("metadata.name", "user-config")).thenReturn(namespaced);
+        when(namespaced.list()).thenReturn(configMapList("100", configMap));
+        return new UserConfigWatchFixture(service(client, config()), resource, namespaced);
+    }
+
+    private ConfigMapList configMapList(String version, ConfigMap configMap) {
+        return new ConfigMapListBuilder()
+                .withNewMetadata().withResourceVersion(version).endMetadata()
+                .withItems(configMap == null ? List.of() : List.of(configMap)).build();
     }
 
     private ListOptions resourceVersion(String resourceVersion) {
         return argThat(options -> resourceVersion.equals(options.getResourceVersion()));
     }
 
-    private record UserConfigWatchFixture(WireMockConfigService service, Resource<ConfigMap> resource) {
+    private record UserConfigWatchFixture(WireMockConfigService service, Resource<ConfigMap> resource,
+                                          NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced) {
     }
 
     private void installCatalog(WireMockConfigService service, WireMockVersionCatalog catalog) {

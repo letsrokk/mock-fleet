@@ -3,6 +3,7 @@ package com.github.letsrokk;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapList;
+import io.fabric8.kubernetes.api.model.ConfigMapListBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
@@ -45,6 +46,11 @@ public class KubernetesClientTestProducer {
                                 "defaultVersion", "3.13.2",
                                 "selectable.3.13.2", "wiremock/wiremock:3.13.2-2"))
                         .build());
+        when(namespaced.withField("metadata.name", "version-catalog")).thenReturn(namespaced);
+        ConfigMap catalog = catalogResource.get();
+        when(namespaced.list()).thenReturn(new ConfigMapListBuilder()
+                .withNewMetadata().withResourceVersion("test-list").endMetadata()
+                .withItems(catalog).build());
         return kubernetesClient;
     }
 }

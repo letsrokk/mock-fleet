@@ -1,6 +1,7 @@
 package com.github.letsrokk;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
+import io.fabric8.kubernetes.api.model.ConfigMapList;
 import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
@@ -67,10 +68,15 @@ public class WireMockVersionCatalogService {
             return;
         }
         Resource<ConfigMap> resource = catalogResource();
-        resyncCatalog(resource);
         try {
+            ConfigMapList current = kubernetesClient.configMaps()
+                    .inNamespace(config.namespace())
+                    .withField("metadata.name", resourceName())
+                    .list();
+            resyncCatalog(current);
+            // An unchanged object's version may have expired from watch history; use the list snapshot.
             watch = resource.watch(new ListOptionsBuilder()
-                    .withResourceVersion(catalog().resourceVersion())
+                    .withResourceVersion(current.getMetadata().getResourceVersion())
                     .build(), catalogWatcher());
             watchRestartAttempts = 0;
         } catch (RuntimeException error) {
@@ -79,9 +85,9 @@ public class WireMockVersionCatalogService {
         }
     }
 
-    private void resyncCatalog(Resource<ConfigMap> resource) {
+    private void resyncCatalog(ConfigMapList resources) {
         try {
-            ConfigMap current = resource.get();
+            ConfigMap current = resources.getItems().stream().findFirst().orElse(null);
             if (current == null) {
                 LOG.warn("WireMock version catalog is missing during watch resync; retaining the last valid snapshot.");
                 return;
@@ -132,12 +138,15 @@ public class WireMockVersionCatalogService {
     }
 
     private Resource<ConfigMap> catalogResource() {
-        String name = config.wiremockVersionCatalogConfigMapName()
-                .filter(value -> !value.isBlank())
-                .orElseThrow(() -> new IllegalStateException("WireMock version catalog ConfigMap name is required."));
         return kubernetesClient.configMaps()
                 .inNamespace(config.namespace())
-                .withName(name);
+                .withName(resourceName());
+    }
+
+    private String resourceName() {
+        return config.wiremockVersionCatalogConfigMapName()
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new IllegalStateException("WireMock version catalog ConfigMap name is required."));
     }
 
     @PreDestroy
