@@ -34,6 +34,15 @@ spec:
       labels:
         {{- include "mock-fleet.apiSelectorLabels" . | nindent 8 }}
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "mock-fleet.apiSelectorLabels" . | nindent 20 }}
       serviceAccountName: {{ include "mock-fleet.serviceAccountName" . }}
       automountServiceAccountToken: true
       terminationGracePeriodSeconds: {{ .Values.fleet.api.terminationGracePeriodSeconds }}

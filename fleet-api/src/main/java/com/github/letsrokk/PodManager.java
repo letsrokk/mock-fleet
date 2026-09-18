@@ -75,6 +75,9 @@ public class PodManager {
     @Inject
     FleetMetrics metrics;
 
+    @Inject
+    MockRecovery recovery;
+
     @ConfigProperty(name = "mock-fleet.inactivity-threshold")
     Duration inactivityThreshold;
 
@@ -443,20 +446,27 @@ public class PodManager {
         }
         try {
             Pod pod = kubernetesClient.pods().inNamespace(currentNamespace()).withName(ref.podName()).get();
-            if (pod == null || pod.getSpec() == null || pod.getSpec().getContainers() == null) {
-                return null;
-            }
-            String image = pod.getSpec().getContainers().stream()
-                    .filter(container -> Objects.equals(config.wiremockContainerName(), container.getName()))
-                    .map(container -> container.getImage())
-                    .findFirst()
-                    .orElse(null);
-            String recovered = WireMockVersion.parseImage(image).toString();
+            String recovered = runtimeVersion(pod);
             podState.backfillRuntimeVersion(mockId, ref, recovered);
             return recovered;
         } catch (RuntimeException error) {
             LOG.warnf(error, "Could not recover WireMock runtime version for mock id '%s' from pod '%s'.",
                     mockId, ref.podName());
+            return null;
+        }
+    }
+
+    String runtimeVersion(Pod pod) {
+        if (pod == null || pod.getSpec() == null || pod.getSpec().getContainers() == null) {
+            return null;
+        }
+        String image = pod.getSpec().getContainers().stream()
+                .filter(container -> Objects.equals(config.wiremockContainerName(), container.getName()))
+                .map(container -> container.getImage()).findFirst().orElse(null);
+        try {
+            return WireMockVersion.parseImage(image).toString();
+        } catch (IllegalArgumentException error) {
+            LOG.warnf("Could not recover runtime version from image '%s'.", image);
             return null;
         }
     }
@@ -598,7 +608,7 @@ public class PodManager {
         throw new PodCreationException("Pod '" + pod.getMetadata().getName() + "' did not become running before timeout.");
     }
 
-    private java.util.Optional<String> terminalPodFailure(Pod pod) {
+    java.util.Optional<String> terminalPodFailure(Pod pod) {
         if (pod == null || pod.getStatus() == null) {
             return java.util.Optional.empty();
         }
@@ -671,6 +681,9 @@ public class PodManager {
      */
     @Scheduled(every = "5m")
     public void cleanUpIdlePods() {
+        if (recovery != null && !recovery.isReady()) {
+            return;
+        }
         long now = System.currentTimeMillis();
 
         podState.getPods().forEach((mockId, pod) -> {
@@ -702,6 +715,9 @@ public class PodManager {
      */
     @Scheduled(every = "5m", delayed = "5m")
     public void cleanUpOrphanedPods() {
+        if (recovery != null && !recovery.isReady()) {
+            return;
+        }
         String namespace = currentNamespace();
         PodList podList = kubernetesClient.pods()
                 .inNamespace(namespace)
@@ -829,7 +845,7 @@ public class PodManager {
                 + "/pods/" + Utils.toUrlEncoded(podName);
     }
 
-    private boolean isOwnedManagedPod(Pod pod, String mockId) {
+    boolean isOwnedManagedPod(Pod pod, String mockId) {
         if (mockId == null || mockId.isBlank()
                 || pod == null || pod.getMetadata() == null
                 || pod.getMetadata().getLabels() == null) {

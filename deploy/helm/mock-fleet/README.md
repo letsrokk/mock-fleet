@@ -418,10 +418,10 @@ The admission policy accepts zero identity projections or exactly one projection
 | `fleet.api.logging.json` | `false` | Enable JSON console logging for the API. |
 | `fleet.api.logging.level` | `INFO` | API `com.github.letsrokk` log level. |
 | `fleet.api.replicas` | `2` | API replica count when dev mode is disabled; must be at least two for embedded Hazelcast redundancy. |
-| `fleet.api.terminationGracePeriodSeconds` | `30` | Time allowed for graceful Hazelcast member shutdown and partition migration. |
-| `fleet.api.updateStrategy.type` | `Recreate` | API deployment update strategy. The default stops the embedded Hazelcast cluster before starting a new version because Hazelcast Community Edition does not support mixed-version rolling member upgrades. |
-| `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `1` | Maximum unavailable API pods when `updateStrategy.type=RollingUpdate`; ignored by the default `Recreate` strategy. |
-| `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods when `updateStrategy.type=RollingUpdate`; ignored by the default `Recreate` strategy. |
+| `fleet.api.terminationGracePeriodSeconds` | `120` | Time allowed for HTTP draining, start-executor shutdown, and graceful Hazelcast partition migration. |
+| `fleet.api.updateStrategy.type` | `RollingUpdate` | Use rolling updates for compatible API releases. Set `Recreate` for incompatible Hazelcast or distributed-state upgrades. |
+| `fleet.api.updateStrategy.rollingUpdate.maxUnavailable` | `0` | Maximum unavailable API pods during a rolling update. |
+| `fleet.api.updateStrategy.rollingUpdate.maxSurge` | `1` | Maximum additional API pods during a rolling update; requires spare scheduling capacity. |
 | `fleet.api.pdb.enabled` | `true` | Create a PodDisruptionBudget for API/Hazelcast members. |
 | `fleet.api.pdb.minAvailable` | `1` | Minimum API pods available during voluntary disruptions. |
 | `fleet.api.service.type` | `ClusterIP` | API service type. |
@@ -668,6 +668,16 @@ For Argo CD upgrades from v1.5.1 or v2.0–v2.2, run a full sync with hooks enab
 The initializer has its own `<fullname>-user-config-init` ServiceAccount and temporary hook RBAC. Kubernetes cannot restrict `create` by resource name, so only this bootstrap identity gets namespace-scoped ConfigMap creation; its `get` and `update` permissions are restricted to the user ConfigMap. Successful hooks are cleaned up. The API retains only named `get`, `list`, `watch`, `update`, and `patch` operations on user configuration, and cannot create or delete ConfigMaps. ConfigMap lists use a `metadata.name` field selector to stay within the named permissions and obtain a fresh resource version before each watch. The initializer uses `mockOps.image` and `mockOps.resources`; custom images must include the initialization command.
 
 If `rbac.create=false`, provision the initializer's Role/RoleBinding with those permissions before syncing. Grant the API service account named `get`, `list`, `watch`, `update`, and `patch` on `<fullname>-wiremock-user-config`, named `get`, `list`, and `watch` on `<fullname>-wiremock-version-catalog`, and pod `get`, `list`, `create`, and `delete`. When Fleet Mock Ops is enabled, grant its service account named `get` on `<fullname>-wiremock-config` and `<fullname>-wiremock-user-config`, plus named `get`, `update`, and `patch` on `<fullname>-wiremock-version-catalog`. Do not restore namespace-wide ConfigMap or Deployment authority to the API.
+
+### API restarts and upgrades
+
+Each API pod is an embedded Hazelcast member. A replacement joins surviving members and preserves their mock state and last-access timestamps. After all members stop, startup recovery lists managed WireMock pods in the namespace and rebuilds the cache before serving requests or running idle/orphan cleanup. Recovered mocks retain their pod identity and actual runtime version; their idle timer starts at recovery time. Existing running pods are recovered even if a lower capacity limit now prevents additional starts.
+
+One member performs recovery under a shared lock. Unready mock pods get one shared `fleet.api.podCreationTimeout` window to become Ready; failures appear through the existing lifecycle reporting and remain subject to normal cleanup. Kubernetes read failures fail startup, allowing Kubernetes to retry without treating unavailable state as an empty fleet. Recovery assumes the existing namespace and mock ownership labels identify one fleet.
+
+Compatible releases use `RollingUpdate` with zero unavailable replicas and one surge replica. Preferred anti-affinity spreads API pods across nodes when possible, but permits a single-node cluster. New replicas wait for recovery and initial partition synchronization before becoming Ready. HTTP shutdown marks readiness down for 5 seconds while continuing to serve requests, then drains requests for up to 60 seconds before member shutdown. Streaming connections may need to reconnect. Hazelcast membership changes can temporarily stall API requests, including during graceful rolling updates. Local rollout testing observed requests exceeding a 5-second timeout while surviving members removed a departed member. Abrupt member loss also requires failure detection and backup promotion. RollingUpdate keeps API replicas available, but does not guarantee uninterrupted requests.
+
+The release author must check Hazelcast dependencies and shared-state serialization/coordination compatibility. For a Hazelcast Community Edition minor/major upgrade or an incompatible shared-state change, set `fleet.api.updateStrategy.type=Recreate` in Helm/Argo CD values **before syncing the new image**. Wait for the upgrade and recovery to complete, then restore `RollingUpdate`. Do not automatically fall back to Recreate when a rolling update stalls: old healthy replicas should remain available. A full restart temporarily interrupts API access, but surviving mock pods are recovered. No downtime guarantee applies to simultaneous replica loss, network partitions, or insufficient cluster capacity.
 
 ## Local Minikube Values
 

@@ -21,16 +21,21 @@ public class HazelcastReadinessCheck implements HealthCheck {
     @Inject
     MockFleetConfig config;
 
+    @Inject
+    MockRecovery recovery;
+
     @Override
     public HealthCheckResponse call() {
         LifecycleService lifecycleService = hazelcastInstance.getLifecycleService();
         Cluster cluster = hazelcastInstance.getCluster();
         boolean lifecycleRunning = lifecycleService != null && lifecycleService.isRunning();
         ClusterState clusterState = cluster == null ? null : cluster.getClusterState();
-        boolean active = lifecycleRunning && clusterState == ClusterState.ACTIVE;
+        boolean recovered = lifecycleRunning && recovery.isReady();
+        boolean active = recovered && clusterState == ClusterState.ACTIVE;
 
         HealthCheckResponseBuilder response = HealthCheckResponse.named("hazelcast")
                 .withData("lifecycleRunning", lifecycleRunning)
+                .withData("recoveryComplete", recovered)
                 .withData("clusterState", clusterState == null ? "unknown" : clusterState.name());
 
         if (cluster != null) {

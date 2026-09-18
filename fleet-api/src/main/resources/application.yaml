@@ -1,4 +1,8 @@
 quarkus:
+  shutdown:
+    delay-enabled: true
+    delay: 5s
+    timeout: 60s
   micrometer:
     export:
       prometheus:

@@ -59,6 +59,49 @@ public class PodState {
         return this.podMap.get(mockId);
     }
 
+    boolean needsRecovery(String mockId) {
+        return !podMap.containsKey(mockId) && !podLifecycleMap.containsKey(mockId);
+    }
+
+    boolean recoverPod(String mockId, Supplier<MockPodRef> currentPod, long recoveredAt) {
+        return withLifecycleAndCapacityLock(mockId, () -> {
+            if (!needsRecovery(mockId)) {
+                return false;
+            }
+            MockPodRef pod = currentPod.get();
+            if (pod == null) {
+                return false;
+            }
+            MockPodLifecycle running = MockPodLifecycle.running(null, pod.podName());
+            boolean timestampAdded = lastAccessTimeMap.putIfAbsent(pod.podName(), recoveredAt) == null;
+            try {
+                // A pod reference is sufficient to report RUNNING if this member stops mid-publication.
+                podMap.put(mockId, pod);
+                podLifecycleMap.put(mockId, running);
+            } catch (RuntimeException failure) {
+                tryCleanup(() -> podMap.remove(mockId, pod), failure);
+                tryCleanup(() -> podLifecycleMap.remove(mockId, running), failure);
+                if (timestampAdded) {
+                    tryCleanup(() -> lastAccessTimeMap.remove(pod.podName(), recoveredAt), failure);
+                }
+                throw failure;
+            }
+            return true;
+        });
+    }
+
+    void recoverFailure(String mockId, Supplier<String> currentPodName, String message) {
+        withLifecycleAndCapacityLock(mockId, () -> {
+            if (needsRecovery(mockId)) {
+                String podName = currentPodName.get();
+                if (podName != null) {
+                    putFailedLifecycle(mockId, MockPodLifecycle.failed(podName, message));
+                }
+            }
+            return null;
+        });
+    }
+
     public boolean backfillRuntimeVersion(String mockId, MockPodRef expected, String runtimeVersion) {
         if (expected == null || runtimeVersion == null) {
             return false;

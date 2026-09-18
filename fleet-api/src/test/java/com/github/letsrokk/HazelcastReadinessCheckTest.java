@@ -29,6 +29,13 @@ class HazelcastReadinessCheckTest {
     }
 
     @Test
+    void reportsDownUntilRecoveryCompletes() {
+        HazelcastReadinessCheck check = check(true, ClusterState.ACTIVE);
+        when(check.recovery.isReady()).thenReturn(false);
+        assertTrue(check.call().getStatus() == HealthCheckResponse.Status.DOWN);
+    }
+
+    @Test
     void reportsDownWhenLifecycleIsStopped() {
         HazelcastReadinessCheck check = check(false, ClusterState.ACTIVE);
 
@@ -53,6 +60,8 @@ class HazelcastReadinessCheckTest {
         HazelcastReadinessCheck check = new HazelcastReadinessCheck();
         check.hazelcastInstance = hazelcastInstance;
         check.config = config();
+        check.recovery = mock(MockRecovery.class);
+        when(check.recovery.isReady()).thenReturn(true);
         when(hazelcastInstance.getLifecycleService()).thenReturn(lifecycleService);
         when(lifecycleService.isRunning()).thenReturn(true);
 
@@ -72,6 +81,8 @@ class HazelcastReadinessCheckTest {
 
         check.hazelcastInstance = hazelcastInstance;
         check.config = config();
+        check.recovery = mock(MockRecovery.class);
+        when(check.recovery.isReady()).thenReturn(true);
         when(hazelcastInstance.getLifecycleService()).thenReturn(lifecycleService);
         when(hazelcastInstance.getCluster()).thenReturn(cluster);
         when(lifecycleService.isRunning()).thenReturn(running);
