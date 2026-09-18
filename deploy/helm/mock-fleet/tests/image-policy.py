@@ -72,3 +72,12 @@ external_rbac = render({"rbac": {"create": False}}, "wiremock-user-config-init.y
 assert "kind: Role" not in external_rbac and "kind: ServiceAccount" in external_rbac
 assert not re.search(r"kind: ConfigMap\nmetadata:\n  name: [^\n]*-wiremock-user-config\n", render({}, template=None))
 print("User-config initialization hook render checks passed")
+
+api = render({}, "api-deployment.yaml")
+assert "type: RollingUpdate" in api and "maxUnavailable: 0" in api and "maxSurge: 1" in api
+assert "terminationGracePeriodSeconds: 120" in api
+assert "preferredDuringSchedulingIgnoredDuringExecution:" in api
+assert "topologyKey: kubernetes.io/hostname" in api
+recreate = render({"fleet": {"api": {"updateStrategy": {"type": "Recreate"}}}}, "api-deployment.yaml")
+assert "type: Recreate" in recreate and "rollingUpdate:" not in recreate
+print("API rollout render checks passed")

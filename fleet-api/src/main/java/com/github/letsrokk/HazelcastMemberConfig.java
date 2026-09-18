@@ -11,6 +11,7 @@ import jakarta.inject.Inject;
 @ApplicationScoped
 public class HazelcastMemberConfig {
 
+    static final String RECOVERY_MAP_NAME = "mock-recovery-map";
     static final String POD_MAP_NAME = "mock-pod-name-map";
     static final String POD_LIFECYCLE_MAP_NAME = "mock-pod-lifecycle-map";
     static final String POD_TRANSITION_LOCK_MAP_NAME = "mock-pod-transition-lock-map";
@@ -37,9 +38,11 @@ public class HazelcastMemberConfig {
         MockFleetConfig.HazelcastConfig hazelcast = config.hazelcast();
         Config memberConfig = new Config();
         memberConfig.setClusterName(hazelcast.clusterName());
-        memberConfig.setProperty("hazelcast.shutdownhook.policy", "GRACEFUL");
+        // CDI shuts the member down after Quarkus drains HTTP; a JVM hook would race that drain.
+        memberConfig.setProperty("hazelcast.shutdownhook.enabled", "false");
         memberConfig.setProperty("hazelcast.graceful.shutdown.max.wait",
                 Integer.toString(hazelcast.gracefulShutdownMaxWaitSeconds()));
+        memberConfig.getMapConfig(RECOVERY_MAP_NAME).setBackupCount(hazelcast.backupCount());
         memberConfig.getMapConfig(POD_MAP_NAME).setBackupCount(hazelcast.backupCount());
         memberConfig.getMapConfig(POD_LIFECYCLE_MAP_NAME).setBackupCount(hazelcast.backupCount());
         memberConfig.getMapConfig(POD_TRANSITION_LOCK_MAP_NAME).setBackupCount(hazelcast.backupCount());

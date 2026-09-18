@@ -81,13 +81,12 @@ fleet:
       json: false
       level: INFO
     replicas: 2
-    terminationGracePeriodSeconds: 30
+    terminationGracePeriodSeconds: 120
     updateStrategy:
-      # Community Hazelcast members cannot join a cluster running another minor version.
-      # Recreate prevents dependency upgrades from deadlocking on mixed member versions.
-      type: Recreate
+      # Use Recreate for incompatible Hazelcast or shared-state upgrades.
+      type: RollingUpdate
       rollingUpdate:
-        maxUnavailable: 1
+        maxUnavailable: 0
         maxSurge: 1
     pdb:
       enabled: true

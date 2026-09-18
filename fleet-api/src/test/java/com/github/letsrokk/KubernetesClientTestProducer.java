@@ -51,6 +51,16 @@ public class KubernetesClientTestProducer {
         when(namespaced.list()).thenReturn(new ConfigMapListBuilder()
                 .withNewMetadata().withResourceVersion("test-list").endMetadata()
                 .withItems(catalog).build());
+        MixedOperation<io.fabric8.kubernetes.api.model.Pod, io.fabric8.kubernetes.api.model.PodList,
+                io.fabric8.kubernetes.client.dsl.PodResource> pods = mock(MixedOperation.class);
+        NonNamespaceOperation<io.fabric8.kubernetes.api.model.Pod, io.fabric8.kubernetes.api.model.PodList,
+                io.fabric8.kubernetes.client.dsl.PodResource> namespacedPods = mock(NonNamespaceOperation.class,
+                        org.mockito.Mockito.RETURNS_SELF);
+        when(kubernetesClient.pods()).thenReturn(pods);
+        when(pods.inNamespace("test")).thenReturn(namespacedPods);
+        when(namespacedPods.withLabel(PodFactory.LABEL_APP_NAME, PodFactory.APP_NAME_VALUE)).thenReturn(namespacedPods);
+        when(namespacedPods.withLabel(PodFactory.LABEL_MANAGED_BY, PodFactory.MANAGED_BY_VALUE)).thenReturn(namespacedPods);
+        when(namespacedPods.list()).thenReturn(new io.fabric8.kubernetes.api.model.PodListBuilder().build());
         return kubernetesClient;
     }
 }
