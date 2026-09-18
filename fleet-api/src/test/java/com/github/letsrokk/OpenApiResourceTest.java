@@ -20,6 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OpenApiResourceTest {
 
     @Test
+    void documentsTheDeployedApplicationVersion() {
+        String version = given().get("/__fleet/api/version")
+                .then().statusCode(200).extract().path("version");
+        assertEquals("9.8.7-test", version);
+        given().queryParam("format", "json")
+                .when().get("/__fleet/api/openapi")
+                .then().statusCode(200).body("info.version", equalTo(version));
+    }
+
+    @Test
     void servesOpenApiAsJsonWhenRequested() {
         given()
                 .queryParam("format", "json")
