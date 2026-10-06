@@ -10,6 +10,8 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 
+import org.jboss.logging.Logger;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Supplier;
@@ -19,6 +21,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 final class CatalogReconciler {
+    private static final Logger LOG = Logger.getLogger(CatalogReconciler.class);
     static final String IMAGE_POLICY = "mock-fleet/image-policy";
     private static final String DEFAULT_VERSION = "defaultVersion";
     private static final String SELECTABLE_PREFIX = "selectable.";
@@ -64,6 +67,7 @@ final class CatalogReconciler {
                 if (!allowedVersionRange.isEmpty()) {
                     throw new IllegalStateException("Catalog image policy must select static images or a version range.");
                 }
+                LOG.infof("Skipping discovery for catalog %s/%s: image policy is static.", namespace, catalogName);
                 return;
             }
         }
@@ -72,8 +76,12 @@ final class CatalogReconciler {
         if (!range.contains(fallback)) {
             throw new IllegalArgumentException("defaultImage must be inside allowedVersionRange.");
         }
-        CatalogSelection.Selection selection = CatalogSelection.select(repository, registryTags.get(), minorLines, range);
+        LOG.infof("Discovering WireMock versions in %s across up to %d minor lines.", allowedVersionRange, minorLines);
+        List<String> tags = registryTags.get();
+        CatalogSelection.Selection selection = CatalogSelection.select(repository, tags, minorLines, range);
+        LOG.infof("Registry returned %d tags; selected %d versions.", tags.size(), selection.selectable().size());
         if (selection.candidates().isEmpty()) {
+            LOG.infof("Catalog %s/%s unchanged: no eligible registry tags.", namespace, catalogName);
             return;
         }
         ConfigMap baseline = requireConfigMap(configMaps, baselineName);
@@ -93,9 +101,15 @@ final class CatalogReconciler {
 
         ConfigMap update = new ConfigMapBuilder(catalog).withData(nextData).build();
         configMaps.resource(update).update();
+        LOG.infof("Updated catalog %s/%s: default=%s -> %s, dataChanged=%s, selectable=%s, retained=%s.",
+                namespace, catalogName, currentDefault, nextData.get(DEFAULT_VERSION), !currentData.equals(nextData),
+                nextData.keySet().stream().filter(key -> key.startsWith(SELECTABLE_PREFIX))
+                        .map(key -> key.substring(SELECTABLE_PREFIX.length())).toList(),
+                nextData.keySet().stream().filter(key -> key.startsWith(RETAINED_PREFIX))
+                        .map(key -> key.substring(RETAINED_PREFIX.length())).toList());
     }
 
-    private String validateCatalog(Map<String, String> catalog) {
+    static String validateCatalog(Map<String, String> catalog) {
         String defaultVersion = requireStableVersion(catalog.get(DEFAULT_VERSION), "catalog defaultVersion");
         Set<String> selectable = new TreeSet<>();
         Set<String> retained = new TreeSet<>();
@@ -235,7 +249,7 @@ final class CatalogReconciler {
         return image;
     }
 
-    private WireMockTag tagFromImage(String image, String expectedVersion) {
+    static WireMockTag tagFromImage(String image, String expectedVersion) {
         if (image == null || image.isBlank() || image.indexOf('@') >= 0
                 || image.chars().anyMatch(Character::isWhitespace)) {
             throw new IllegalStateException("Catalog image is not an exact full image for version "
@@ -250,7 +264,7 @@ final class CatalogReconciler {
         return tag;
     }
 
-    private String requireStableVersion(String version, String source) {
+    private static String requireStableVersion(String version, String source) {
         WireMockTag tag = WireMockTag.parse(version).orElse(null);
         if (tag == null || !tag.imageTag().equals(tag.version())) {
             throw invalidVersion(source, version);
@@ -258,7 +272,7 @@ final class CatalogReconciler {
         return version;
     }
 
-    private IllegalStateException invalidVersion(String source, String version) {
+    private static IllegalStateException invalidVersion(String source, String version) {
         return new IllegalStateException(source + " must be an exact stable WireMock 3.x version: " + version);
     }
 

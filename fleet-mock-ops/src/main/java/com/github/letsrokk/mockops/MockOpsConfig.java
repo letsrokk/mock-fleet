@@ -19,4 +19,5 @@ interface MockOpsConfig {
     int minorLines();
     int pageSize();
     Optional<List<String>> registryConfigFiles();
+    Optional<String> catalogSeed();
 }
