@@ -9,6 +9,7 @@ import jakarta.inject.Inject;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -46,7 +47,8 @@ public final class MockOpsCommand implements QuarkusApplication {
                 config.userConfigMapName(),
                 config.configKey(),
                 imageRepository,
-                () -> new RegistryV2Client(HttpClient.newHttpClient(), json, registryCredentials())
+                () -> new RegistryV2Client(HttpClient.newHttpClient(), json, DockerConfigCredentials.read(json, registryUri,
+                        config.registryConfigFiles().orElseGet(List::of)))
                         .tags(registryUri, config.repository(), config.pageSize()),
                 config.minorLines(),
                 config.allowedVersionRange(),
@@ -84,13 +86,5 @@ public final class MockOpsCommand implements QuarkusApplication {
 
     private static IllegalArgumentException unsupportedIpv6ImageRepository() {
         return new IllegalArgumentException("Bracketed IPv6 imageRepository authorities are not supported.");
-    }
-
-    private RegistryV2Client.Credentials registryCredentials() {
-        return config.registryUsername()
-                .map(username -> new RegistryV2Client.Credentials(username,
-                        config.registryPassword().orElseThrow(() -> new IllegalArgumentException(
-                                "registryPassword is required with registryUsername."))))
-                .orElse(null);
     }
 }

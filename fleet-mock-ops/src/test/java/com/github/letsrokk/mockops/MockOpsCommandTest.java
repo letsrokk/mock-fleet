@@ -11,17 +11,21 @@ import io.fabric8.kubernetes.client.dsl.MixedOperation;
 import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -113,14 +117,20 @@ class MockOpsCommandTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void privateRegistryRunWritesPullableImagesWithRegistryHost() throws Exception {
+    void privateRegistryRunWritesPullableImagesWithRegistryHost(@TempDir Path directory) throws Exception {
         HttpServer registry = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         registry.createContext("/v2/mirror/wiremock/tags/list",
-                exchange -> json(exchange, "{\"tags\":[\"3.14.1-2\"]}"));
+                exchange -> {
+                    assertEquals("Basic dXNlcjpwYXNz", exchange.getRequestHeaders().getFirst("Authorization"));
+                    json(exchange, "{\"tags\":[\"3.14.1-2\"]}");
+                });
         registry.start();
         try {
             String registryUrl = "http://127.0.0.1:" + registry.getAddress().getPort();
             MockOpsConfig config = config(registryUrl, "mirror/wiremock", Optional.empty());
+            Path pullSecret = directory.resolve("config.json");
+            Files.writeString(pullSecret, "{\"auths\":{\"" + registryUrl + "\":{\"auth\":\"dXNlcjpwYXNz\"}}}");
+            when(config.registryConfigFiles()).thenReturn(Optional.of(List.of(pullSecret.toString())));
             KubernetesClient kubernetes = mock(KubernetesClient.class);
             MixedOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> configMaps = mock(MixedOperation.class);
             NonNamespaceOperation<ConfigMap, ConfigMapList, Resource<ConfigMap>> namespaced =
@@ -195,6 +205,50 @@ class MockOpsCommandTest {
         }
     }
 
+    @Test
+    void matchesPullSecretRegistryAndUsesConfiguredOrder(@TempDir Path directory) throws Exception {
+        Path unrelated = directory.resolve("unrelated.json");
+        Path matching = directory.resolve("matching.json");
+        Files.writeString(unrelated, "{\"auths\":{\"other.example\":{\"auth\":\"b3RoZXI6c2VjcmV0\"}}}");
+        Files.writeString(matching, "{\"auths\":{\"https://registry.example:5000\":{\"username\":\"user\",\"password\":\"pass:word\"}}}");
+        var json = new ObjectMapper();
+        var files = List.of(unrelated.toString(), matching.toString());
+        assertEquals(new RegistryV2Client.Credentials("user", "pass:word"),
+                DockerConfigCredentials.read(json, URI.create("https://registry.example:5000"), files));
+        assertNull(DockerConfigCredentials.read(json, URI.create("https://registry.example"), files));
+        assertNull(DockerConfigCredentials.read(json, URI.create("https://registry.example"), List.of()));
+        Files.writeString(unrelated, "{\"auths\":{\"registry.example:5000\":{\"auth\":\"Zmlyc3Q6cGFzcw==\"}}}");
+        assertEquals(new RegistryV2Client.Credentials("first", "pass"),
+                DockerConfigCredentials.read(json, URI.create("https://registry.example:5000"), files));
+    }
+
+    @Test
+    void supportsDockerHubPullSecretAliasAndPasswordColons(@TempDir Path directory) throws Exception {
+        Path file = directory.resolve("config.json");
+        Files.writeString(file, "{\"auths\":{\"https://index.docker.io/v1/\":{\"auth\":\"dXNlcjpwYXNzOndvcmQ=\"}}}");
+        assertEquals(new RegistryV2Client.Credentials("user", "pass:word"),
+                DockerConfigCredentials.read(new ObjectMapper(), URI.create("https://registry-1.docker.io"),
+                        List.of(file.toString())));
+    }
+
+    @Test
+    void rejectsMalformedPullSecretWithoutExposingCredentials(@TempDir Path directory) throws Exception {
+        Path file = directory.resolve("config.json");
+        for (String value : List.of("{\"auths\":{\"registry.example\":{\"auth\":\"secret-invalid!\"}}}",
+                "{\"auths\":{\"registry.example\":{\"auth\":\"bm9jb2xvbg==\"}}}",
+                "{\"auths\":{\"registry.example\":{\"username\":\"secret\"}}}",
+                "{\"auths\":{\"registry.example\":null}}", "{\"auths\":[]}", "secret-invalid-json")) {
+            Files.writeString(file, value);
+            var error = assertThrows(IllegalArgumentException.class, () -> DockerConfigCredentials.read(
+                    new ObjectMapper(), URI.create("https://registry.example"), List.of(file.toString())));
+            assertEquals("Cannot read valid registry credentials from image pull secret.", error.getMessage());
+            assertNull(error.getCause());
+        }
+        Files.writeString(file, " ".repeat(1_048_577));
+        assertThrows(IllegalArgumentException.class, () -> DockerConfigCredentials.read(
+                new ObjectMapper(), URI.create("https://registry.example"), List.of(file.toString())));
+    }
+
     private static MockOpsConfig config(String registryUrl, String repository,
                                         Optional<String> imageRepository) {
         MockOpsConfig config = mock(MockOpsConfig.class);
@@ -210,8 +264,7 @@ class MockOpsCommandTest {
         when(config.baselineConfigMapName()).thenReturn("baseline");
         when(config.userConfigMapName()).thenReturn("user");
         when(config.configKey()).thenReturn("wiremock.yaml");
-        when(config.registryUsername()).thenReturn(Optional.empty());
-        when(config.registryPassword()).thenReturn(Optional.empty());
+        when(config.registryConfigFiles()).thenReturn(Optional.empty());
         return config;
     }
 
