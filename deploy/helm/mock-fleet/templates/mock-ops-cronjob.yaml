@@ -67,24 +67,33 @@ spec:
                   value: {{ .Values.wiremock.containerImage | quote }}
                 - name: MOCK_FLEET_WIREMOCK_MINOR_LINES
                   value: {{ .Values.mockOps.minorLines | quote }}
-                {{- with .Values.mockOps.registry.credentialsSecretName }}
-                - name: MOCK_FLEET_WIREMOCK_REGISTRY_USERNAME
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ . | quote }}
-                      key: username
-                - name: MOCK_FLEET_WIREMOCK_REGISTRY_PASSWORD
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ . | quote }}
-                      key: password
+                {{- with .Values.wiremock.serviceAccount.imagePullSecrets }}
+                - name: MOCK_FLEET_WIREMOCK_REGISTRY_CONFIG_FILES
+                  {{- $files := list }}
+                  {{- range $index, $secret := . }}
+                  {{- $files = append $files (printf "/etc/mock-fleet/registry/%d/config.json" $index) }}
+                  {{- end }}
+                  value: {{ join "," $files | quote }}
                 {{- end }}
               resources:
                 {{- toYaml .Values.mockOps.resources | nindent 16 }}
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp
+                {{- range $index, $secret := .Values.wiremock.serviceAccount.imagePullSecrets }}
+                - name: registry-{{ $index }}
+                  mountPath: /etc/mock-fleet/registry/{{ $index }}
+                  readOnly: true
+                {{- end }}
           volumes:
             - name: tmp
               emptyDir: {}
+            {{- range $index, $secret := .Values.wiremock.serviceAccount.imagePullSecrets }}
+            - name: registry-{{ $index }}
+              secret:
+                secretName: {{ $secret.name | quote }}
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+            {{- end }}
 {{- end }}

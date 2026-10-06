@@ -54,10 +54,17 @@ render({"wiremock": {"supportedImageTags": ["3.13.2-2", "3.13.2-9"]}}, valid=Fal
 account = render({"wiremock": {"serviceAccount": {"imagePullSecrets": [{"name": "private-pull"}]}}},
                  "wiremock-serviceaccount.yaml")
 assert "imagePullSecrets:" in account and "name: private-pull" in account
-cron = render({"mockOps": {"enabled": True, "registry": {"credentialsSecretName": "registry-login"}}},
+cron = render({"mockOps": {"enabled": True}, "wiremock": {"serviceAccount": {
+    "create": False, "name": "external-wiremock", "imagePullSecrets": [{"name": "private-pull"}, {"name": "second-pull"}]}}},
               "mock-ops-cronjob.yaml")
 assert "MOCK_FLEET_WIREMOCK_ALLOWED_VERSION_RANGE" in cron and "MOCK_FLEET_WIREMOCK_DEFAULT_IMAGE" in cron
-assert 'name: "registry-login"' in cron and "key: username" in cron and "key: password" in cron
+assert 'secretName: "private-pull"' in cron and 'secretName: "second-pull"' in cron
+assert "key: .dockerconfigjson" in cron and "readOnly: true" in cron
+assert 'value: "/etc/mock-fleet/registry/0/config.json,/etc/mock-fleet/registry/1/config.json"' in cron
+assert "MOCK_FLEET_WIREMOCK_REGISTRY_USERNAME" not in cron and "MOCK_FLEET_WIREMOCK_REGISTRY_PASSWORD" not in cron
+anonymous = render({"mockOps": {"enabled": True}}, "mock-ops-cronjob.yaml")
+assert "MOCK_FLEET_WIREMOCK_REGISTRY_CONFIG_FILES" not in anonymous and "secretName:" not in anonymous
+render({"mockOps": {"registry": {"credentialsSecretName": "old-login"}}}, valid=False)
 print("Image-policy render checks passed")
 
 initializer = render({}, "wiremock-user-config-init.yaml")

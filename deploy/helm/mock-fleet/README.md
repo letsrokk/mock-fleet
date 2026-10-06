@@ -505,7 +505,7 @@ MCP publishes 31 tools, including `start_mock` and `get_recording_status`; `reco
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
 | `wiremock.serviceAccount.name` | `""` | Service account name. A generated name is used when creation is enabled and this is empty. |
 | `wiremock.serviceAccount.annotations` | `{}` | Dedicated WireMock service-account annotations for IRSA, EKS Pod Identity, or another workload-identity integration. |
-| `wiremock.serviceAccount.imagePullSecrets` | `[]` | Existing pull-secret references, such as `[{name: wiremock-pull}]`, attached only to the chart-managed WireMock ServiceAccount. |
+| `wiremock.serviceAccount.imagePullSecrets` | `[]` | Existing pull-secret references, such as `[{name: wiremock-pull}]`, attached to the chart-managed WireMock ServiceAccount and mounted into Mock Ops for registry discovery. |
 | `wiremock.admissionPolicy.enabled` | `true` | Install fail-closed admission policy and binding for API-created managed pods. Requires Kubernetes 1.30 or newer; disabling it removes pod-shape enforcement. |
 | `wiremock.admissionPolicy.workloadIdentity.allowedTokenAudiences` | `[sts.amazonaws.com, pods.eks.amazonaws.com]` | Audiences accepted for one injected identity token. Adding an audience expands the admitted workload-identity boundary. Non-EKS audiences use the IRSA-shaped contract; `pods.eks.amazonaws.com` is reserved for the exact EKS Pod Identity shape. |
 | `wiremock.resourcePolicy.requestFloor.cpu` | `"100m"` | Minimum effective WireMock CPU request. |
@@ -533,7 +533,6 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing dedica
 | `mockOps.registry.url` | `https://registry-1.docker.io` | Registry V2 HTTP(S) origin. |
 | `mockOps.registry.repository` | `wiremock/wiremock` | Repository path used by the Registry V2 tag-discovery API. |
 | `mockOps.registry.imageRepository` | `""` | Pullable image repository written to the catalog. Empty derives it from the registry origin and API repository. |
-| `mockOps.registry.credentialsSecretName` | `""` | Existing Secret whose `username` and `password` keys provide optional registry credentials. |
 | `mockOps.image.repository` | `ghcr.io/letsrokk/mock-fleet/mock-ops` | Fleet Mock Ops image repository. |
 | `mockOps.image.tag` | `""` | Fleet Mock Ops image tag. Defaults to the chart `appVersion` when empty. |
 | `mockOps.image.pullPolicy` | `IfNotPresent` | Fleet Mock Ops image pull policy. |
@@ -545,9 +544,13 @@ Set `wiremock.serviceAccount.create=false` with a name to use an existing dedica
 | `mockOps.resources.limits.cpu` | `"0.5"` | Fleet Mock Ops CPU limit. |
 | `mockOps.resources.limits.memory` | `512Mi` | Fleet Mock Ops memory limit. |
 
-Fleet Mock Ops implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges. If credentials are configured, the Secret must contain both exact keys. An HTTPS registry accepts only HTTPS Bearer realms, including legitimate cross-origin services such as `auth.docker.io`. An HTTP registry accepts only a same-origin HTTP realm and is intended for a controlled local test registry. Realm userinfo is always rejected, and configured credentials are never sent cross-origin over HTTP. With an empty `imageRepository`, the Docker Hub defaults remain `wiremock/wiremock:<tag>`; another registry derives `<registry-host[:port]>/<repository>:<tag>`. Bracketed IPv6 image-repository authorities are not supported; use a DNS registry name. Set `imageRepository` when the pullable image name uses a different host or path from tag discovery.
+Fleet Mock Ops implements the Registry V2 tag-list API, including pagination, optional HTTP Basic credentials, and Bearer-token challenges.
 
-For a private registry, configure discovery credentials and image-pull credentials separately:
+Discovery uses only the `kubernetes.io/dockerconfigjson` Secrets referenced by `wiremock.serviceAccount.imagePullSecrets`. Mock Ops reads the matching `auths` entry for the configured registry host and port, using `username`/`password` or Base64-encoded `auth`. Entries may use a host or an HTTP(S) URL; Docker Hub aliases (`docker.io`, `index.docker.io`, and `registry-1.docker.io`) are equivalent. The first matching entry in the configured Secret order supplies credentials. With no matching entry, discovery is anonymous. Missing Secrets or `.dockerconfigjson` keys prevent the Job from starting; malformed config or matching credentials fail discovery without updating the catalog.
+
+An HTTPS registry accepts only HTTPS Bearer realms, including legitimate cross-origin services such as `auth.docker.io`. An HTTP registry accepts only a same-origin HTTP realm and is intended for a controlled local test registry. Realm userinfo is always rejected, and configured credentials are never sent cross-origin over HTTP. With an empty `imageRepository`, the Docker Hub defaults remain `wiremock/wiremock:<tag>`; another registry derives `<registry-host[:port]>/<repository>:<tag>`. Bracketed IPv6 image-repository authorities are not supported; use a DNS registry name. Set `imageRepository` when the pullable image name uses a different host or path from tag discovery.
+
+For a private registry, configure one pull secret for both discovery and image pulls:
 
 ```yaml
 wiremock:
@@ -562,10 +565,11 @@ mockOps:
     url: https://registry.example.com
     repository: team/wiremock
     imageRepository: registry.example.com/team/wiremock
-    credentialsSecretName: wiremock-discovery
 ```
 
-Create `wiremock-pull` as a `kubernetes.io/dockerconfigjson` Secret in the deployment namespace. Kubernetes inherits its reference from the managed WireMock ServiceAccount when it creates pods. Create `wiremock-discovery` in the same namespace with `username` and `password` keys for registry tag discovery. The chart only references existing Secrets; it does not create them or copy credentials into the catalog. If `wiremock.serviceAccount.create=false`, attach `imagePullSecrets` to that external ServiceAccount yourself; the chart does not modify it. Static mode needs only pull credentials and an exact `supportedImageTags` allowlist.
+Create `wiremock-pull` as a `kubernetes.io/dockerconfigjson` Secret in the deployment namespace. Kubernetes inherits its reference from the managed WireMock ServiceAccount when it creates pods. The Mock Ops Job mounts the same Secret read-only and reads it on each run, so later Jobs use rotated credentials. No Secret-read RBAC permission is added. The chart only references existing Secrets; it does not create them or copy credentials into the catalog. If `wiremock.serviceAccount.create=false`, attach `imagePullSecrets` to that external ServiceAccount yourself and also supply the references in `wiremock.serviceAccount.imagePullSecrets` for Mock Ops; the chart does not modify the external account. Static mode needs only pull credentials and an exact `supportedImageTags` allowlist.
+
+Migration: `mockOps.registry.credentialsSecretName` and the Mock Ops registry username/password settings are removed. Move discovery credentials into a `kubernetes.io/dockerconfigjson` Secret, add its reference to `wiremock.serviceAccount.imagePullSecrets`, and remove the old value. Plain `username`/`password` Secrets are no longer supported.
 
 Each run reads the named baseline, user, and catalog ConfigMaps exactly once. It computes references from the effective per-mock merge: a baseline row applies only when no user row has the same ID, and a user row with an omitted or null version clears a baseline pin. It ignores unstable tags, filters candidates by `allowedVersionRange`, and selects the newest image revision for the latest patch in each of the newest `minorLines` eligible stable 3.x lines. The default advances to a newer eligible candidate; an excluded current default falls back to `wiremock.containerImage`. An allowed current default outside that latest-minor window stays selectable. Interval endpoints are numeric `major.minor` or `major.minor.patch`, with no whitespace; all four bracket combinations work, and equal endpoints require both brackets closed. Image revisions do not affect interval comparison.
 

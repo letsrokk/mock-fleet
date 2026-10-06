@@ -14,7 +14,7 @@ The chart enables admission policies, namespace quota, and restricted workload s
 
 Managed WireMock pods use a dedicated service account and do not receive the general Kubernetes API token. `wiremock.serviceAccount.annotations` supports IRSA or EKS Pod Identity. With `storage.s3.authenticationSource=pod`, the S3 CSI driver uses pod-level identity; an identity integration may inject a separate audience-bound projected token, mount, and AWS environment variables without re-enabling the general API token.
 
-Private registries use existing Secrets. `wiremock.serviceAccount.imagePullSecrets` attaches pull-secret references to the managed WireMock service account; configure these references yourself when using an external service account. `mockOps.registry.credentialsSecretName` supplies separate `username`/`password` discovery credentials. See the [private-registry example](../deploy/helm/mock-fleet/README.md#fleet-mock-ops).
+Private registries use existing Secrets. `wiremock.serviceAccount.imagePullSecrets` attaches pull-secret references to the managed WireMock service account; configure these references yourself when using an external service account. Mock Ops mounts the same `kubernetes.io/dockerconfigjson` Secrets read-only for discovery and selects credentials for the configured registry host. It does not need Secret-read RBAC permissions. See the [private-registry example](../deploy/helm/mock-fleet/README.md#fleet-mock-ops).
 
 ## Ingress protection
 
