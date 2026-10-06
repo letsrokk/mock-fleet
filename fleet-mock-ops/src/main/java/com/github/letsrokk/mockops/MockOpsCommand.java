@@ -7,6 +7,8 @@ import io.quarkus.runtime.QuarkusApplication;
 import io.quarkus.runtime.annotations.QuarkusMain;
 import jakarta.inject.Inject;
 
+import org.jboss.logging.Logger;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.util.List;
@@ -16,6 +18,7 @@ import java.util.regex.Pattern;
 
 @QuarkusMain
 public final class MockOpsCommand implements QuarkusApplication {
+    private static final Logger LOG = Logger.getLogger(MockOpsCommand.class);
     private static final String REPOSITORY_COMPONENT =
             "[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*";
     private static final String DNS_LABEL = "[a-z0-9](?:[a-z0-9-]*[a-z0-9])?";
@@ -35,11 +38,17 @@ public final class MockOpsCommand implements QuarkusApplication {
     @Override
     public int run(String... args) {
         if (args.length == 1 && "initialize-user-config".equals(args[0])) {
+            LOG.infof("Initializing saved configuration in namespace %s.", config.namespace());
             UserConfigInitializer.initialize(kubernetes, config.namespace(), config.userConfigMapName(), config.configKey());
+            config.catalogSeed().ifPresent(seed -> VersionCatalogInitializer.initialize(
+                    kubernetes, json, config.namespace(), config.catalogConfigMapName(), seed));
+            LOG.info("Configuration initialization completed.");
             return 0;
         }
         URI registryUri = URI.create(config.registryUrl());
         String imageRepository = imageRepository(registryUri, config.repository(), config.imageRepository());
+        LOG.infof("Starting WireMock discovery: namespace=%s, catalog=%s, registry=%s, repository=%s.",
+                config.namespace(), config.catalogConfigMapName(), registryUri.getHost(), config.repository());
         new CatalogReconciler(kubernetes, new ObjectMapper(new YAMLFactory())).reconcile(
                 config.namespace(),
                 config.catalogConfigMapName(),
@@ -47,9 +56,13 @@ public final class MockOpsCommand implements QuarkusApplication {
                 config.userConfigMapName(),
                 config.configKey(),
                 imageRepository,
-                () -> new RegistryV2Client(HttpClient.newHttpClient(), json, DockerConfigCredentials.read(json, registryUri,
-                        config.registryConfigFiles().orElseGet(List::of)))
-                        .tags(registryUri, config.repository(), config.pageSize()),
+                () -> {
+                    var credentials = DockerConfigCredentials.read(json, registryUri,
+                            config.registryConfigFiles().orElseGet(List::of));
+                    LOG.infof("Registry authentication: %s.", credentials == null ? "anonymous" : "image pull secret");
+                    return new RegistryV2Client(HttpClient.newHttpClient(), json, credentials)
+                            .tags(registryUri, config.repository(), config.pageSize());
+                },
                 config.minorLines(),
                 config.allowedVersionRange(),
                 config.defaultImage());

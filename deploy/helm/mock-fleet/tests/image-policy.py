@@ -21,9 +21,15 @@ def render(values, template="wiremock-version-catalog-configmap.yaml", valid=Tru
 
 
 def catalog(values):
-    output = render(values)
-    policy = json.loads(json.loads(re.search(r"mock-fleet/image-policy: (.+)", output)[1]))
-    versions = set(re.findall(r"selectable\.([\d.]+):", output))
+    if values.get("mockOps", {}).get("enabled", False):
+        output = render(values, "wiremock-user-config-init.yaml")
+        seed = json.loads(json.loads(re.search(r"MOCK_FLEET_WIREMOCK_CATALOG_SEED\n\s+value: (.+)", output)[1]))
+        policy = json.loads(seed["metadata"]["annotations"]["mock-fleet/image-policy"])
+        versions = {key.removeprefix("selectable.") for key in seed["data"] if key.startswith("selectable.")}
+    else:
+        output = render(values)
+        policy = json.loads(json.loads(re.search(r"mock-fleet/image-policy: (.+)", output)[1]))
+        versions = set(re.findall(r"selectable\.([\d.]+):", output))
     return policy, versions
 
 
@@ -92,3 +98,10 @@ print("API rollout render checks passed")
 wiremock_admission = render({}, "wiremock-validatingadmissionpolicy.yaml")
 assert "object.spec.restartPolicy in ['Never', 'Always']" in wiremock_admission
 print("WireMock restart-policy admission render check passed")
+
+discovery = render({"mockOps": {"enabled": True}}, template=None)
+assert not re.search(r"kind: ConfigMap\nmetadata:\n  name: [^\n]*-wiremock-version-catalog\n", discovery)
+assert "MOCK_FLEET_WIREMOCK_CATALOG_SEED" in discovery
+assert "MOCK_FLEET_WIREMOCK_CATALOG_SEED" not in initializer
+assert "mock-fleet-wiremock-version-catalog" in render({"mockOps": {"enabled": True}}, "wiremock-user-config-init.yaml")
+print("Discovery catalog ownership render checks passed")

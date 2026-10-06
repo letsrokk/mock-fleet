@@ -54,7 +54,11 @@ public class WireMockVersionCatalogParser {
             WireMockVersionCatalog.VersionEntry previous = versions.putIfAbsent(version,
                     new WireMockVersionCatalog.VersionEntry(version, value.getValue(), selectable));
             if (previous != null) {
-                throw new IllegalArgumentException("WireMock catalog versions must occur in exactly one section.");
+                if (!previous.image().equals(value.getValue())) {
+                    throw new IllegalArgumentException("WireMock catalog version has conflicting image mappings.");
+                }
+                versions.put(version, new WireMockVersionCatalog.VersionEntry(
+                        version, value.getValue(), previous.selectable() || selectable));
             }
         }
 

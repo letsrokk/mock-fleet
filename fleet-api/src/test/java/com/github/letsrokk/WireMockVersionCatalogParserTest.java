@@ -76,6 +76,29 @@ class WireMockVersionCatalogParserTest {
                 "selectable.3.13.2", "wiremock/wiremock:3.12.1-2"))));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void acceptsIdenticalDuplicatesRegardlessOfSectionOrder(boolean selectableFirst) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("defaultVersion", "3.13.2");
+        data.put((selectableFirst ? "selectable." : "retained.") + "3.13.2", "wiremock/wiremock:3.13.2-2");
+        data.put((selectableFirst ? "retained." : "selectable.") + "3.13.2", "wiremock/wiremock:3.13.2-2");
+        WireMockVersionCatalog catalog = parser.parse(configMap("42", data));
+        assertEquals(1, catalog.versions().size());
+        assertTrue(catalog.versions().get(WireMockVersion.parse("3.13.2")).selectable());
+    }
+
+    @Test
+    void identicalDuplicatesStillRespectTheImagePolicy() {
+        ConfigMap config = configMap("42", Map.of(
+                "defaultVersion", "3.13.2", "selectable.3.13.2", "wiremock/wiremock:3.13.2-2",
+                "selectable.3.12.1", "wiremock/wiremock:3.12.1", "retained.3.12.1", "wiremock/wiremock:3.12.1"));
+        config.getMetadata().setAnnotations(Map.of("mock-fleet/image-policy", """
+                {"defaultImage":"wiremock/wiremock:3.13.2-2","allowedImages":[],"allowedVersionRange":"[3.13,4.0)"}
+                """));
+        assertEquals(false, parser.parse(config).versions().get(WireMockVersion.parse("3.12.1")).selectable());
+    }
+
     @Test
     void rejectsTheSameSemanticVersionAcrossSelectableAndRetainedSections() {
         assertThrows(IllegalArgumentException.class, () -> parser.parse(configMap("42", Map.of(

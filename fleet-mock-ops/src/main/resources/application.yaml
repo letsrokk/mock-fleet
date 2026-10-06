@@ -16,3 +16,4 @@ mock-fleet:
     minor-lines: ${MOCK_FLEET_WIREMOCK_MINOR_LINES:5}
     page-size: ${MOCK_FLEET_WIREMOCK_PAGE_SIZE:100}
     registry-config-files: ${MOCK_FLEET_WIREMOCK_REGISTRY_CONFIG_FILES:}
+    catalog-seed: ${MOCK_FLEET_WIREMOCK_CATALOG_SEED:}

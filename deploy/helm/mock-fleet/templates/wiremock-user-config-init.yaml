@@ -39,6 +39,9 @@ rules:
     resources: [configmaps]
     resourceNames:
       - {{ include "mock-fleet.wiremockUserConfigMapName" . }}
+      {{- if .Values.mockOps.enabled }}
+      - {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . }}
+      {{- end }}
     verbs: [get, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -114,6 +117,12 @@ spec:
               value: {{ include "mock-fleet.wiremockUserConfigMapName" . | quote }}
             - name: MOCK_FLEET_WIREMOCK_CONFIG_KEY
               value: wiremock-options.yaml
+            {{- if .Values.mockOps.enabled }}
+            - name: MOCK_FLEET_WIREMOCK_VERSION_CATALOG_CONFIG_MAP_NAME
+              value: {{ include "mock-fleet.wiremockVersionCatalogConfigMapName" . | quote }}
+            - name: MOCK_FLEET_WIREMOCK_CATALOG_SEED
+              value: {{ include "mock-fleet.wiremockVersionCatalog" . | fromYaml | toJson | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.mockOps.resources | nindent 12 }}
           volumeMounts:
