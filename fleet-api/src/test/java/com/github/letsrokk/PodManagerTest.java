@@ -1090,6 +1090,44 @@ class PodManagerTest {
     }
 
     @Test
+    void deletePodForcesRemovalAfterGracefulDeletionTimesOut() {
+        KubernetesClient client = mock(KubernetesClient.class);
+        @SuppressWarnings("unchecked")
+        MixedOperation<Pod, PodList, PodResource> operations = mock(MixedOperation.class);
+        @SuppressWarnings("unchecked")
+        NonNamespaceOperation<Pod, PodList, PodResource> namespaced = mock(NonNamespaceOperation.class);
+        PodResource resource = mock(PodResource.class);
+        when(client.pods()).thenReturn(operations);
+        when(operations.inNamespace("test")).thenReturn(namespaced);
+        when(namespaced.withName("mock-fleet-demo-1")).thenReturn(resource);
+        Pod original = managedPod("mock-fleet-demo-1", "demo");
+        original.getMetadata().setUid("uid-original");
+        original.getMetadata().setDeletionTimestamp("2026-10-05T12:00:00Z");
+        AtomicReference<Pod> livePod = new AtomicReference<>(original);
+        when(client.getNamespace()).thenReturn("test");
+        when(resource.get()).thenAnswer(ignored -> livePod.get());
+        AtomicInteger deletes = new AtomicInteger();
+        when(client.raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+                eq("DELETE"), any(DeleteOptions.class))).thenAnswer(invocation -> {
+            DeleteOptions options = invocation.getArgument(2);
+            assertEquals("uid-original", options.getPreconditions().getUid());
+            if (deletes.incrementAndGet() == 2) {
+                assertEquals(0L, options.getGracePeriodSeconds());
+                livePod.set(null);
+            }
+            return "{}";
+        });
+        PodManager manager = new PodManager();
+        manager.kubernetesClient = client;
+        manager.metrics = metrics;
+        manager.podCreationTimeout = Duration.ZERO;
+
+        assertTrue(manager.deletePod("mock-fleet-demo-1", "demo"));
+        assertEquals(2, deletes.get());
+        assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "deleted").counter().count());
+    }
+
+    @Test
     void deleteMockTreatsAnAbsentOwnedPodAsIdempotentlyDeleted() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         PodState podState = mock(PodState.class);
@@ -1318,7 +1356,7 @@ class PodManagerTest {
         when(podResource.get()).thenReturn(deleting);
 
         assertEquals(PodManager.DeleteMockResult.FAILED, podManager.deleteMock("demo"));
-        verify(kubernetesClient).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
+        verify(kubernetesClient, times(2)).raw(eq("/api/v1/namespaces/test/pods/mock-fleet-demo-1"),
                 eq("DELETE"), any(DeleteOptions.class));
         verify(podState, never()).confirmStopped("demo", pod.podName());
         assertEquals(1, registry.get("mock_fleet_pod_deletions").tag("outcome", "error").counter().count());
