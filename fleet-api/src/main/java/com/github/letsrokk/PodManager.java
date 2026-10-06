@@ -823,6 +823,12 @@ public class PodManager {
                     .build();
             kubernetesClient.raw(podDeletePath(namespace, podName), "DELETE", deleteOptions);
             boolean deleted = waitForPodToBeDeleted(podName, podResource::get);
+            if (!deleted && !Thread.currentThread().isInterrupted()) {
+                LOG.warnf("Force deleting pod '%s' after graceful deletion timed out.", podName);
+                deleteOptions.setGracePeriodSeconds(0L);
+                kubernetesClient.raw(podDeletePath(namespace, podName), "DELETE", deleteOptions);
+                deleted = waitForPodToBeDeleted(podName, podResource::get);
+            }
             outcome = deleted ? "deleted" : "error";
             return deleted;
         } catch (KubernetesClientException failure) {
