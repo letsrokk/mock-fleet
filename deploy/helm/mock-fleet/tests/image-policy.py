@@ -95,6 +95,18 @@ recreate = render({"fleet": {"api": {"updateStrategy": {"type": "Recreate"}}}}, 
 assert "type: Recreate" in recreate and "rollingUpdate:" not in recreate
 print("API rollout render checks passed")
 
+proxy = render({}, "proxy-deployment.yaml")
+for name, value in (("API", 50), ("MOCK", 20)):
+    assert re.search(rf'MOCK_FLEET_CONNECTION_POOLS_{name}_MAX_SIZE\n\s+value: "{value}"', proxy)
+proxy = render({"fleet": {"proxy": {"connectionPools": {"apiMaxSize": 75, "mockMaxSize": 30}}}},
+               "proxy-deployment.yaml")
+for name, value in (("API", 75), ("MOCK", 30)):
+    assert re.search(rf'MOCK_FLEET_CONNECTION_POOLS_{name}_MAX_SIZE\n\s+value: "{value}"', proxy)
+for key in ("apiMaxSize", "mockMaxSize"):
+    for value in (0, -1, 1.5, "invalid"):
+        render({"fleet": {"proxy": {"connectionPools": {key: value}}}}, valid=False)
+print("Proxy connection-pool render checks passed")
+
 wiremock_admission = render({}, "wiremock-validatingadmissionpolicy.yaml")
 assert "object.spec.restartPolicy in ['Never', 'Always']" in wiremock_admission
 print("WireMock restart-policy admission render check passed")

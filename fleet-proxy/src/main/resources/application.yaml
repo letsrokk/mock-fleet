@@ -26,6 +26,9 @@ quarkus:
     build: true
 
 mock-fleet:
+  connection-pools:
+    api-max-size: ${MOCK_FLEET_CONNECTION_POOLS_API_MAX_SIZE:50}
+    mock-max-size: ${MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE:20}
   api:
     base-url: ${MOCK_FLEET_API_BASE_URL:http://localhost:8081}
   routing:

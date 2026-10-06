@@ -17,7 +17,25 @@
     "fleet": {
       "type": "object",
       "properties": {
-        "proxy": { "$ref": "#/definitions/app" },
+        "proxy": {
+          "allOf": [
+            { "$ref": "#/definitions/app" },
+            {
+              "type": "object",
+              "properties": {
+                "connectionPools": {
+                  "type": "object",
+                  "properties": {
+                    "apiMaxSize": { "type": "integer", "minimum": 1 },
+                    "mockMaxSize": { "type": "integer", "minimum": 1 }
+                  },
+                  "required": ["apiMaxSize", "mockMaxSize"]
+                }
+              },
+              "required": ["connectionPools"]
+            }
+          ]
+        },
         "api": {
           "allOf": [
             { "$ref": "#/definitions/app" },

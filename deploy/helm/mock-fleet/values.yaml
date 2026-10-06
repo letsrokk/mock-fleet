@@ -18,6 +18,9 @@ fleet:
       pullPolicy: IfNotPresent
     routing:
       mode: HOST
+    connectionPools:
+      apiMaxSize: 50
+      mockMaxSize: 20
     logging:
       json: false
       level: INFO

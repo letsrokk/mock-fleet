@@ -48,6 +48,10 @@ spec:
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_API_BASE_URL
               value: {{ printf "http://%s" (include "mock-fleet.apiFullname" .) | quote }}
+            - name: MOCK_FLEET_CONNECTION_POOLS_API_MAX_SIZE
+              value: {{ .Values.fleet.proxy.connectionPools.apiMaxSize | quote }}
+            - name: MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE
+              value: {{ .Values.fleet.proxy.connectionPools.mockMaxSize | quote }}
             - name: QUARKUS_LOG_CONSOLE_JSON
               value: {{ .Values.fleet.proxy.logging.json | quote }}
             - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
