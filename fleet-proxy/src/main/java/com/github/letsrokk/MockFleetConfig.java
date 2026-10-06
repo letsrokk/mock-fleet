@@ -9,6 +9,13 @@ public interface MockFleetConfig {
 
     RoutingConfig routing();
 
+    ConnectionPoolsConfig connectionPools();
+
+    interface ConnectionPoolsConfig {
+        int apiMaxSize();
+        int mockMaxSize();
+    }
+
     interface ApiConfig {
         String baseUrl();
     }

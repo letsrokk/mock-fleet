@@ -26,6 +26,22 @@ helm upgrade --install mock-fleet deploy/helm/mock-fleet \
   --create-namespace
 ```
 
+## Proxy connection pools
+
+Configure outgoing HTTP/1 connection limits through Helm values:
+
+```yaml
+fleet:
+  proxy:
+    connectionPools:
+      apiMaxSize: 50
+      mockMaxSize: 20
+```
+
+Both values must be positive integers. Each proxy replica has a separate API pool and separate pools for each mock pod destination. Requests wait when a pool reaches its limit.
+
+Outside Helm, set `MOCK_FLEET_CONNECTION_POOLS_API_MAX_SIZE` and `MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE` on `fleet-proxy`. The application defaults are also 50 and 20. Changing these settings requires restarting the proxy.
+
 ## Cluster Security Prerequisites
 
 The chart renders `NetworkPolicy` objects, but Kubernetes accepts them even when the installed network plugin does not enforce them. A NetworkPolicy-capable CNI, such as Calico or Cilium, is a deployment prerequisite. Installing and configuring that CNI, and proving that it enforces the rendered selectors, belongs to the cluster operator. `make local-deploy` neither checks nor changes CNI capability. The bridge CNI in the Minikube cluster reviewed for this release accepted the policies but did not enforce them.

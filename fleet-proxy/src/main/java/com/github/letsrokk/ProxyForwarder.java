@@ -47,6 +47,9 @@ public class ProxyForwarder {
     @Inject
     FleetApiClient fleetApiClient;
 
+    @Inject
+    MockFleetConfig config;
+
     private volatile WebClient webClient;
 
     void forward(RoutingContext routingContext, String host, ResolvedRequest resolvedRequest) {
@@ -192,7 +195,9 @@ public class ProxyForwarder {
             synchronized (this) {
                 local = webClient;
                 if (local == null) {
-                    local = WebClient.create(vertx, new WebClientOptions().setFollowRedirects(false));
+                    local = WebClient.create(vertx, new WebClientOptions()
+                            .setFollowRedirects(false)
+                            .setMaxPoolSize(config.connectionPools().mockMaxSize()));
                     webClient = local;
                 }
             }
