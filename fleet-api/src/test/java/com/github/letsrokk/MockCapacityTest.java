@@ -246,12 +246,11 @@ class MockCapacityTest {
     @Test
     void renewedQueuedAttemptSurvivesItsNominalLifecycleLeaseAndCanComplete() {
         hazelcast = newHazelcast();
-        MockCapacity capacity = new MockCapacity(hazelcast,
-                config(1, 1, 1, Duration.ofMillis(5)));
+        MockCapacity capacity = new MockCapacity(hazelcast, config(1, 1, 1));
         capacity.metrics = metrics;
         var lifecycles = hazelcast.<String, MockPodLifecycle>getMap(
                 HazelcastMemberConfig.POD_LIFECYCLE_MAP_NAME);
-        long expiredLifecycleStart = System.currentTimeMillis() - 20L;
+        long expiredLifecycleStart = System.currentTimeMillis() - capacity.reservationLeaseMillis() - 1L;
         capacity.reserve("alpha", "attempt-alpha", () -> lifecycles.put("alpha",
                 MockPodLifecycle.starting("attempt-alpha", null, expiredLifecycleStart)));
 
