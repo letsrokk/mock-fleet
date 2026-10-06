@@ -150,7 +150,7 @@ public class PodFactory {
                         .endSeccompProfile()
                         .build())
                 .withTerminationGracePeriodSeconds(config.wiremockTerminationGracePeriodSeconds())
-                .withRestartPolicy("Never");
+                .withRestartPolicy("Always");
 
         config.wiremockServiceAccountName()
                 .filter(name -> !name.isBlank())

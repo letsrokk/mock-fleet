@@ -87,7 +87,7 @@ spec:
         object.spec.automountServiceAccountToken == false
       message: Managed WireMock pods require the dedicated tokenless service account.
     - expression: >-
-        object.spec.restartPolicy == 'Never' &&
+        object.spec.restartPolicy in ['Never', 'Always'] &&
         object.spec.terminationGracePeriodSeconds == {{ .Values.wiremock.terminationGracePeriodSeconds }} &&
         (!has(object.spec.hostNetwork) || object.spec.hostNetwork == false) &&
         (!has(object.spec.hostPID) || object.spec.hostPID == false) &&

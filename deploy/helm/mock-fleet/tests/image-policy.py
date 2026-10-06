@@ -81,3 +81,7 @@ assert "topologyKey: kubernetes.io/hostname" in api
 recreate = render({"fleet": {"api": {"updateStrategy": {"type": "Recreate"}}}}, "api-deployment.yaml")
 assert "type: Recreate" in recreate and "rollingUpdate:" not in recreate
 print("API rollout render checks passed")
+
+wiremock_admission = render({}, "wiremock-validatingadmissionpolicy.yaml")
+assert "object.spec.restartPolicy in ['Never', 'Always']" in wiremock_admission
+print("WireMock restart-policy admission render check passed")
