@@ -1933,6 +1933,7 @@ class PodManagerTest {
         assertEquals("wiremock/wiremock:3.13.2-2", pod.getSpec().getContainers().getFirst().getImage());
         assertEquals("Always", pod.getSpec().getContainers().getFirst().getImagePullPolicy());
         assertEquals(5L, pod.getSpec().getTerminationGracePeriodSeconds());
+        assertEquals("Always", pod.getSpec().getRestartPolicy());
         assertTrue(pod.getSpec().getContainers().getFirst().getArgs() == null
                 || pod.getSpec().getContainers().getFirst().getArgs().isEmpty());
         assertEquals(PodFactory.WIREMOCK_HEALTH_PATH, pod.getSpec().getContainers().getFirst().getStartupProbe().getHttpGet().getPath());
