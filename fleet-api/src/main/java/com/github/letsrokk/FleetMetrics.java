@@ -26,9 +26,7 @@ public class FleetMetrics {
         this.registry = registry;
         this.wireMockOptions = wireMockOptions;
         for (String outcome : new String[]{"success", "error", "rejected", "cancelled"}) {
-            registry.counter("mock_fleet_start_attempts", "outcome", outcome, "mock_id", "unknown");
             if (!"rejected".equals(outcome)) {
-                registry.timer("mock_fleet_start_duration_by_mock", "outcome", outcome, "mock_id", "unknown");
                 Timer.builder("mock_fleet_start_duration")
                         .description("Accepted startup duration including queue time")
                         .tag("outcome", outcome)
@@ -39,13 +37,25 @@ public class FleetMetrics {
                         .register(registry);
             }
         }
+        registry.counter("mock_fleet_start_reservations_reclaimed");
+        registerMockSeries("unknown");
+        wireMockOptions.onConfigChange(() -> wireMockOptions.effectiveConfig().mockConfigs().keySet()
+                .forEach(mockId -> registerMockSeries(mockIdLabel(mockId))));
+    }
+
+    private void registerMockSeries(String mockId) {
+        for (String outcome : new String[]{"success", "error", "rejected", "cancelled"}) {
+            registry.counter("mock_fleet_start_attempts", "outcome", outcome, "mock_id", mockId);
+            if (!"rejected".equals(outcome)) {
+                registry.timer("mock_fleet_start_duration_by_mock", "outcome", outcome, "mock_id", mockId);
+            }
+        }
         for (String reason : new String[]{"capacity", "queue_full"}) {
-            registry.counter("mock_fleet_start_rejections", "reason", reason, "mock_id", "unknown");
+            registry.counter("mock_fleet_start_rejections", "reason", reason, "mock_id", mockId);
         }
         for (String outcome : new String[]{"deleted", "already_absent", "error"}) {
-            registry.counter("mock_fleet_pod_deletions", "outcome", outcome, "mock_id", "unknown");
+            registry.counter("mock_fleet_pod_deletions", "outcome", outcome, "mock_id", mockId);
         }
-        registry.counter("mock_fleet_start_reservations_reclaimed");
     }
 
     @Inject
