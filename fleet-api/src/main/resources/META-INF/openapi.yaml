@@ -29,6 +29,39 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/MockRow"
+  /__fleet/api/mocks/{mockId}/pin:
+    parameters:
+      - $ref: "#/components/parameters/MockId"
+    put:
+      operationId: setMockPinned
+      summary: Pin or unpin a running mock
+      description: Pinned mocks skip idle cleanup. Unpinning resumes the existing idle timeout. Manual deletion still works; replacement pods start unpinned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [pinned]
+              properties:
+                pinned: { type: boolean }
+      responses:
+        "200":
+          description: The requested pin state is applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [mockId, pinned]
+                properties:
+                  mockId: { type: string }
+                  pinned: { type: boolean }
+        "400":
+          $ref: "#/components/responses/ApiError"
+        "409":
+          $ref: "#/components/responses/ApiError"
   /__fleet/api/mocks/{mockId}/start:
     parameters:
       - $ref: "#/components/parameters/MockId"
@@ -281,7 +314,7 @@ components:
     MockRow:
       type: object
       additionalProperties: false
-      required: [mockId, podName, status, message, wireMockVersion, runtimeVersion]
+      required: [mockId, podName, status, message, wireMockVersion, runtimeVersion, pinned]
       properties:
         mockId: { type: string }
         podName: { type: [string, "null"] }
@@ -290,6 +323,7 @@ components:
         message: { type: [string, "null"] }
         wireMockVersion: { type: string, pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
         runtimeVersion: { type: [string, "null"], pattern: '^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)$' }
+        pinned: { type: boolean }
     MockLifecycleResponse:
       type: object
       additionalProperties: false

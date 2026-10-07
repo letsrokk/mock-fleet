@@ -15,6 +15,7 @@ public final class OutputSchemas {
     public static final class DeleteMockConfig {}
     public static final class StartMock {}
     public static final class StopMock {}
+    public static final class SetMockPinned {}
     public static final class StubPage {}
     public static final class Stub {}
     public static final class DeleteStub {}

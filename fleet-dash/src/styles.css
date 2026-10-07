@@ -198,6 +198,7 @@ h1 {
 }
 
 .panel-refresh-button,
+.pin-button,
 .danger-button {
   display: inline-flex;
   align-items: center;
@@ -222,6 +223,18 @@ h1 {
   background: var(--surface-raised);
 }
 
+.pin-button {
+  width: 40px;
+  height: 40px;
+  margin-right: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+}
+
+.pin-button:hover:not(:disabled) { background: var(--surface-raised); }
+.pin-button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-surface); }
+.pin-button:disabled { cursor: not-allowed; opacity: 0.62; }
+
 .danger-button {
   width: 40px;
   height: 40px;
@@ -244,6 +257,7 @@ h1 {
 }
 
 .refresh-icon,
+.pin-icon,
 .trash-icon {
   display: block;
   width: 20px;
@@ -1013,6 +1027,7 @@ tr:last-child td { border-bottom: 0; }
 
 .tab:focus-visible,
 .panel-refresh-button:focus-visible,
+.pin-button:focus-visible,
 .danger-button:focus-visible,
 .primary-button:focus-visible,
 .secondary-button:focus-visible,

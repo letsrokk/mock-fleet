@@ -29,7 +29,7 @@ class McpRegistrationTest {
     private static final Set<String> EXPECTED_TOOLS = Set.of(
             "list_mocks", "get_mock_config", "export_mock_configs", "import_mock_configs",
             "list_option_definitions", "update_mock_config",
-            "delete_mock_config", "start_mock", "stop_mock",
+            "delete_mock_config", "start_mock", "stop_mock", "set_mock_pinned",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "delete_stub",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
@@ -205,7 +205,7 @@ class McpRegistrationTest {
                 .extract().asString();
 
         JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
-        assertEquals(33, tools.size());
+        assertEquals(34, tools.size());
         for (JsonNode tool : tools) {
             JsonNode schema = tool.path("outputSchema");
             assertEquals(2, schema.path("oneOf").size(), tool.path("name").asText() + ": " + schema);

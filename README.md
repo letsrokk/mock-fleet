@@ -78,7 +78,9 @@ Idle pods are checked every five minutes and removed when they exceed `fleet.api
 
 ### Active mocks
 
-Inspect currently active mocks.
+Inspect currently active mocks. Use the pin button between status and delete to keep a running mock past its idle timeout. Unpinning resumes cleanup using the existing last-access time. Manual deletion still works; replacement pods start unpinned.
+
+The API exposes the same toggle through `PUT /__fleet/api/mocks/{mockId}/pin` with `{"pinned":true}` or `{"pinned":false}`. MCP clients can call `set_mock_pinned` with `mockId` and `pinned`.
 
 ![Active Mocks tab](docs/screenshots/active-mocks.png)
 

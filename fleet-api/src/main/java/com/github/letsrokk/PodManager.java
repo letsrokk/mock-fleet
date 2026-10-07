@@ -434,7 +434,7 @@ public class PodManager {
         });
         podState.getPods().entrySet().forEach(entry -> mocks.put(entry.getKey(),
                 new MockPodStatus(entry.getKey(), entry.getValue().podName(), MockLifecycleStatus.RUNNING, null,
-                        runtimeVersion(entry.getKey(), entry.getValue()))));
+                        runtimeVersion(entry.getKey(), entry.getValue()), entry.getValue().pinned())));
         return mocks.values().stream()
                 .sorted(Comparator.comparing(MockPodStatus::mockId))
                 .toList();
@@ -469,6 +469,10 @@ public class PodManager {
             LOG.warnf("Could not recover runtime version from image '%s'.", image);
             return null;
         }
+    }
+
+    public boolean setPinned(String mockId, boolean pinned) {
+        return serializedPodTransition(mockId, () -> podState.setPinned(mockId, pinned));
     }
 
     public DeleteMockResult deleteMock(String mockId) {
@@ -686,11 +690,15 @@ public class PodManager {
         }
         long now = System.currentTimeMillis();
 
-        podState.getPods().forEach((mockId, pod) -> {
+        podState.getPods().forEach((mockId, snapshot) -> serializedPodTransition(mockId, () -> {
+            MockPodRef pod = podState.getPod(mockId);
+            if (pod == null || !pod.podName().equals(snapshot.podName()) || pod.pinned()) {
+                return null;
+            }
             Long lastAccess = podState.getLastAccessTime(pod.podName());
             if (lastAccess == null) {
                 LOG.warnf("Skipping idle cleanup for pod '%s' because no last access time is recorded.", pod.podName());
-                return;
+                return null;
             }
 
             long diff = now - lastAccess;
@@ -706,7 +714,8 @@ public class PodManager {
                     LOG.warnf("Failed to delete inactive pod '%s' for mock id '%s'.", pod.podName(), mockId);
                 }
             }
-        });
+            return null;
+        }));
     }
 
     /**
@@ -888,7 +897,12 @@ public class PodManager {
     }
 
     public record MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message,
-                                String runtimeVersion) {
+                                String runtimeVersion, boolean pinned) {
+        public MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message,
+                             String runtimeVersion) {
+            this(mockId, podName, status, message, runtimeVersion, false);
+        }
+
         public MockPodStatus(String mockId, String podName, MockLifecycleStatus status, String message) {
             this(mockId, podName, status, message, null);
         }

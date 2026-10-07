@@ -67,6 +67,31 @@ class FleetResourceTest {
     }
 
     @Test
+    void pinsAndUnpinsRunningMocks() {
+        for (boolean pinned : new boolean[] { true, false }) {
+            when(podManager.setPinned("demo", pinned)).thenReturn(true);
+            given().contentType("application/json").body("{\"pinned\":" + pinned + "}")
+                    .when().put("/__fleet/api/mocks/demo/pin")
+                    .then().statusCode(200).body("mockId", is("demo")).body("pinned", is(pinned));
+            verify(podManager).setPinned("demo", pinned);
+        }
+    }
+
+    @Test
+    void refusesPinningAnInactiveMock() {
+        given().contentType("application/json").body("{\"pinned\":true}")
+                .when().put("/__fleet/api/mocks/missing/pin")
+                .then().statusCode(409).body("code", is("MOCK_NOT_RUNNING"));
+    }
+
+    @Test
+    void requiresAnExplicitPinState() {
+        given().contentType("application/json").body("{}")
+                .when().put("/__fleet/api/mocks/demo/pin")
+                .then().statusCode(400).body("code", is("INVALID_PIN_STATE"));
+    }
+
+    @Test
     void deletesActiveMock() {
         when(podManager.deleteMock("demo")).thenReturn(PodManager.DeleteMockResult.NOT_FOUND);
 

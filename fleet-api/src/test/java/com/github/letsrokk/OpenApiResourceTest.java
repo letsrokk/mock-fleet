@@ -167,7 +167,7 @@ class OpenApiResourceTest {
         assertClosedObject(mock, Set.of("mockId", "lifecycle", "baseline", "user", "effective",
                 "wireMockVersion", "runtimeVersion"));
         assertClosedObject(schemas.path("MockRow"), Set.of("mockId", "podName", "status", "message",
-                "wireMockVersion", "runtimeVersion"));
+                "wireMockVersion", "runtimeVersion", "pinned"));
         assertClosedObject(schemas.path("MockLifecycleResponse"),
                 Set.of("mockId", "status", "podName", "message", "retryAfterMs"));
         assertClosedObject(schemas.path("ResolvedConfigData"), Set.of("version", "options", "resources"));

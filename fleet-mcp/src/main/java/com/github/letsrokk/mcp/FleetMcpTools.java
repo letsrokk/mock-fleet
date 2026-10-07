@@ -259,6 +259,23 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "set_mock_pinned", description = "Pin a running mock to prevent idle cleanup, or unpin it to resume the existing idle timeout. Manual stop still works; replacement pods start unpinned.",
+            outputSchema = @Tool.OutputSchema(from = OutputSchemas.SetMockPinned.class, generator = ToolOutputSchemaGenerator.class),
+            annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse setMockPinned(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "True to pin; false to unpin") boolean pinned) {
+        return fleet("set_mock_pinned", () -> {
+            JsonNode result = fleetApi.setPinned(mockId, pinned);
+            if (!result.isObject() || !mockId.equals(result.path("mockId").asText())
+                    || !result.path("pinned").isBoolean() || result.path("pinned").asBoolean() != pinned) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Fleet API returned an invalid pin response",
+                        false, true, Map.of());
+            }
+            return McpToolExecutor.ToolResult.of((pinned ? "Pinned mock " : "Unpinned mock ") + mockId + ".", result);
+        });
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "list_stubs", description = "List WireMock stubs. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listStubs(
             @ToolArg(description = "Mock ID") String mockId,

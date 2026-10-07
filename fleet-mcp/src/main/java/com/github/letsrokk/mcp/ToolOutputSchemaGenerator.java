@@ -35,6 +35,7 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "resourceVersion", nullableString(), "mockId", string(), "deleted", bool(), "apply", apply()));
             case "StartMock" -> lifecycle();
             case "StopMock" -> stopLifecycle();
+            case "SetMockPinned" -> strict(properties("mockId", string(), "pinned", bool()));
             case "StubPage" -> strict(properties(
                     "mockId", string(), "stubs", array(openObject()), "page", page()));
             case "Stub" -> strict(properties("mockId", string(), "stub", openObject()));

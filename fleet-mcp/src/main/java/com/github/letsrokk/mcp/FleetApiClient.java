@@ -67,6 +67,11 @@ public final class FleetApiClient {
                 lifecycleTimeoutMillis);
     }
 
+    public JsonNode setPinned(String mockId, boolean pinned) {
+        return json(HttpMethod.PUT, "/__fleet/api/mocks/" + MockIdValidator.requireValid(mockId) + "/pin",
+                mapper.createObjectNode().put("pinned", pinned));
+    }
+
     public JsonNode getConfig() {
         return json(HttpMethod.GET, "/__fleet/api/config", null);
     }
