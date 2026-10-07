@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 33 tools:
+The server publishes 34 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -16,6 +16,7 @@ start_recording            get_recording_status        stop_recording
 snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
 reset_scenarios             export_mock_configs         import_mock_configs
+set_mock_pinned
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -74,6 +75,8 @@ Every collection returns `page` with the same metadata:
 Poll `start_mock` after `retryAfterMs` until status is RUNNING. `stop_mock` is idempotent and waits for an existing pod to be removed before it returns all lifecycle fields with status exactly `STOPPED`, for example `{ "mockId": "orders", "status": "STOPPED", "podName": null, "message": null, "retryAfterMs": null }`. Already stopped or absent mocks return STOPPED directly. Pod deletion uses the longer `fleet.mcp.lifecycleTimeout` budget, which must exceed the Fleet API pod-creation timeout. If a mutating Fleet API request times out or loses its response, MCP reports `stateMayHaveChanged: true`; reconcile the lifecycle or config before retrying. The MCP wrapper rejects missing, malformed, or mismatched Fleet lifecycle responses as `INVALID_UPSTREAM_RESPONSE`.
 
 ## Configuration
+
+`set_mock_pinned` takes `mockId` and a required boolean `pinned`, and returns `{mockId,pinned}`. Set `pinned` to `true` to keep the current running mock past its idle timeout, or `false` to resume cleanup using its existing last-access time. Pinning an inactive mock returns `MOCK_NOT_RUNNING` without starting it. Manual stop still works. Pin state is shared with other API members in Hazelcast; replacement pods and pods recovered after a complete loss of shared state start unpinned.
 
 `export_mock_configs` exports saved overrides for all mocks, or one saved mock when `mockId` is supplied. It returns `{resourceVersion,mocks}`; save the `mocks` array directly as the same JSON file used by the Config tab. A requested mock without saved overrides returns `NOT_FOUND`. Export excludes inherited settings and unsaved edits, and retains existing sensitive-option redaction. Results are never silently truncated.
 

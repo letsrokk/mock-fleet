@@ -5,6 +5,8 @@ import io.smallrye.mutiny.Multi;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -50,13 +52,32 @@ public class FleetResource {
     private List<MockRow> activeMocksSnapshot() {
         return podManager.listMocks().stream()
                 .map(mock -> new MockRow(mock.mockId(), mock.podName(), mock.status(), mock.message(),
-                        desiredVersion(mock.mockId()), mock.runtimeVersion()))
+                        desiredVersion(mock.mockId()), mock.runtimeVersion(), mock.pinned()))
                 .toList();
     }
 
     private String desiredVersion(String mockId) {
         return wireMockOptions == null ? null : wireMockOptions.desiredVersionFor(mockId).toString();
     }
+
+    @PUT
+    @Path("/{mockId}/pin")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public PinResponse setPinned(@PathParam("mockId") String mockId, PinRequest request) {
+        WireMockConfigService.validateMockId(mockId);
+        if (request == null || request.pinned() == null) {
+            throw ApiException.badRequest("INVALID_PIN_STATE", "pinned is required.", Map.of());
+        }
+        if (!podManager.setPinned(mockId, request.pinned())) {
+            throw new ApiException(Response.Status.CONFLICT,
+                    new ApiError("MOCK_NOT_RUNNING", "Only running mocks can be pinned or unpinned.",
+                            false, false, Map.of("mockId", mockId)));
+        }
+        return new PinResponse(mockId, request.pinned());
+    }
+
+    public record PinRequest(Boolean pinned) {}
+    public record PinResponse(String mockId, boolean pinned) {}
 
     @DELETE
     @Path("/{mockId}")
@@ -107,7 +128,12 @@ public class FleetResource {
     }
 
     public record MockRow(String mockId, String podName, MockLifecycleStatus status, String message,
-                          String wireMockVersion, String runtimeVersion) {
+                          String wireMockVersion, String runtimeVersion, boolean pinned) {
+        public MockRow(String mockId, String podName, MockLifecycleStatus status, String message,
+                       String wireMockVersion, String runtimeVersion) {
+            this(mockId, podName, status, message, wireMockVersion, runtimeVersion, false);
+        }
+
         public MockRow(String mockId, String podName, MockLifecycleStatus status, String message) {
             this(mockId, podName, status, message, null, null);
         }

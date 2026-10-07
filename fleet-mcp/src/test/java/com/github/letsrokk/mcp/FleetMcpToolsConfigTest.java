@@ -52,6 +52,18 @@ class FleetMcpToolsConfigTest {
     private String responseBody;
     private String requestBody;
 
+    @Test
+    void pinsAndUnpinsThroughThePublicApi() {
+        for (boolean pinned : new boolean[] { true, false }) {
+            responseBody = "{\"mockId\":\"zeta\",\"pinned\":" + pinned + "}";
+            var result = tools.setMockPinned("zeta", pinned);
+            assertFalse(result.isError(), result.toString());
+            assertEquals(pinned, ((ObjectNode) result.structuredContent()).path("pinned").asBoolean());
+            assertEquals("{\"pinned\":" + pinned + "}", requestBody);
+        }
+        assertEquals(List.of("PUT /__fleet/api/mocks/zeta/pin", "PUT /__fleet/api/mocks/zeta/pin"), requests);
+    }
+
     @BeforeEach
     void startServer() {
         responseBody = CONFIG_VIEW;

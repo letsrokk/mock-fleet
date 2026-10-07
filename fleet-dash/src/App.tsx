@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import refreshIcon from "./assets/refresh.svg";
 import trashIcon from "./assets/trash.svg";
+import pinIcon from "./assets/pin.svg";
+import pinnedIcon from "./assets/pin-filled.svg";
 import {
   draftFromConfig,
   emptyConfig,
@@ -43,6 +45,7 @@ type MockRow = {
   mockId: string;
   podName: string | null;
   status: MockStatus;
+  pinned: boolean;
   message: string | null;
 };
 
@@ -121,6 +124,7 @@ export default function App() {
   const [loadingMappingsTree, setLoadingMappingsTree] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pinningMockId, setPinningMockId] = useState<string | null>(null);
   const [busyMockId, setBusyMockId] = useState<string | null>(null);
   const [busyMappingPath, setBusyMappingPath] = useState<string | null>(null);
   const [busyMappingFolder, setBusyMappingFolder] = useState<string | null>(null);
@@ -300,6 +304,31 @@ export default function App() {
       if (mountedRef.current) {
         setLoadingMappingsTree(false);
       }
+    }
+  }
+
+  async function togglePin(row: MockRow) {
+    setPinningMockId(row.mockId);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`${MOCKS_API_PATH}/${encodeURIComponent(row.mockId)}/pin`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pinned: !row.pinned })
+      });
+      if (!response.ok) {
+        throw new Error(await errorMessage(response, `Unable to change pin for '${row.mockId}'.`));
+      }
+      const result = await response.json() as { pinned: boolean };
+      setRows((currentRows) => currentRows.map((current) => current.mockId === row.mockId
+        ? { ...current, pinned: result.pinned }
+        : current));
+      showToast(`${result.pinned ? "Pinned" : "Unpinned"} mock '${row.mockId}'.`);
+    } catch (pinError) {
+      setError(pinError instanceof Error ? pinError.message : "Unable to change pin.");
+    } finally {
+      setPinningMockId(null);
     }
   }
 
@@ -966,9 +995,20 @@ export default function App() {
                   </td>
                   <td className="actions" data-label="Actions">
                     <button
+                      className="pin-button"
+                      onClick={() => togglePin(row)}
+                      disabled={!canDelete || pinningMockId !== null || busyMockId === row.mockId}
+                      aria-label={`${row.pinned ? "Unpin" : "Pin"} ${row.mockId}`}
+                      aria-pressed={Boolean(row.pinned)}
+                      aria-busy={pinningMockId === row.mockId}
+                      title={row.pinned ? "Unpin to resume idle cleanup" : "Pin to prevent idle cleanup"}
+                    >
+                      <img src={row.pinned ? pinnedIcon : pinIcon} alt="" aria-hidden="true" className="pin-icon" />
+                    </button>
+                    <button
                       className={!canDelete ? "danger-button unavailable" : "danger-button"}
                       onClick={() => requestKillMock(row.mockId)}
-                      disabled={!canDelete || busyMockId === row.mockId}
+                      disabled={!canDelete || busyMockId === row.mockId || pinningMockId === row.mockId}
                       aria-label={busyMockId === row.mockId
                         ? "Deleting"
                         : canDelete

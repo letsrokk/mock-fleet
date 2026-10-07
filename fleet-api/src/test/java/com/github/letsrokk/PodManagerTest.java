@@ -1446,6 +1446,53 @@ class PodManagerTest {
     }
 
     @Test
+    void pinningKeepsAnIdleMockUntilUnpinnedAndAllowsManualDeletion() {
+        HazelcastInstance hazelcast = newTestHazelcast("pin-idle-");
+        PodState state = new PodState(hazelcast);
+        AtomicInteger deleted = new AtomicInteger();
+        PodManager manager = new PodManager() {
+            @Override
+            boolean deletePod(MockPodRef pod, String mockId) {
+                deleted.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            boolean deletePod(String podName, String mockId) {
+                deleted.incrementAndGet();
+                return true;
+            }
+        };
+        manager.podState = state;
+        manager.podTransitionCoordinator = new PodTransitionCoordinator(hazelcast);
+        manager.inactivityThreshold = Duration.ofSeconds(30);
+        try {
+            assertFalse(manager.setPinned("missing", true));
+            state.getPods().put("demo", new MockPodRef("pod", "10.0.0.1"));
+            state.setLastAccessTime("pod", System.currentTimeMillis() - 60_000);
+            assertTrue(manager.setPinned("demo", true));
+            assertTrue(manager.setPinned("demo", true));
+            manager.cleanUpIdlePods();
+            assertEquals(0, deleted.get());
+            assertTrue(state.getPod("demo").pinned());
+            assertTrue(state.backfillRuntimeVersion("demo", state.getPod("demo"), "3.13.2"));
+            assertTrue(state.getPod("demo").pinned());
+            assertTrue(manager.setPinned("demo", false));
+            manager.cleanUpIdlePods();
+            assertEquals(1, deleted.get());
+            assertEquals(null, state.getPod("demo"));
+            state.getPods().put("demo", new MockPodRef("replacement", "10.0.0.2"));
+            assertFalse(state.getPod("demo").pinned());
+            assertTrue(manager.setPinned("demo", true));
+            assertEquals(PodManager.DeleteMockResult.DELETED, manager.deleteMock("demo"));
+            assertEquals(2, deleted.get());
+        } finally {
+            state.removePodListener();
+            hazelcast.getLifecycleService().terminate();
+        }
+    }
+
+    @Test
     void cleanUpIdlePodsDeletesOnlyStalePodsWithRecordedAccessTime() {
         KubernetesClient kubernetesClient = mock(KubernetesClient.class);
         PodState podState = mock(PodState.class);
@@ -1473,6 +1520,9 @@ class PodManagerTest {
         when(podOperations.inNamespace("test")).thenReturn(namespacedPods);
         when(namespacedPods.withName("stale-pod")).thenReturn(stalePodResource);
         when(podState.getPods()).thenReturn(pods);
+        when(podState.getPod("stale")).thenReturn(stalePod);
+        when(podState.getPod("current")).thenReturn(currentPod);
+        when(podState.getPod("unknown")).thenReturn(unknownPod);
         when(podState.getLastAccessTime("stale-pod")).thenReturn(System.currentTimeMillis() - 60_000);
         when(podState.getLastAccessTime("current-pod")).thenReturn(System.currentTimeMillis());
         when(podState.getLastAccessTime("unknown-pod")).thenReturn(null);

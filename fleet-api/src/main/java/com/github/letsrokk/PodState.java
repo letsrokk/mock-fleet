@@ -107,7 +107,18 @@ public class PodState {
             return false;
         }
         return podMap.replace(mockId, expected,
-                new MockPodRef(expected.podName(), expected.podIp(), runtimeVersion));
+                new MockPodRef(expected.podName(), expected.podIp(), runtimeVersion, expected.pinned()));
+    }
+
+    public boolean setPinned(String mockId, boolean pinned) {
+        podLifecycleMap.lock(mockId);
+        try {
+            MockPodRef pod = podMap.get(mockId);
+            return pod != null && podMap.replace(mockId, pod,
+                    new MockPodRef(pod.podName(), pod.podIp(), pod.runtimeVersion(), pinned));
+        } finally {
+            podLifecycleMap.unlock(mockId);
+        }
     }
 
     public StartClaim claimStart(String mockId, long nowEpochMillis, long startupLeaseMillis) {
