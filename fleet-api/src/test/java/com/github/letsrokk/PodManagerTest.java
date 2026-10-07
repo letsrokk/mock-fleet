@@ -58,7 +58,8 @@ import static org.mockito.Mockito.when;
 class PodManagerTest {
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final FleetMetrics metrics = new FleetMetrics(registry);
+    private final WireMockOptions metricOptions = new WireMockOptions();
+    private final FleetMetrics metrics = new FleetMetrics(registry, metricOptions);
 
     @Test
     void concurrentCallersShareOneMeasuredStartAttempt() throws Exception {
@@ -344,6 +345,8 @@ class PodManagerTest {
 
     @Test
     void startupFailureDeletesTheAttemptPodBeforePublishingFailedState() {
+        metricOptions.setUserConfig(WireMockConfigDocument.of(List.of(), null,
+                Map.of("demo", new WireMockPodConfig(List.of(), null))));
         PodState podState = mock(PodState.class);
         AtomicBoolean deletionAttempted = new AtomicBoolean();
         PodCreationException createFailure = new PodCreationException("create rejected");
@@ -381,7 +384,8 @@ class PodManagerTest {
         assertTrue(deletionAttempted.get());
         verify(podState).failStart("demo", "attempt-1", createFailure);
         verify(podState).removeLastAccessTime("mock-fleet-demo-attempt-1");
-        assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "error").counter().count());
+        assertEquals(1, registry.get("mock_fleet_start_attempts").tag("outcome", "error")
+                .tag("mock_id", "demo").counter().count());
         assertEquals(1, registry.get("mock_fleet_start_duration").tag("outcome", "error").timer().count());
     }
 

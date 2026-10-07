@@ -76,7 +76,7 @@ public class MockCapacity {
                     activeMockIds = activeMockIds();
                     if (!activeMockIds.contains(mockId)
                             && activeMockIds.size() >= maxActiveMocks) {
-                        metrics.startRejected("capacity");
+                        metrics.startRejected("capacity", mockId);
                         throw new CapacityExceededException(maxActiveMocks);
                     }
                 }
