@@ -30,6 +30,7 @@ public class WireMockOptions {
     private WireMockConfigDocument baselineConfig = WireMockConfigDocument.empty();
     private WireMockConfigDocument userConfig = WireMockConfigDocument.empty();
     private WireMockConfigDocument effectiveConfig = WireMockConfigDocument.empty();
+    private Runnable configChangeListener = () -> { };
 
     @PostConstruct
     void load() {
@@ -139,8 +140,14 @@ public class WireMockOptions {
                           WireMockConfigDocument effective, WireMockVersionCatalog catalog) {
     }
 
+    synchronized void onConfigChange(Runnable listener) {
+        this.configChangeListener = listener;
+        listener.run();
+    }
+
     private void rebuildEffectiveConfig() {
         this.effectiveConfig = baselineConfig.merge(userConfig);
+        configChangeListener.run();
     }
 
     private void validateSourceOptions(WireMockConfigDocument document, String mockId, WireMockVersion version) {

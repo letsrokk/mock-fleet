@@ -270,7 +270,7 @@ Confirm one target per API/proxy/MCP replica in Prometheus and `up{job="mock-fle
 
 ### API lifecycle metrics
 
-Fixed outcome and reason combinations are registered before their first event with `mock_id="unknown"`. Start attempt, rejection, and pod deletion counters, plus the per-mock startup timer, include `mock_id`. Only valid IDs in the merged baseline and user mock configuration receive their own label; unconfigured or invalid IDs use `unknown`, including valid mocks started using defaults. Configured mock series are registered on their first event. Labels omit pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
+All outcome and reason combinations are registered at zero for configured mocks and `mock_id="unknown"` on startup and configuration reload. Start attempt, rejection, and pod deletion counters, plus the per-mock startup timer, include `mock_id`. Only valid IDs in the merged baseline and user mock configuration receive their own label; unconfigured or invalid IDs use `unknown`, including valid mocks started using defaults. Reloads register newly configured mocks without resetting existing counters or timer samples. Series for removed mocks remain exported until the API replica restarts; their counters retain the last value, while timer `_max` values expire normally. Subsequent events for a removed mock use `unknown`. Labels omit pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
@@ -287,6 +287,8 @@ Fixed outcome and reason combinations are registered before their first event wi
 | `mock_fleet_start_reservations_reclaimed_total` | Counter | Stale/expired startup reservations successfully removed by reconciliation. |
 
 The `|` notation in the table lists allowed label values. Startup duration exports `_bucket`, `_count`, and `_sum` series, with bucket boundaries of 0.1, 0.5, 1, 2, 5, 10, 30, 60, and 120 seconds, plus `+Inf`.
+
+Zero initialization provides a baseline for rate and increase queries once scraped. Events before the first scrape can still be missed. Prometheus [`increase()`](https://prometheus.io/docs/prometheus/latest/querying/functions/#increase) extrapolates over the query window, so its result can differ from the integer event count.
 
 The aggregate `mock_fleet_start_duration_seconds` metric retains its existing labels and buckets; it has no `mock_id`. Sum the counters over `mock_id` to preserve existing totals. For per-mock average startup time, use:
 

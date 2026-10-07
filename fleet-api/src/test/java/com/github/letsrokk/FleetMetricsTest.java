@@ -20,6 +20,72 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FleetMetricsTest {
 
     @Test
+    void initializesConfiguredSeriesOnStartupAndReloadWithoutResettingExistingValues() {
+        WireMockOptions options = new WireMockOptions();
+        options.load(new ByteArrayInputStream("""
+                wiremock:
+                  default: {}
+                  mocks:
+                    - id: mock-a
+                    - id: invalid_id
+                """.getBytes(StandardCharsets.UTF_8)));
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        try {
+            FleetMetrics metrics = new FleetMetrics(registry, options);
+            assertZeroSeries(registry, "mock-a");
+            assertFalse(registry.scrape().contains("invalid_id"));
+
+            metrics.finishStart(metrics.start(), "error", "mock-a");
+            options.setUserConfig(WireMockConfigDocument.of(List.of(), null,
+                    Map.of("mock-b", new WireMockPodConfig(List.of(), null))));
+            assertZeroSeries(registry, "mock-b");
+            assertEquals(1, registry.get("mock_fleet_start_attempts")
+                    .tags("mock_id", "mock-a", "outcome", "error").counter().count());
+
+            metrics.finishStart(metrics.start(), "error", "mock-b");
+            options.setUserConfig(WireMockConfigDocument.empty());
+            assertEquals(1, registry.get("mock_fleet_start_attempts")
+                    .tags("mock_id", "mock-b", "outcome", "error").counter().count());
+            assertTrue(registry.scrape().contains("mock_id=\"mock-b\""));
+            options.setUserConfig(WireMockConfigDocument.of(List.of(), null,
+                    Map.of("mock-b", new WireMockPodConfig(List.of(), null))));
+            assertEquals(1, registry.get("mock_fleet_start_attempts")
+                    .tags("mock_id", "mock-b", "outcome", "error").counter().count());
+            options.load(new ByteArrayInputStream("""
+                    wiremock:
+                      default: {}
+                      mocks:
+                        - id: mock-c
+                    """.getBytes(StandardCharsets.UTF_8)));
+            assertZeroSeries(registry, "mock-c");
+        } finally {
+            registry.close();
+        }
+    }
+
+    private void assertZeroSeries(PrometheusMeterRegistry registry, String mockId) {
+        CollectorRegistry samples = registry.getPrometheusRegistry();
+        for (String outcome : List.of("success", "error", "cancelled", "rejected")) {
+            assertEquals(0.0, samples.getSampleValue("mock_fleet_start_attempts_total",
+                    new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
+            if (!"rejected".equals(outcome)) {
+                for (String suffix : List.of("count", "sum", "max")) {
+                    assertEquals(0.0, samples.getSampleValue("mock_fleet_start_duration_by_mock_seconds_" + suffix,
+                            new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
+                }
+            }
+        }
+        for (String reason : List.of("capacity", "queue_full")) {
+            assertEquals(0.0, samples.getSampleValue("mock_fleet_start_rejections_total",
+                    new String[]{"mock_id", "reason"}, new String[]{mockId, reason}));
+        }
+        for (String outcome : List.of("deleted", "already_absent", "error")) {
+            assertEquals(0.0, samples.getSampleValue("mock_fleet_pod_deletions_total",
+                    new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
+        }
+    }
+
+    @Test
     void exportsBoundedMockLabelsAndSeparateDurationWithoutBuckets() {
         MockClock clock = new MockClock();
         WireMockOptions options = new WireMockOptions();
