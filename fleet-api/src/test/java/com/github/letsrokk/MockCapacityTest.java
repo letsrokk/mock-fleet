@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 class MockCapacityTest {
 
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final FleetMetrics metrics = new FleetMetrics(registry);
+    private final FleetMetrics metrics = new FleetMetrics(registry, new WireMockOptions());
 
     private HazelcastInstance hazelcast;
     private HazelcastInstance secondHazelcast;
@@ -62,7 +62,7 @@ class MockCapacityTest {
         firstReplica.metrics = metrics;
         MockCapacity secondReplica = new MockCapacity(secondHazelcast, config(2, 2, 2));
         SimpleMeterRegistry secondRegistry = new SimpleMeterRegistry();
-        secondReplica.metrics = new FleetMetrics(secondRegistry);
+        secondReplica.metrics = new FleetMetrics(secondRegistry, new WireMockOptions());
         metrics.bindState(hazelcast, config(2, 2, 2));
         secondReplica.metrics.bindState(secondHazelcast, config(2, 2, 2));
         CountDownLatch ready = new CountDownLatch(3);

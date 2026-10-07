@@ -270,7 +270,7 @@ Confirm one target per API/proxy/MCP replica in Prometheus and `up{job="mock-fle
 
 ### API lifecycle metrics
 
-All fixed label combinations are registered before their first event. Labels omit mock IDs, pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
+Fixed outcome and reason combinations are registered before their first event with `mock_id="unknown"`. Start attempt, rejection, and pod deletion counters, plus the per-mock startup timer, include `mock_id`. Only valid IDs in the merged baseline and user mock configuration receive their own label; unconfigured or invalid IDs use `unknown`, including valid mocks started using defaults. Configured mock series are registered on their first event. Labels omit pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
@@ -279,13 +279,24 @@ All fixed label combinations are registered before their first event. Labels omi
 | `mock_fleet_capacity_limit` | Gauge | Configured cluster-wide maximum active mocks. |
 | `mock_fleet_start_queue_depth` | Local gauge | Tasks waiting in this API replica's startup executor. |
 | `mock_fleet_start_workers_active` | Local gauge | Startup tasks executing on this replica. |
-| `mock_fleet_start_attempts_total{outcome="success\|error\|rejected\|cancelled"}` | Counter | One terminal outcome per submitted startup attempt; callers sharing an existing attempt add no event. Executor rejection is `rejected`; shutdown cancellation of queued tasks is `cancelled`; interrupted executing starts are `error`. |
-| `mock_fleet_start_rejections_total{reason="capacity\|queue_full"}` | Counter | Admission rejections at the cluster capacity limit or the local executor queue. |
+| `mock_fleet_start_attempts_total{outcome="success\|error\|rejected\|cancelled",mock_id="…"}` | Counter | One terminal outcome per submitted startup attempt; callers sharing an existing attempt add no event. Executor rejection is `rejected`; shutdown cancellation of queued tasks is `cancelled`; interrupted executing starts are `error`. |
+| `mock_fleet_start_rejections_total{reason="capacity\|queue_full",mock_id="…"}` | Counter | Admission rejections at the cluster capacity limit or the local executor queue. |
 | `mock_fleet_start_duration_seconds{outcome="success\|error\|cancelled"}` | Histogram | Accepted startup time from submission through completion, including time in the queue. Rejected attempts are excluded. |
-| `mock_fleet_pod_deletions_total{outcome="deleted\|already_absent\|error"}` | Counter | Deletion operation outcomes, including idempotent requests; not a count of distinct deleted pods. |
+| `mock_fleet_start_duration_by_mock_seconds{outcome="success\|error\|cancelled",mock_id="…"}` | Timer | The same accepted startup duration per configured mock; exports `_count`, `_sum`, and `_max`, without buckets. |
+| `mock_fleet_pod_deletions_total{outcome="deleted\|already_absent\|error",mock_id="…"}` | Counter | Deletion operation outcomes, including idempotent requests; not a count of distinct deleted pods. |
 | `mock_fleet_start_reservations_reclaimed_total` | Counter | Stale/expired startup reservations successfully removed by reconciliation. |
 
 The `|` notation in the table lists allowed label values. Startup duration exports `_bucket`, `_count`, and `_sum` series, with bucket boundaries of 0.1, 0.5, 1, 2, 5, 10, 30, 60, and 120 seconds, plus `+Inf`.
+
+The aggregate `mock_fleet_start_duration_seconds` metric retains its existing labels and buckets; it has no `mock_id`. Sum the counters over `mock_id` to preserve existing totals. For per-mock average startup time, use:
+
+```promql
+sum by (mock_id, outcome) (rate(mock_fleet_start_duration_by_mock_seconds_sum[5m]))
+/
+sum by (mock_id, outcome) (rate(mock_fleet_start_duration_by_mock_seconds_count[5m]))
+```
+
+The per-mock `_max` is a time-window maximum; use `max` rather than `sum` across mocks or replicas.
 
 Shared gauges read Hazelcast state without reconciliation, state changes, or Kubernetes calls. They are non-atomic observations and can temporarily include stale reservations until ordinary reconciliation removes them. There is no stopped gauge because retained stopped records are not a complete mock inventory. Counters and histograms record events on the handling replica and reset on process restart; they are operational telemetry, not a durable audit log.
 
