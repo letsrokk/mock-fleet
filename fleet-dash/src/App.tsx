@@ -1360,6 +1360,18 @@ export default function App() {
     );
   }
 
+  function renderMappingsEmptyState(title: string, description: string) {
+    return (
+      <div className="mappings-empty-state">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z" />
+        </svg>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
+    );
+  }
+
   function renderMappingsPanel() {
     if (!mappingsView.enabled) {
       return (
@@ -1390,6 +1402,30 @@ export default function App() {
               ? "Persistent mappings storage is disabled."
               : "Checking mappings storage..."}
           </p>
+        </section>
+      );
+    }
+
+    if (!loadingMappings && mappingsLoaded && !mappingsStatusError && mappingsView.mockIds.length === 0) {
+      return (
+        <section className="panel mappings-empty-panel">
+          <div className="panel-header">
+            <span>Mapping folders</span>
+            <button
+              className="panel-refresh-button"
+              onClick={() => void loadMappings(false)}
+              disabled={refreshing}
+              aria-label={refreshing ? "Refreshing mappings" : "Refresh mappings"}
+            >
+              {refreshing ? (
+                <span className="refresh-spinner" aria-hidden="true"></span>
+              ) : (
+                <img src={refreshIcon} alt="" aria-hidden="true" className="refresh-icon" />
+              )}
+            </button>
+          </div>
+          {renderMappingsEmptyState("No mapping folders yet",
+            "Persist mappings in WireMock, then refresh this list to find them.")}
         </section>
       );
     }
@@ -1462,7 +1498,7 @@ export default function App() {
                 </a>
               </span>
             ) : (
-              <span className="mono">No mock selected</span>
+              <span>Mapping files</span>
             )}
             {selectedMappingsMockId ? (
               <button
@@ -1472,9 +1508,7 @@ export default function App() {
               >
                 {busyMappingFolder === selectedMappingsMockId ? "Deleting..." : "Delete folder"}
               </button>
-            ) : (
-              <span className="panel-status">Stored mapping files</span>
-            )}
+            ) : null}
           </div>
           {loadingMappingsTree ? <p className="state">Loading file tree...</p> : null}
           {!loadingMappingsTree && selectedMappingsMockId && mappingsTree ? (
@@ -1489,15 +1523,16 @@ export default function App() {
                   </button>
                 </div>
               ) : null}
-              <div className="file-tree">
-                {mappingsTree.children.length > 0
-                  ? mappingsTree.children.map((child) => renderFileNode(child, 0))
-                  : <p className="state inline-state">No mapping files.</p>}
-              </div>
+              {mappingsTree.children.length > 0 ? (
+                <div className="file-tree">
+                  {mappingsTree.children.map((child) => renderFileNode(child, 0))}
+                </div>
+              ) : renderMappingsEmptyState("No mapping files",
+                "This mock’s folder is empty. Persist mappings in WireMock, then refresh.")}
             </>
           ) : null}
           {!loadingMappingsTree && !selectedMappingsMockId ? (
-            <p className="state">Select a mock folder to view mapping files.</p>
+            renderMappingsEmptyState("Select a mock", "Choose a folder from the list to view its mapping files.")
           ) : null}
         </section>
       </section>
