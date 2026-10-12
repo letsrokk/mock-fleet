@@ -361,6 +361,8 @@ kubectl -n "$NAMESPACE" edit configmap <release-fullname>-wiremock-user-config
 
 ## Persistent Mappings
 
+The dashboard lists mock folders without walking their contents; empty folders are included. Selecting a mock reads only its current file tree. Refresh reloads the folder list and selected tree. With default settings, startup does not scan mappings. Storage-status checks never access the filesystem. Periodic folder-index refresh is disabled by default (`fleet.api.mappings.refreshInterval: "off"`); set a duration such as `5m` to enable it. File trees are always read on demand, regardless of that interval.
+
 Persistent mappings are disabled by default. To enable them, set `storage.persistent=true`, use `storage.type=s3`, and provide `storage.s3.bucket`.
 
 The chart creates a static S3 CSI PV/PVC and mounts it into:
@@ -443,6 +445,7 @@ The admission policy accepts zero identity projections or exactly one projection
 | `fleet.api.maxActiveMocks` | `20` | Maximum distinct mocks that may be reserved, starting, or running across API replicas. Exhaustion returns HTTP 429 `MOCK_CAPACITY_EXHAUSTED`. |
 | `fleet.api.maxConcurrentStarts` | `4` | Pod-start workers per API replica; must not exceed cluster-wide `maxActiveMocks`. Aggregate workers equal this value times the API replica count. |
 | `fleet.api.queuedStartCapacity` | `16` | Waiting start positions per API replica. Aggregate positions equal this value times the API replica count; replica-local saturation returns HTTP 503 `MOCK_START_QUEUE_FULL`. |
+| `fleet.api.mappings.refreshInterval` | `"off"` | Periodic shallow folder-index refresh interval; `off` disables it. |
 | `fleet.api.mappings.maxDepth` | `32` | Inclusive maximum relative depth for mapping tree reads and recursive deletion. |
 | `fleet.api.mappings.maxEntries` | `10000` | Inclusive maximum examined entries, including the selected mock root, for one mapping traversal. |
 | `fleet.api.networkPolicy.enabled` | `true` | Render API ingress isolation. Disabling it exposes HTTP and Hazelcast to any connectivity the cluster otherwise permits. |

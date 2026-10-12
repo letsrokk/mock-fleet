@@ -37,7 +37,7 @@ class FleetApiClientTest {
         vertx = Vertx.vertx();
         server = vertx.createHttpServer().requestHandler(request -> request.bodyHandler(body -> {
             requests.add(new CapturedRequest(request.method().name(), request.uri(), body.toString()));
-            String response = request.uri().equals("/__fleet/api/mappings") ? "{\"enabled\":true}" : responseBody;
+            String response = request.uri().equals("/__fleet/api/mappings/status") ? "{\"enabled\":true}" : responseBody;
             int status = request.method().name().equals("DELETE")
                     && request.uri().startsWith("/__fleet/api/mocks/") ? 200 : responseStatus;
             Runnable reply = () -> request.response().setStatusCode(status)
@@ -80,7 +80,7 @@ class FleetApiClientTest {
                 "GET /__fleet/api/config/options?version=3.13.2%2Bcandidate",
                 "PUT /__fleet/api/config/orders",
                 "DELETE /__fleet/api/config/orders",
-                "GET /__fleet/api/mappings"), requests.stream().map(CapturedRequest::summary).toList());
+                "GET /__fleet/api/mappings/status"), requests.stream().map(CapturedRequest::summary).toList());
         assertFalse(requests.stream().anyMatch(request -> request.uri().contains("/internal/mocks/")));
 
         var update = mapper.readTree(requests.stream()

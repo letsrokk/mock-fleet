@@ -51,6 +51,7 @@
                 "mappings": {
                   "type": "object",
                   "properties": {
+                    "refreshInterval": { "type": "string", "minLength": 1 },
                     "maxDepth": { "type": "integer", "minimum": 1 },
                     "maxEntries": { "type": "integer", "minimum": 1 }
                   },

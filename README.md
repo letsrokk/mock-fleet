@@ -96,7 +96,7 @@ Inspect persisted mock mapping files.
 
 ![Persisted Mappings tab](docs/screenshots/persisted-mappings.png)
 
-The Mappings tab reads a backend cache of folders and file trees, refreshed at startup and every 30 seconds. Set `MOCK_FLEET_MAPPINGS_REFRESH_INTERVAL` to tune the interval (for example, `1m`). Dashboard deletions refresh the cache immediately; external file changes appear after the next refresh. File downloads always read the current file.
+The Mappings tab lists mock folders without traversing their contents, including empty folders. Selecting a mock reads only that mock’s current file tree. Use Refresh to reload the folder list and selected tree. Periodic folder-index refresh is disabled by default; set `fleet.api.mappings.refreshInterval` in Helm (or `MOCK_FLEET_MAPPINGS_REFRESH_INTERVAL`) to a duration such as `5m` to enable it. File downloads always read the current file.
 
 ## Components
 

@@ -22,6 +22,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @QuarkusTest
@@ -35,6 +36,7 @@ class MappingsResourceTest {
 
     @Test
     void configuresDefaultMappingTraversalLimits() {
+        assertThat(config.getValue("mock-fleet.mappings.refresh-interval", String.class), is("off"));
         assertThat(config.getValue("mock-fleet.mappings.max-depth", Integer.class), is(32));
         assertThat(config.getValue("mock-fleet.mappings.max-entries", Integer.class), is(10_000));
     }
@@ -57,13 +59,38 @@ class MappingsResourceTest {
                 .body("routing.mode", is("HOST"))
                 .body("routing.host", is("mock-fleet.localhost"));
 
+        verify(mappingsService).refreshCache();
         verify(mappingsService).cachedView();
+    }
+
+    @Test
+    void readsCachedFolderIndexWhenRefreshIsDisabled() {
+        when(mappingsService.cachedView()).thenReturn(new MappingsService.MappingsView(
+                true, List.of("demo"), null, new MappingsService.RoutingView("HOST", "mock-fleet.localhost")));
+
+        given().queryParam("refresh", false).get("/__fleet/api/mappings")
+                .then().statusCode(200).body("mockIds[0]", is("demo"));
+
+        verify(mappingsService).cachedView();
+        verifyNoMoreInteractions(mappingsService);
+    }
+
+    @Test
+    void getsStorageStatusWithoutRefreshingMappings() {
+        when(mappingsService.status()).thenReturn(new MappingsService.MappingsView(
+                true, List.of(), null, new MappingsService.RoutingView("HOST", "mock-fleet.localhost")));
+
+        given().get("/__fleet/api/mappings/status")
+                .then().statusCode(200).body("enabled", is(true)).body("mockIds.size()", is(0));
+
+        verify(mappingsService).status();
+        verifyNoMoreInteractions(mappingsService);
     }
 
     @Test
     void getsMappingTree() {
         MappingsService.FileNode child = new MappingsService.FileNode("mapping.json", "mapping.json", false, List.of());
-        when(mappingsService.cachedTree("demo"))
+        when(mappingsService.tree("demo"))
                 .thenReturn(new MappingsService.FileNode("demo", "", true, List.of(child)));
 
         given()
@@ -74,7 +101,8 @@ class MappingsResourceTest {
                 .body("name", is("demo"))
                 .body("children[0].path", is("mapping.json"));
 
-        verify(mappingsService).cachedTree("demo");
+        verify(mappingsService).tree("demo");
+        verifyNoMoreInteractions(mappingsService);
     }
 
     @Test

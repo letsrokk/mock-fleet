@@ -189,9 +189,26 @@ paths:
   /__fleet/api/mappings:
     get:
       operationId: listMappingFolders
+      parameters:
+        - name: refresh
+          in: query
+          schema:
+            type: boolean
+            default: true
+          description: Refresh the shallow folder index before returning it; false uses the cached index.
       responses:
         "200":
           description: Mapping storage status and folders.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MappingsView"
+  /__fleet/api/mappings/status:
+    get:
+      operationId: getMappingStorageStatus
+      responses:
+        "200":
+          description: Mapping storage status without accessing the filesystem; mockIds is empty.
           content:
             application/json:
               schema:

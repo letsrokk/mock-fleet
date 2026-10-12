@@ -76,6 +76,7 @@ fleet:
     maxConcurrentStarts: 4
     queuedStartCapacity: 16
     mappings:
+      refreshInterval: "off"
       maxDepth: 32
       maxEntries: 10000
     networkPolicy:
