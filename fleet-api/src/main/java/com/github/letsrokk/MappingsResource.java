@@ -2,6 +2,7 @@ package com.github.letsrokk;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -23,14 +24,23 @@ public class MappingsResource {
     MappingsService mappingsService;
 
     @GET
-    public MappingsService.MappingsView getMappings() {
+    public MappingsService.MappingsView getMappings(@QueryParam("refresh") @DefaultValue("true") boolean refresh) {
+        if (refresh) {
+            mappingsService.refreshCache();
+        }
         return mappingsService.cachedView();
+    }
+
+    @GET
+    @Path("/status")
+    public MappingsService.MappingsView getStatus() {
+        return mappingsService.status();
     }
 
     @GET
     @Path("/{mockId}/tree")
     public MappingsService.FileNode getTree(@PathParam("mockId") String mockId) {
-        return mappingsService.cachedTree(mockId);
+        return mappingsService.tree(mockId);
     }
 
     @DELETE

@@ -165,7 +165,7 @@ public final class FleetApiClient {
     }
 
     public boolean storageEnabled() {
-        return json(HttpMethod.GET, "/__fleet/api/mappings", null).path("enabled").asBoolean(false);
+        return json(HttpMethod.GET, "/__fleet/api/mappings/status", null).path("enabled").asBoolean(false);
     }
 
     private JsonNode json(HttpMethod method, String path, JsonNode payload) {

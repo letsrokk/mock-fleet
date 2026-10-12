@@ -139,6 +139,8 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
   const optionCollapseStateReadyRef = useRef(hasStoredSet(OPTION_GROUP_COLLAPSE_STORAGE_KEY));
   const configRequestRef = useRef(new LatestConfigRequest());
+  const mappingsTreeRequestRef = useRef(new LatestConfigRequest());
+  const selectedMappingsMockIdRef = useRef<string | null>(null);
 
   const selectedMock = useMemo(
     () => configView?.mocks.find((mock) => mock.mockId === selectedMockId) ?? null,
@@ -242,6 +244,21 @@ export default function App() {
     }
   }
 
+  async function loadMappingsStatus() {
+    try {
+      const response = await fetch(`${MAPPINGS_API_PATH}/status`);
+      if (!response.ok) {
+        throw new Error(await errorMessage(response, "Unable to load mappings storage status."));
+      }
+      const data = normalizeMappingsView((await response.json()) as MappingsView);
+      setMappingsView((current) => ({ ...current, enabled: data.enabled, routing: data.routing }));
+      setMappingsLoaded(true);
+    } catch (loadError) {
+      setMappingsLoaded(true);
+      setMappingsStatusError(loadError instanceof Error ? loadError.message : "Unable to load mappings storage status.");
+    }
+  }
+
   async function loadMappings(showSpinner: boolean) {
     if (showSpinner) {
       setLoadingMappings(true);
@@ -255,14 +272,18 @@ export default function App() {
         throw new Error(await errorMessage(response, `Unable to load mappings (${response.status})`));
       }
       const data = normalizeMappingsView((await response.json()) as MappingsView & { routing?: RoutingView });
-      const nextSelected = selectedMappingsMockId && data.mockIds.includes(selectedMappingsMockId)
-        ? selectedMappingsMockId
-        : data.mockIds[0] ?? null;
+      const currentSelected = selectedMappingsMockIdRef.current;
+      const nextSelected = currentSelected && data.mockIds.includes(currentSelected)
+        ? currentSelected
+        : null;
       setMappingsView(data);
       setMappingsLoaded(true);
       setMappingsStatusError(data.error ?? null);
+      selectedMappingsMockIdRef.current = nextSelected;
       setSelectedMappingsMockId(nextSelected);
       if (!data.enabled || nextSelected === null) {
+        mappingsTreeRequestRef.current.invalidate();
+        setLoadingMappingsTree(false);
         setMappingsTree(null);
         setCollapsedMappingPaths(new Set());
       } else {
@@ -283,6 +304,7 @@ export default function App() {
   }
 
   async function loadMappingsTree(mockId: string, showSpinner: boolean) {
+    const request = mappingsTreeRequestRef.current.begin();
     if (showSpinner) {
       setLoadingMappingsTree(true);
     }
@@ -293,15 +315,21 @@ export default function App() {
         throw new Error(await errorMessage(response, `Unable to load mappings for '${mockId}'.`));
       }
       const data = (await response.json()) as MappingFileNode;
+      if (!mappingsTreeRequestRef.current.isCurrent(request)) {
+        return;
+      }
       setMappingsTree(data);
       setCollapsedMappingPaths(new Set());
       setError(null);
     } catch (loadError) {
+      if (!mappingsTreeRequestRef.current.isCurrent(request)) {
+        return;
+      }
       setMappingsTree(null);
       setCollapsedMappingPaths(new Set());
       setError(loadError instanceof Error ? loadError.message : "Unable to load mappings tree.");
     } finally {
-      if (mountedRef.current) {
+      if (mountedRef.current && mappingsTreeRequestRef.current.isCurrent(request)) {
         setLoadingMappingsTree(false);
       }
     }
@@ -519,6 +547,7 @@ export default function App() {
         throw new Error(await errorMessage(response, "Unable to delete mappings folder."));
       }
       await loadMappings(false);
+      selectedMappingsMockIdRef.current = null;
       setSelectedMappingsMockId(null);
       setMappingsTree(null);
       showToast(`Deleted mappings folder '${mockId}'.`);
@@ -558,6 +587,7 @@ export default function App() {
   }
 
   function selectMappingsMock(mockId: string) {
+    selectedMappingsMockIdRef.current = mockId;
     setSelectedMappingsMockId(mockId);
     setCollapsedMappingPaths(new Set());
     void loadMappingsTree(mockId, true);
@@ -772,7 +802,7 @@ export default function App() {
 
     window.addEventListener("hashchange", syncTabFromHash);
     syncTabFromHash();
-    void loadMappings(false);
+    void loadMappingsStatus();
 
     return () => {
       mountedRef.current = false;
@@ -848,10 +878,10 @@ export default function App() {
   }, [collapsedOptionGroups, configView, optionCatalog]);
 
   useEffect(() => {
-    if (activeTab === "mappings" && mappingsView.enabled) {
+    if (activeTab === "mappings") {
       void loadMappings(true);
     }
-  }, [activeTab, mappingsView.enabled]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!confirmDialog) {

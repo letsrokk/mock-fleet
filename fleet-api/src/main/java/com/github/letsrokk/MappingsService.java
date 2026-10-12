@@ -1,8 +1,6 @@
 package com.github.letsrokk;
 
-import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
-import jakarta.enterprise.event.Observes;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -44,20 +42,13 @@ public class MappingsService {
 
     private volatile MappingSnapshot snapshot;
 
-    void initializeCache(@Observes StartupEvent event) {
-        refreshCache();
-    }
-
-    @Scheduled(every = "${mock-fleet.mappings.refresh-interval:30s}",
-            delayed = "${mock-fleet.mappings.refresh-interval:30s}",
+    @Scheduled(every = "${mock-fleet.mappings.refresh-interval:off}",
             concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     synchronized void refreshCache() {
-        Map<String, FileNode> trees = new HashMap<>();
         try {
-            MappingsView view = scanView(trees);
-            snapshot = new MappingSnapshot(view, view.error() == null ? Map.copyOf(trees) : Map.of(), null);
+            snapshot = new MappingSnapshot(view(), null);
         } catch (ApiException e) {
-            snapshot = new MappingSnapshot(null, Map.of(), e);
+            snapshot = new MappingSnapshot(null, e);
         }
     }
 
@@ -65,27 +56,15 @@ public class MappingsService {
         return cachedSnapshot().view();
     }
 
-    FileNode cachedTree(String mockId) {
-        ensureEnabled();
-        validateMockId(mockId);
-        MappingSnapshot current = cachedSnapshot();
-        if (current.view().error() != null) {
-            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
-                    current.view().error(), true, false, Map.of("mockId", mockId));
-        }
-        FileNode tree = current.trees().get(mockId);
-        if (tree == null) {
-            throw error(Response.Status.NOT_FOUND, "MAPPING_FOLDER_NOT_FOUND", "Mappings folder not found.",
-                    false, false, Map.of("mockId", mockId));
-        }
-        return tree;
+    MappingsView status() {
+        return new MappingsView(enabled(), List.of(), null, routingView());
     }
 
     private MappingSnapshot cachedSnapshot() {
         MappingSnapshot current = snapshot;
         if (current == null) {
-            throw error(Response.Status.SERVICE_UNAVAILABLE, "MAPPINGS_STORAGE_ERROR",
-                    "Mappings index is not ready yet.", true, false, Map.of());
+            refreshCache();
+            current = snapshot;
         }
         if (current.failure() != null) {
             throw current.failure();
@@ -93,14 +72,10 @@ public class MappingsService {
         return current;
     }
 
-    private record MappingSnapshot(MappingsView view, Map<String, FileNode> trees, ApiException failure) {
+    private record MappingSnapshot(MappingsView view, ApiException failure) {
     }
 
     MappingsView view() {
-        return scanView(new HashMap<>());
-    }
-
-    private MappingsView scanView(Map<String, FileNode> trees) {
         RoutingView routing = routingView();
         if (!enabled()) {
             return new MappingsView(false, List.of(), null, routing);
@@ -119,8 +94,7 @@ public class MappingsService {
                 BasicFileAttributes attributes = Files.readAttributes(child, BasicFileAttributes.class,
                         LinkOption.NOFOLLOW_LINKS);
                 String mockId = child.getFileName().toString();
-                if (attributes.isDirectory() && VALID_MOCK_ID.matcher(mockId).matches()
-                        && containsMappingFile(child, attributes, budget, trees)) {
+                if (attributes.isDirectory() && VALID_MOCK_ID.matcher(mockId).matches()) {
                     mockIds.add(mockId);
                 }
             }
@@ -133,19 +107,6 @@ public class MappingsService {
                     "Unable to list mappings root: " + ioErrorMessage(e.getCause()), routing);
         } catch (IOException e) {
             return new MappingsView(true, List.of(), "Unable to list mappings root: " + ioErrorMessage(e), routing);
-        }
-    }
-
-    private boolean containsMappingFile(Path directory, BasicFileAttributes attributes,
-                                        TraversalBudget budget, Map<String, FileNode> trees) throws IOException {
-        TraversalEntry root = entry(directory, "", 0, attributes);
-        try (SecureTraversalSession session = openSecureRoot(root)) {
-            List<TraversalEntry> manifest = discover(session, root, budget, true);
-            validateManifest(session, manifest);
-            trees.put(directory.getFileName().toString(), assembleTree(manifest));
-            return manifest.stream().anyMatch(entry -> entry.identity().regularFile());
-        } catch (TraversalStorageException e) {
-            throw e.ioException();
         }
     }
 
@@ -313,15 +274,8 @@ public class MappingsService {
 
     private List<TraversalEntry> discover(SecureTraversalSession session, TraversalEntry root) {
         TraversalBudget budget = new TraversalBudget(config.mappings().maxDepth(), config.mappings().maxEntries());
-        return discover(session, root, budget, false);
-    }
-
-    private List<TraversalEntry> discover(SecureTraversalSession session, TraversalEntry root,
-                                          TraversalBudget budget, boolean rootAlreadyVisited) {
         List<TraversalEntry> manifest = new ArrayList<>();
-        if (!rootAlreadyVisited) {
-            budget.visit(0);
-        }
+        budget.visit(0);
         manifest.add(root);
         discoverSecure(root.path(), root, session.root(), budget, manifest);
         return List.copyOf(manifest);

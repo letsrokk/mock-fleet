@@ -48,54 +48,58 @@ class MappingsServiceTest {
     Path mappingsRoot;
 
     @Test
-    void cachedListingsChangeOnlyWhenRefreshedAndFilesStayLive() throws IOException {
+    void cachesOnlyFolderIndexWhileSelectedTreeAndFilesStayLive() throws IOException {
         Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
-        Path mapping = root.resolve("mapping.json");
-        Files.writeString(mapping, "old");
+        Path mapping = Files.writeString(root.resolve("mapping.json"), "old");
         MappingsService service = service(true);
-        service.refreshCache();
+        assertEquals(List.of("demo"), service.cachedView().mockIds());
 
         Files.writeString(mapping, "new");
         Files.writeString(root.resolve("added.json"), "{}");
         Files.createDirectories(mappingsRoot.resolve("other"));
-        Files.writeString(mappingsRoot.resolve("other/mapping.json"), "{}");
 
         assertEquals(List.of("demo"), service.cachedView().mockIds());
-        assertEquals(List.of("mapping.json"), service.cachedTree("demo").children().stream()
+        assertEquals(List.of("added.json", "mapping.json"), service.tree("demo").children().stream()
                 .map(MappingsService.FileNode::name).toList());
         assertEquals("new", readOpenedFile(service.file("demo", "mapping.json")));
 
         service.refreshCache();
         assertEquals(List.of("demo", "other"), service.cachedView().mockIds());
-        assertEquals(List.of("added.json", "mapping.json"), service.cachedTree("demo").children().stream()
-                .map(MappingsService.FileNode::name).toList());
-
         service.deleteFolder("demo");
-        assertEquals("demo", service.cachedTree("demo").name());
         service.refreshCache();
         assertEquals(List.of("other"), service.cachedView().mockIds());
-        assertEquals(404, assertThrows(ApiException.class, () -> service.cachedTree("demo"))
+        assertEquals(404, assertThrows(ApiException.class, () -> service.tree("demo"))
                 .getResponse().getStatus());
     }
 
     @Test
-    void cacheReportsTraversalFailureAndRecoversOnRefresh() throws IOException {
-        Path root = Files.createDirectories(mappingsRoot.resolve("demo"));
-        Files.writeString(root.resolve("mapping.json"), "{}");
+    void cacheReportsIndexEntryLimitAndRecoversOnRefresh() throws IOException {
+        Files.createDirectories(mappingsRoot.resolve("alpha"));
+        Files.createDirectories(mappingsRoot.resolve("beta"));
         MappingsService service = service(true, 10, 2);
         service.refreshCache();
-        assertEquals(List.of("demo"), service.cachedView().mockIds());
+        assertEquals(List.of("alpha", "beta"), service.cachedView().mockIds());
 
-        Path extra = Files.writeString(root.resolve("extra.json"), "{}");
+        Path extra = Files.createDirectory(mappingsRoot.resolve("extra"));
         service.refreshCache();
         assertApiError(assertThrows(ApiException.class, service::cachedView),
                 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
                 Map.of("limit", "maxEntries", "maximum", 2));
-        assertThrows(ApiException.class, () -> service.cachedTree("demo"));
+        assertEquals("alpha", service.tree("alpha").name());
 
         Files.delete(extra);
         service.refreshCache();
-        assertEquals(List.of("demo"), service.cachedView().mockIds());
+        assertEquals(List.of("alpha", "beta"), service.cachedView().mockIds());
+    }
+
+    @Test
+    void storageStatusDoesNotAccessTheFilesystem() {
+        MappingsService service = service(true);
+        try (MockedStatic<Files> files = mockStatic(Files.class)) {
+            assertTrue(service.status().enabled());
+            assertEquals(List.of(), service.status().mockIds());
+            files.verifyNoInteractions();
+        }
     }
 
     @Test
@@ -127,7 +131,7 @@ class MappingsServiceTest {
     }
 
     @Test
-    void listsOnlyValidNonEmptyMockDirectories() throws IOException {
+    void listsValidMockDirectoriesIncludingEmptyFolders() throws IOException {
         Files.createDirectories(mappingsRoot.resolve("beta/nested"));
         Files.createDirectories(mappingsRoot.resolve("alpha"));
         Files.createDirectories(mappingsRoot.resolve("not_valid"));
@@ -141,20 +145,22 @@ class MappingsServiceTest {
         MappingsService.MappingsView view = service.view();
 
         assertTrue(view.enabled());
-        assertEquals(List.of("alpha", "beta"), view.mockIds());
+        assertEquals(List.of("alpha", "beta", "empty"), view.mockIds());
         assertEquals("HOST", view.routing().mode());
         assertEquals("mock-fleet.localhost", view.routing().host());
     }
 
     @Test
-    void rejectsMappingsIndexBeyondTheSharedDepthBudget() throws IOException {
-        createDirectoryChain("demo", 3);
-        MappingsService service = service(true, 2, 100);
+    void folderListingAndSelectedTreeDoNotTraverseOtherMockTrees() throws IOException {
+        createDirectoryChain("other", 3);
+        Path selected = Files.createDirectories(mappingsRoot.resolve("demo"));
+        Files.writeString(selected.resolve("mapping.json"), "{}");
+        MappingsService service = service(true, 2, 2);
 
-        ApiException exception = assertThrows(ApiException.class, service::view);
-
-        assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
-                Map.of("limit", "maxDepth", "maximum", 2));
+        assertEquals(List.of("demo", "other"), service.view().mockIds());
+        assertEquals(List.of("mapping.json"), service.tree("demo").children().stream()
+                .map(MappingsService.FileNode::name).toList());
+        assertThrows(ApiException.class, () -> service.tree("other"));
     }
 
     @Test
@@ -163,12 +169,12 @@ class MappingsServiceTest {
             Path root = Files.createDirectories(mappingsRoot.resolve(mockId));
             Files.writeString(root.resolve("mapping.json"), "{}");
         }
-        MappingsService service = service(true, 10, 5);
+        MappingsService service = service(true, 10, 2);
 
         ApiException exception = assertThrows(ApiException.class, service::view);
 
         assertApiError(exception, 400, "MAPPINGS_TRAVERSAL_LIMIT", false,
-                Map.of("limit", "maxEntries", "maximum", 5));
+                Map.of("limit", "maxEntries", "maximum", 2));
     }
 
     @Test
@@ -177,7 +183,7 @@ class MappingsServiceTest {
             Path root = Files.createDirectories(mappingsRoot.resolve(mockId));
             Files.writeString(root.resolve("mapping.json"), "{}");
         }
-        MappingsService service = service(true, 10, 4);
+        MappingsService service = service(true, 10, 2);
 
         MappingsService.MappingsView view = service.view();
 

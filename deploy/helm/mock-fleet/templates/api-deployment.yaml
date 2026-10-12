@@ -126,6 +126,8 @@ spec:
               value: {{ .Values.fleet.proxy.routing.mode | quote }}
             - name: MOCK_FLEET_PROXY_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
+            - name: MOCK_FLEET_MAPPINGS_REFRESH_INTERVAL
+              value: {{ .Values.fleet.api.mappings.refreshInterval | quote }}
             - name: MOCK_FLEET_MAPPINGS_MAX_DEPTH
               value: {{ .Values.fleet.api.mappings.maxDepth | quote }}
             - name: MOCK_FLEET_MAPPINGS_MAX_ENTRIES
