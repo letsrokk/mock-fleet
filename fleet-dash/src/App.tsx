@@ -75,7 +75,7 @@ type MappingFileNode = {
 
 type ConfigCatalogState = {
   configView: ConfigView;
-  optionCatalog: OptionCatalogView;
+  optionCatalog: OptionCatalogView | null;
 };
 
 const MOCKS_API_PATH = "/__fleet/api/mocks";
@@ -165,7 +165,7 @@ export default function App() {
         : data;
       const nextSelected = selectedMockId && nextData.mockIds.includes(selectedMockId)
         ? selectedMockId
-        : nextData.mockIds[0] ?? null;
+        : null;
       const loaded = await loadEditorCatalog(
         nextData,
         nextSelected,
@@ -177,7 +177,7 @@ export default function App() {
       const { target, catalog } = loaded;
       setConfigCatalogState({ configView: nextData, optionCatalog: catalog });
       setSelectedMockId(nextSelected);
-      if (nextSelected && !preserveDraft) {
+      if (nextSelected && catalog && !preserveDraft) {
         const mock = nextData.mocks.find((item) => item.mockId === nextSelected);
         setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
         setDraftWireMockVersion(target.draftWireMockVersion);
@@ -231,7 +231,7 @@ export default function App() {
       setConfigCatalogState({ configView: data, optionCatalog: catalog });
       setSelectedMockId(mockId);
       const mock = mockId === null ? null : data.mocks.find((item) => item.mockId === mockId);
-      setDraft(draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options));
+      setDraft(catalog ? draftFromConfig(mock?.effective ?? emptyConfig(), catalog.options) : emptyDraft());
       setDraftWireMockVersion(target?.draftWireMockVersion ?? null);
       setConfigDirty(false);
       setError(null);
@@ -1063,7 +1063,7 @@ export default function App() {
 
   function renderConfigPanel() {
     const catalog = optionCatalog;
-    if (configView === null || catalog === null) {
+    if (configView === null) {
       const unavailableStatus = loadingConfig
         ? "Loading configuration..."
         : "Configuration unavailable.";
@@ -1093,7 +1093,7 @@ export default function App() {
     }
 
     const resourcesCollapsed = collapsedOptionGroups.has(RESOURCE_GROUP_NAME);
-    const incompatibleOptions = selectedMock
+    const incompatibleOptions = selectedMock && catalog
       ? incompatibleDraftOptionNames(
         [...selectedMock.baseline.options, ...selectedMock.user.options, ...selectedMock.effective.options],
         draft,
@@ -1177,7 +1177,7 @@ export default function App() {
         </aside>
 
         <section className="panel editor-panel">
-          {selectedMock ? (
+          {selectedMock && catalog ? (
             <>
               <div className="panel-header">
                 <span className="mock-heading">
@@ -1353,7 +1353,18 @@ export default function App() {
               </div>
             </>
           ) : (
-            <p className="state">Add a mock id to create an editable override.</p>
+            <>
+              <div className="panel-header"><span>Mock configuration</span></div>
+              <div className="editor-empty-state">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M3 7h4m4 0h10M3 17h10m4 0h4M9 4v6m6 4v6" />
+                  <circle cx="9" cy="7" r="2" />
+                  <circle cx="15" cy="17" r="2" />
+                </svg>
+                <h2>Select a mock</h2>
+                <p>Choose a mock from the list to view and edit its configuration.</p>
+              </div>
+            </>
           )}
         </section>
       </section>
@@ -1362,7 +1373,7 @@ export default function App() {
 
   function renderMappingsEmptyState(title: string, description: string) {
     return (
-      <div className="mappings-empty-state">
+      <div className="editor-empty-state">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3z" />
         </svg>

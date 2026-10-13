@@ -540,7 +540,7 @@ h1 {
   min-height: 340px;
 }
 
-.mappings-empty-state {
+.editor-empty-state {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -552,7 +552,7 @@ h1 {
   text-align: center;
 }
 
-.mappings-empty-state svg {
+.editor-empty-state svg {
   width: 32px;
   height: 32px;
   margin-bottom: 6px;
@@ -563,7 +563,7 @@ h1 {
   stroke-linejoin: round;
 }
 
-.mappings-empty-state h2 {
+.editor-empty-state h2 {
   margin: 0;
   color: var(--text);
   font-size: 1rem;
@@ -571,7 +571,7 @@ h1 {
   line-height: 1.35;
 }
 
-.mappings-empty-state p {
+.editor-empty-state p {
   max-width: 43ch;
   margin: 0;
   color: var(--text-secondary);

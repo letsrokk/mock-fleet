@@ -10,6 +10,15 @@ import {
 import type { ConfigView } from "./apiContracts";
 
 describe("configuration catalog loading", () => {
+  it("does not load an editor catalog before a mock is selected", async () => {
+    const fetcher = vi.fn();
+
+    const result = await loadEditorCatalog(configView(), null, undefined, fetcher);
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result.catalog).toBeNull();
+  });
+
   it("loads config and the versioned option catalog from their separate API endpoints", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ mockIds: ["orders"], defaultVersion: "3.13.2" }))
@@ -115,7 +124,7 @@ describe("configuration catalog loading", () => {
 
     expect(fetcher).toHaveBeenCalledWith(`/__fleet/api/config/options?version=${expectedVersion}`);
     expect(result.target.desiredVersion).toBe(expectedVersion);
-    expect(result.catalog.wireMockVersion).toBe(expectedVersion);
+    expect(result.catalog?.wireMockVersion).toBe(expectedVersion);
   });
 });
 
