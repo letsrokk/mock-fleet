@@ -72,7 +72,7 @@ export async function loadEditorCatalog(
   }
   return {
     target,
-    catalog: await loadOptionCatalogForVersion(target.desiredVersion, fetcher)
+    catalog: mockId === null ? null : await loadOptionCatalogForVersion(target.desiredVersion, fetcher)
   };
 }
 
