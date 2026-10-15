@@ -151,6 +151,50 @@ The tool requests count metadata with WireMock's `limit=0`, so journal request a
 
 Patches follow JSON Merge Patch semantics: omitted fields are preserved, nested objects are merged, `null` removes a field, and arrays are replaced as a whole. The patch must be an object and cannot contain `id`, `uuid`, or `persistent`; use `persist_stub` or `unpersist_stub` for persistence changes. Outbound policy checks apply to the complete merged mapping before writing it. Persistent patches reuse the recoverable update transaction, including retry reconciliation. Results use the same compact summary and optional `includeBody` as other stub writes. Updates are serialized with other MCP mutations for that mock; external Admin API writers are not covered by that lock.
 
+## Common workflows
+
+Replace the sample UUID below with the relevant ID from `list_stubs`.
+
+### Rename or edit selected stubs
+
+Rename with `patch_stub`:
+
+```json
+{"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c","patch":{"name":"orders lookup"}}
+```
+
+For matcher or priority edits, use the same tool with the relevant patch fields. To apply the same change to several selected IDs, call `patch_stub` once per ID and inspect each result. Omitted fields stay unchanged; there is no batch patch operation. Use `update_stub` only when replacing the complete mapping.
+
+### Restart and wait for readiness
+
+A restart discards temporary stubs, journal entries, scenarios, and recording state. Persist any stubs that must survive first.
+
+Call `stop_mock` with `{"mockId":"orders"}` and wait for a successful STOPPED result. Then call `start_mock` with the same arguments. If it returns STARTING, wait `retryAfterMs` and call `start_mock` again until RUNNING. A WireMock tool called during startup can instead return `MOCK_STARTING`; wait `details.retryAfterMs` before retrying that tool. Mappings saved to backing storage reload when the replacement pod starts.
+
+### Inspect matchers or response bodies
+
+Use the default compact `get_stub` or `list_stubs` output to inspect matchers and metadata. Request a full mapping only when the response body is needed, for example with `get_stub`:
+
+```json
+{"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c","includeBody":true}
+```
+
+There is no arbitrary `fields` selector. Select the fields you need from the returned mapping; keep `includeBody` omitted for routine inspection.
+
+### Monitor proxy fall-throughs
+
+Find the proxy catch-all mapping in `list_stubs` by its `response.proxyBaseUrl`, then pass its ID to `get_journal_summary`:
+
+```json
+{"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c"}
+```
+
+Read that stub's `count`, and check `requestJournalDisabled` before interpreting zero counts. The tool reports retained counts, not unmatched or proxied URL lists. Counts can decrease after eviction or resets and do not measure lifetime traffic.
+
+### Review recording candidates before deletion
+
+Read `warnings`, `scenarioStubs`, and `possibleDuplicates` after `stop_recording` or `snapshot_requests`. For each possible duplicate, review `responseEqual` and both mappings' scenario steps before deciding whether either mapping is redundant. If `duplicateAnalysisComplete` is false, some comparisons or hints are missing. Even complete analysis covers exact matcher JSON only, so an absent hint never proves that a route is new. Use `delete_stubs` only for IDs you have selected after review, and inspect every deletion outcome.
+
 ## Encoded bodies
 
 `send_request` and `put_body_file` accept bytes only through an encoded body object. `sizeBytes` describes the decoded byte length. Body files have no stored media-type metadata; set the serving media type in the response headers of the stub that references the file.

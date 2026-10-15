@@ -234,7 +234,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "start_mock", description = "Start a mock pod or report that startup is still in progress.",
+    @Tool(name = "start_mock", description = "Start a mock pod or report startup progress. When status is STARTING, wait retryAfterMs and call start_mock again until RUNNING. To restart a mock, call stop_mock first and wait for STOPPED.",
             outputSchema = @Tool.OutputSchema(from = OutputSchemas.StartMock.class, generator = ToolOutputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse startMock(@ToolArg(description = "Mock ID") String mockId) {
@@ -248,7 +248,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "stop_mock", description = "Stop an active mock pod. The next proxied request may start it again.",
+    @Tool(name = "stop_mock", description = "Stop a mock pod and wait for STOPPED. To restart, then call start_mock and follow its readiness instructions. Stopping discards temporary stubs, journal entries, scenarios, and recording state; mappings saved to backing storage reload on startup. The next proxied request may start the mock again.",
             outputSchema = @Tool.OutputSchema(from = OutputSchemas.StopMock.class, generator = ToolOutputSchemaGenerator.class),
             annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse stopMock(@ToolArg(description = "Mock ID") String mockId) {
@@ -276,7 +276,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_stubs", description = "List WireMock stubs without inline response bodies by default. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_stubs", description = "List WireMock stubs without inline response bodies by default. Keep compact output for matcher inspection; set includeBody=true only when response bodies are needed. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listStubs(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
@@ -306,7 +306,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "get_stub", description = "Get a WireMock stub by ID without inline response bodies by default. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_stub", description = "Get a WireMock stub by ID without inline response bodies by default. Inspect matchers and metadata compactly; set includeBody=true only when the response body is needed. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
@@ -328,7 +328,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "update_stub", description = "Replace a complete WireMock stub mapping while preserving its persistence state. Use patch_stub for name, matcher, or priority edits without resending the body. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse updateStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping,
@@ -342,7 +342,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "patch_stub", description = "Partially update a stub using JSON Merge Patch: omitted fields are preserved, null removes fields, arrays are replaced. Cannot change id, uuid, or persistent; use persistence tools. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "patch_stub", description = "Partially update a stub using JSON Merge Patch: omitted fields are preserved, null removes fields, arrays are replaced. Rename by setting patch.name; for several stubs, call once per selected ID. Cannot change id, uuid, or persistent; use persistence tools. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse patchStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "JSON Merge Patch object for a native WireMock mapping") Map<String, Object> patch,
@@ -483,7 +483,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "get_journal_summary", description = "Count retained journal entries and requests served by each current stub without transferring event bodies. Optional stubId selects one stub, including a proxy catch-all. Per-stub counts are paginated; totals cover the whole retained journal, not lifetime traffic. Calls are not a single snapshot.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.JournalSummary.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_journal_summary", description = "Count retained journal entries and requests served by each current stub without transferring event bodies. Returns counts, not request URLs. To monitor proxy fall-throughs, pass the proxy catch-all stubId. Per-stub counts are paginated; totals cover the whole retained journal, not lifetime traffic. Calls are not a single snapshot.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.JournalSummary.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getJournalSummary(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Only count requests served by this stub UUID", required = false) String stubId,
             @ToolArg(description = "Page size for current stub counts", required = false) Integer limit,
@@ -588,7 +588,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "stop_recording", description = "Stop recording and return temporary candidate IDs, scenario steps, journal warnings, and advisory same-matcher duplicate hints against existing stubs. A full journal may have evicted earlier requests.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "stop_recording", description = "Stop recording and return temporary candidate IDs, scenario steps, journal warnings, and advisory duplicate hints against existing stubs. Hints compare exact matcher JSON. An absent hint does not prove a candidate is new. Check duplicateAnalysisComplete, responseEqual, and scenario metadata before deleting. A full journal may have evicted earlier requests.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse stopRecording(@ToolArg(description = "Mock ID") String mockId) {
         return wireMock("stop_recording", mockId, () -> coordinator.serialized(mockId, () ->
                 recordingReview(mockId, "Stopped recording for " + mockId + ". Review candidates with get_stub.",
@@ -596,7 +596,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, journal warnings, and advisory same-matcher duplicate hints. Set snapshot.repeatsAsScenarios=false to ignore repeat requests.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, journal warnings, and advisory duplicate hints. Hints compare exact matcher JSON. An absent hint does not prove a candidate is new. Check duplicateAnalysisComplete, responseEqual, and scenario metadata before deleting. Set snapshot.repeatsAsScenarios=false to ignore repeat requests.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse snapshotRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock snapshot JSON") Map<String, Object> snapshot) {
         return wireMock("snapshot_requests", mockId, () -> coordinator.serialized(mockId, () -> {
