@@ -30,6 +30,144 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class FleetMcpToolsTrafficTest {
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void stubReadsOmitLargeInlineBodiesUnlessRequested(boolean includeBody) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        String body = "é".repeat(includeBody ? 10 : 3000);
+        ObjectNode mapping = mapper.createObjectNode().put("id", "stub-1");
+        mapping.putObject("request").put("url", "/orders");
+        mapping.putObject("response").put("status", 200).put("body", body);
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, mapping.toString());
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .getStub("orders", "stub-1", includeBody);
+            assertFalse(response.isError());
+            JsonNode stub = ((JsonNode) response.structuredContent()).path("stub");
+            assertEquals("/orders", stub.path("request").path("url").asText());
+            assertEquals(includeBody, stub.path("response").has("body"));
+            if (!includeBody) {
+                assertEquals(6000, stub.path("bodyBytes").asInt());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void stubCreationReturnsSummaryUnlessFullMappingRequested(boolean includeBody) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        String mapping = "{\"id\":\"stub-1\",\"name\":\"orders\",\"persistent\":false,"
+                + "\"request\":{\"url\":\"/orders\"},\"response\":{\"body\":\"hello\"}}";
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(201, mapping);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).createStub("orders",
+                    Map.of("request", Map.of("url", "/orders"), "response", Map.of("body", "hello")), includeBody);
+            assertFalse(response.isError());
+            JsonNode stub = ((JsonNode) response.structuredContent()).path("stub");
+            assertEquals("stub-1", stub.path("id").asText());
+            assertEquals(includeBody, stub.has("response"));
+            assertEquals(includeBody, stub.has("request"));
+            if (!includeBody) {
+                assertEquals(5, stub.path("bodyBytes").asInt());
+                assertFalse(stub.path("persistent").asBoolean());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"jsonBody", "base64Body", "bodyFileName"})
+    void compactStubReadsDescribeOtherBodyRepresentations(String field) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        ObjectNode mapping = mapper.createObjectNode().put("id", "stub-1");
+        ObjectNode body = mapping.putObject("response");
+        if (field.equals("jsonBody")) {
+            body.putObject(field).put("id", 42);
+        } else {
+            body.put(field, field.equals("base64Body") ? "AAEC" : "payload.json");
+        }
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, mapping.toString());
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).getStub("orders", "stub-1", null);
+            assertFalse(response.isError());
+            JsonNode stub = ((JsonNode) response.structuredContent()).path("stub");
+            if (field.equals("bodyFileName")) {
+                assertTrue(stub.path("bodyBytes").isNull());
+                assertEquals("payload.json", stub.path("response").path(field).asText());
+            } else {
+                assertFalse(stub.path("response").has(field));
+                assertEquals(field.equals("jsonBody") ? 9 : 3, stub.path("bodyBytes").asInt());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void oversizedFullStubResultsReportWhetherAWriteAlreadyOccurred(boolean mutation) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"id\":\"stub-1\",\"response\":{\"body\":\"" + "x".repeat(5000) + "\"}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            FleetMcpTools tools = tools(fleet.client(), transport, mapper);
+            ToolResponse response = mutation ? tools.createStub("orders", Map.of(), true)
+                    : tools.getStub("orders", "stub-1", true);
+            assertTrue(response.isError());
+            var error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("RESULT_TOO_LARGE", error.code());
+            assertEquals(mutation, error.stateMayHaveChanged());
+        }
+    }
+
+    @Test
+    void persistingALargeAlreadyPersistentStubReturnsASmallSummary() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        String mapping = "{\"id\":\"stub-1\",\"persistent\":true,\"response\":{\"body\":\""
+                + "x".repeat(60_000) + "\"}}";
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, mapping);
+        transport.respond(404, "");
+        transport.respond(200, mapping);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, "{\"enabled\":true}");
+            ToolResponse response = tools(fleet.client(), transport, mapper, config(true))
+                    .persistStub("orders", "stub-1", null);
+            assertFalse(response.isError());
+            JsonNode stub = ((JsonNode) response.structuredContent()).path("stub");
+            assertEquals(60_000, stub.path("bodyBytes").asInt());
+            assertTrue(stub.path("persistent").asBoolean());
+            assertFalse(stub.has("response"));
+        }
+    }
+
+    @Test
+    void stubListingOmitsABodyLargerThanTheToolPayloadLimit() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"mappings\":[{\"id\":\"stub-1\",\"response\":{\"body\":\""
+                + "x".repeat(5000) + "\"}}],\"meta\":{\"total\":1}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null, null);
+            assertFalse(response.isError());
+            JsonNode stub = ((JsonNode) response.structuredContent()).path("stubs").get(0);
+            assertFalse(stub.path("response").has("body"));
+            assertEquals(5000, stub.path("bodyBytes").asInt());
+        }
+    }
+
     @Test
     void createStubCannotRaceRecorderSnapshotForTheSameMock() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
@@ -45,7 +183,7 @@ class FleetMcpToolsTrafficTest {
                     new McpToolExecutor(registry), metrics);
 
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                var create = executor.submit(() -> tools.createStub("orders", Map.of()));
+                var create = executor.submit(() -> tools.createStub("orders", Map.of(), null));
                 assertTrue(transport.createEntered.await(1, TimeUnit.SECONDS));
 
                 var snapshot = executor.submit(() -> tools.snapshotRequests("orders", Map.of()));
@@ -127,7 +265,7 @@ class FleetMcpToolsTrafficTest {
             fleet.respond(200, running());
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
-            ToolResponse starting = tools.listStubs("orders", 50, null);
+            ToolResponse starting = tools.listStubs("orders", 50, null, null);
             assertTrue(starting.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) starting.structuredContent()).error();
             assertEquals("MOCK_STARTING", error.code());
@@ -135,7 +273,7 @@ class FleetMcpToolsTrafficTest {
             assertEquals(1000, error.details().get("retryAfterMs"));
             assertEquals(0, transport.requestCount());
 
-            ToolResponse running = tools.listStubs("orders", 50, null);
+            ToolResponse running = tools.listStubs("orders", 50, null, null);
             assertFalse(running.isError());
             ObjectNode result = (ObjectNode) running.structuredContent();
             assertEquals("orders", result.path("mockId").asText());
@@ -157,7 +295,7 @@ class FleetMcpToolsTrafficTest {
                     """);
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
-            ToolResponse response = tools.getStub("orders", "stub-1");
+            ToolResponse response = tools.getStub("orders", "stub-1", null);
 
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
@@ -323,7 +461,7 @@ class FleetMcpToolsTrafficTest {
                     """);
             FleetMcpTools tools = tools(fleet.client(), transport, mapper);
 
-            ToolResponse response = tools.getStub("orders", "stub-1");
+            ToolResponse response = tools.getStub("orders", "stub-1", null);
 
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
@@ -342,7 +480,7 @@ class FleetMcpToolsTrafficTest {
             fleet.respond(200, running());
 
             ToolResponse response = tools(fleet.client(), transport, mapper)
-                    .listUnmatchedStubs("orders", 50, null);
+                    .listUnmatchedStubs("orders", 50, null, null);
 
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
@@ -364,7 +502,7 @@ class FleetMcpToolsTrafficTest {
             fleet.respond(200, running());
             fleet.respond(200, configRuntime("3.13.2", "3.0.4"));
 
-            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null);
+            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null, null);
 
             assertFalse(response.isError());
             assertEquals(List.of("POST /__fleet/api/mocks/orders/start", "GET /__fleet/api/config"), fleet.requests());
@@ -381,7 +519,7 @@ class FleetMcpToolsTrafficTest {
             fleet.respond(200, running());
             fleet.respond(200, configRuntime("3.13.2", null));
 
-            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null);
+            ToolResponse response = tools(fleet.client(), transport, mapper).listStubs("orders", 50, null, null);
 
             assertTrue(response.isError());
             McpToolExecutor.ErrorContent error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();

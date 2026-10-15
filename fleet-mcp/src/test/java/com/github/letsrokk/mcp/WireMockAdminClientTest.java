@@ -263,8 +263,9 @@ class WireMockAdminClientTest {
         assertEquals(13, transport.requestCount());
     }
 
-    @Test
-    void persistTransitionUsesVerifiedRecoveryTransactionWithoutSavingEveryStub() throws Exception {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 2 * 1024 * 1024})
+    void persistTransitionUsesVerifiedRecoveryTransactionWithoutSavingEveryStub(int bodySize) throws Exception {
         String before = """
                 {"id":"server-id","uuid":"server-id","persistent":false,
                  "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
@@ -273,11 +274,18 @@ class WireMockAdminClientTest {
                 {"id":"server-id","uuid":"server-id","persistent":true,
                  "request":{"method":"GET","url":"/orders"},"response":{"status":200}}
                 """;
+        ObjectNode beforeMapping = (ObjectNode) mapper.readTree(before);
+        ObjectNode afterMapping = (ObjectNode) mapper.readTree(after);
+        ((ObjectNode) beforeMapping.path("response")).put("body", "x".repeat(bodySize));
+        ((ObjectNode) afterMapping.path("response")).put("body", "x".repeat(bodySize));
+        before = beforeMapping.toString();
+        after = afterMapping.toString();
         enqueueSuccessfulPersistentReplacement("persist", before, after);
 
         JsonNode result = client.setPersistent("orders", "server-id", true);
 
         assertTrue(result.path("persistent").asBoolean());
+        assertEquals(bodySize, result.path("response").path("body").asText().length());
         assertEquals(HttpMethod.POST, transport.requestAt(2).method());
         assertEquals(HttpMethod.DELETE, transport.requestAt(5).method());
         assertEquals(HttpMethod.POST, transport.requestAt(7).method());
@@ -798,14 +806,16 @@ class WireMockAdminClientTest {
     }
 
     @Test
-    void listStubsReducesTheRawPageSizeWhenAResponseExceedsThePayloadLimit() {
+    void listStubsReducesTheRawPageSizeWhenAResponseExceedsTheMappingBudget() {
+        var limited = new WireMockAdminClient(transport, mapper, 1024 * 1024, Set.of(), null,
+                1024 * 1024, 100_000);
         String oversized = "{\"mappings\":[],\"padding\":\"" + "x".repeat(1024 * 1024) + "\",\"meta\":{\"total\":0}}";
         transport.respond(200, oversized);
         transport.respond(200, """
                 {"mappings":[{"id":"visible-id"}],"meta":{"total":1}}
                 """);
 
-        JsonNode page = client.listStubs("orders", 1, 0);
+        JsonNode page = limited.listStubs("orders", 1, 0);
 
         assertEquals("visible-id", page.path("mappings").get(0).path("id").asText());
         assertEquals("/__admin/mappings?limit=2&offset=0", transport.requestAt(0).target());

@@ -43,6 +43,8 @@ class FleetProxyClientTest {
                 request.response().setChunked(true);
                 request.response().write("{\"requests\":[{\"id\":1},{\"id\":2},{\"id\":3},");
                 request.response().write(Buffer.buffer(new byte[2048]));
+            } else if (request.uri().equals("/orders/large-mapping")) {
+                request.response().end("x".repeat(2048));
             } else {
                 request.response().setStatusCode(207).putHeader("X-Upstream", "yes").end("response");
             }
@@ -125,6 +127,21 @@ class FleetProxyClientTest {
 
         assertEquals("RESULT_TOO_LARGE", error.code());
         client.close();
+    }
+
+    @Test
+    void internalMappingBudgetAllowsLargeRequestsAndResponsesWhileNormalCallsStayBounded() {
+        var client = client(RoutingMode.PATH);
+        var request = new TransportRequest(HttpMethod.POST, "/large-mapping", Map.of(), new byte[2048]);
+        try {
+            assertThrows(McpOperationException.class, () -> client.execute("orders", request));
+            assertEquals(2048, client.execute("orders", request, 4096).body().length);
+            assertEquals(2048, captured.get().body().length);
+            assertThrows(McpOperationException.class, () -> client.execute("orders",
+                    new TransportRequest(HttpMethod.GET, "/large-mapping", Map.of(), new byte[0])));
+        } finally {
+            client.close();
+        }
     }
 
     private FleetProxyClient client(RoutingMode mode) {

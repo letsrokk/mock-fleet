@@ -92,6 +92,12 @@ class McpRegistrationTest {
             assertFalse(registeredTool.path("inputSchema").path("additionalProperties").asBoolean(true),
                     registeredTool.path("name").asText());
         }
+        for (String name : List.of("get_stub", "list_stubs", "list_unmatched_stubs", "create_stub",
+                "update_stub", "persist_stub", "unpersist_stub")) {
+            JsonNode schema = tool(tools, name).path("inputSchema");
+            assertEquals("boolean", schema.path("properties").path("includeBody").path("type").asText(), name);
+            assertFalse(textValues(schema.path("required")).contains("includeBody"), name);
+        }
         JsonNode resources = updateConfig.path("properties").path("resources");
         assertTrue(resources.path("properties").has("requests"), updateConfig.toPrettyString());
         assertTrue(resources.path("properties").has("limits"));

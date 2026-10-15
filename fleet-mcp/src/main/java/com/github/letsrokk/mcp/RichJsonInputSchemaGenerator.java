@@ -49,6 +49,10 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
             }
             default -> throw new IllegalArgumentException("Unsupported rich input schema tool: " + tool.name());
         }
+        if (tool.name().equals("create_stub") || tool.name().equals("update_stub")) {
+            properties.put("includeBody", new JsonObject().put("type", "boolean")
+                    .put("description", "Return the full mapping with inline response bodies; defaults to false"));
+        }
         return new JsonObject().put("type", "object").put("properties", properties)
                 .put("required", required).put("additionalProperties", false);
     }

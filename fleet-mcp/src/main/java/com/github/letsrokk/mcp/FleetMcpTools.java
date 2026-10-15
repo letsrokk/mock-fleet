@@ -276,27 +276,29 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_stubs", description = "List WireMock stubs. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_stubs", description = "List WireMock stubs without inline response bodies by default. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listStubs(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
-            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
+            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         JsonNode scope = scope(mockId, null);
         return wireMock("list_stubs", mockId, () -> McpToolExecutor.ToolResult.of("Listed stubs for " + mockId + ".",
-                collectionResult(mockId, wireMock.listStubs(mockId, pageSize(limit),
+                stubCollectionResult(includeBody, mockId, wireMock.listStubs(mockId, pageSize(limit),
                         mappingCursorPosition("list_stubs", scope, cursor)),
                         "mappings", "stubs", "list_stubs", scope)));
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests. Requires WireMock 3.13+ and may start the pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests, omitting inline response bodies by default. Requires WireMock 3.13+ and may start the pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listUnmatchedStubs(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
-            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
+            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         JsonNode scope = scope(mockId, null);
         return wireMock("list_unmatched_stubs", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed unmatched stubs for " + mockId + ".",
-                collectionResult(mockId, boundedCollectionPage("list_unmatched_stubs", scope, cursor,
+                stubCollectionResult(includeBody, mockId, boundedCollectionPage("list_unmatched_stubs", scope, cursor,
                         () -> wireMock.listUnmatchedStubsPage(mockId, pageSize(limit),
                                 cursorPosition("list_unmatched_stubs", scope, cursor), config.maxCollectionScanBytes(),
                                 config.maxCollectionScanItems())),
@@ -304,35 +306,38 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "get_stub", description = "Get a WireMock stub by ID. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_stub", description = "Get a WireMock stub by ID without inline response bodies by default. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getStub(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "WireMock stub UUID") String stubId) {
+            @ToolArg(description = "WireMock stub UUID") String stubId,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         return wireMock("get_stub", mockId, () -> McpToolExecutor.ToolResult.of(
-                "Loaded stub " + stubId + ".", wrapped(mockId, "stub", wireMock.getStub(mockId, stubId))));
+                "Loaded stub " + stubId + ".", stubResult(mockId, wireMock.getStub(mockId, stubId), includeBody, false)));
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "create_stub", description = "Create a temporary WireMock stub. Client-supplied id, uuid, and persistent fields are ignored.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "create_stub", description = "Create a temporary WireMock stub and return a summary by default. Client-supplied id, uuid, and persistent fields are ignored.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse createStub(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
+            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         return wireMock("create_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Created a temporary stub for " + mockId + ".",
-                    wrapped(mockId, "stub", wireMock.createStub(mockId, payload)));
+                    stubResult(mockId, wireMock.createStub(mockId, payload), includeBody, true));
         }));
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "update_stub", description = "Update a WireMock stub while preserving its current persistence state. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse updateStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
-            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping) {
+            @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         return wireMock("update_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
             return McpToolExecutor.ToolResult.of("Updated stub " + stubId + ".",
-                    wrapped(mockId, "stub", wireMock.updateStub(mockId, stubId, payload)));
+                    stubResult(mockId, wireMock.updateStub(mockId, stubId, payload), includeBody, true));
         }));
     }
 
@@ -348,26 +353,28 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files. Returns a summary by default.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse persistStub(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "WireMock stub UUID") String stubId) {
+            @ToolArg(description = "WireMock stub UUID") String stubId,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         return wireMock("persist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             requireStorage();
             JsonNode stub = wireMock.getStub(mockId, stubId);
             verifyBodyFiles(mockId, stub);
             JsonNode updated = wireMock.setPersistent(mockId, stubId, true);
-            return McpToolExecutor.ToolResult.of("Stub " + stubId + " is persistent.", wrapped(mockId, "stub", updated));
+            return McpToolExecutor.ToolResult.of("Stub " + stubId + " is persistent.", stubResult(mockId, updated, includeBody, true));
         }));
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files. Returns a summary by default.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse unpersistStub(@ToolArg(description = "Mock ID") String mockId,
-            @ToolArg(description = "WireMock stub UUID") String stubId) {
+            @ToolArg(description = "WireMock stub UUID") String stubId,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
         return wireMock("unpersist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             requireStorage();
             return McpToolExecutor.ToolResult.of("Stub " + stubId + " is temporary.",
-                    wrapped(mockId, "stub", wireMock.setPersistent(mockId, stubId, false)));
+                    stubResult(mockId, wireMock.setPersistent(mockId, stubId, false), includeBody, true));
         }));
     }
 
@@ -813,6 +820,66 @@ public final class FleetMcpTools {
         }
         encoded.put("sizeBytes", body.length);
         return encoded;
+    }
+
+    private ObjectNode stubResult(String mockId, JsonNode stub, Boolean includeBody, boolean mutation) {
+        ObjectNode result = wrapped(mockId, "stub", stubView(stub, includeBody, mutation));
+        checkStubResultSize(mockId, result, mutation);
+        return result;
+    }
+
+    private ObjectNode stubCollectionResult(Boolean includeBody, String mockId, JsonNode source, String sourceField,
+            String resultField, String toolName, JsonNode scope) {
+        ObjectNode result = collectionResult(mockId, source, sourceField, resultField, toolName, scope);
+        ArrayNode stubs = mapper.createArrayNode();
+        for (JsonNode stub : result.path(resultField)) {
+            stubs.add(stubView(stub, includeBody, false));
+        }
+        result.set(resultField, stubs);
+        checkStubResultSize(mockId, result, false);
+        return result;
+    }
+
+    private JsonNode stubView(JsonNode stub, Boolean includeBody, boolean summary) {
+        if (Boolean.TRUE.equals(includeBody)) {
+            return stub;
+        }
+        ObjectNode view;
+        if (summary) {
+            view = mapper.createObjectNode();
+            view.set("id", stub.path("id"));
+            view.set("name", stub.has("name") ? stub.get("name") : mapper.nullNode());
+            view.put("persistent", stub.path("persistent").asBoolean(false));
+        } else {
+            view = stub.deepCopy();
+            if (view.get("response") instanceof ObjectNode response) {
+                response.remove(List.of("body", "jsonBody", "base64Body"));
+            }
+        }
+        JsonNode response = stub.path("response");
+        if (response.has("bodyFileName")) {
+            view.putNull("bodyBytes");
+        } else if (response.has("base64Body")) {
+            try {
+                view.put("bodyBytes", Base64.getDecoder().decode(response.path("base64Body").asText()).length);
+            } catch (IllegalArgumentException invalidBase64) {
+                throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "Stub response contains invalid base64",
+                        false, summary, Map.of());
+            }
+        } else if (response.has("jsonBody")) {
+            view.put("bodyBytes", response.path("jsonBody").toString().getBytes(StandardCharsets.UTF_8).length);
+        } else {
+            view.put("bodyBytes", response.path("body").asText("").getBytes(StandardCharsets.UTF_8).length);
+        }
+        return view;
+    }
+
+    private void checkStubResultSize(String mockId, JsonNode result, boolean mutation) {
+        if (result.toString().getBytes(StandardCharsets.UTF_8).length > config.maxPayloadBytes()) {
+            throw new McpOperationException("RESULT_TOO_LARGE",
+                    "Stub result exceeds the configured limit; omit inline bodies or request a smaller page",
+                    false, mutation, Map.of("mockId", mockId, "limitBytes", config.maxPayloadBytes()));
+        }
     }
 
     private ObjectNode wrapped(String mockId, String field, JsonNode value) {

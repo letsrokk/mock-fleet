@@ -158,11 +158,13 @@ public final class WireMockAdminClient {
     public JsonNode createStub(String mockId, ObjectNode mapping) {
         ObjectNode payload = serverManagedCopy(mapping);
         payload.put("persistent", false);
+        validateRequest(mockId, jsonRequest(HttpMethod.POST, "/__admin/mappings", payload), maxPayloadBytes);
         return requireMutationMapping(mockId, null,
                 sendMutationJson(mockId, HttpMethod.POST, "/__admin/mappings", payload));
     }
 
     public JsonNode updateStub(String mockId, String stubId, ObjectNode mapping) {
+        validateRequest(mockId, jsonRequest(HttpMethod.PUT, "/__admin/mappings", mapping), maxPayloadBytes);
         String id = requireIdentifier(stubId, "stubId");
         PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
         JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
@@ -774,7 +776,7 @@ public final class WireMockAdminClient {
         TransportResponse response = exchange(mockId, request);
         if (response.status() < 200 || response.status() >= 300) {
             throw new McpOperationException("WIREMOCK_ADMIN_ERROR", "WireMock returned HTTP " + response.status(),
-                    response.status() >= 500, Map.of("status", response.status(), "body", response.bodyAsString()));
+                    response.status() >= 500, Map.of("status", response.status(), "body", errorBody(response)));
         }
         return response;
     }
@@ -784,47 +786,58 @@ public final class WireMockAdminClient {
         if (response.status() < 200 || response.status() >= 300) {
             throw new McpOperationException("WIREMOCK_ADMIN_ERROR", "WireMock returned HTTP " + response.status(),
                     response.status() >= 500, response.status() >= 500,
-                    Map.of("mockId", mockId, "status", response.status(), "body", response.bodyAsString()));
+                    Map.of("mockId", mockId, "status", response.status(), "body", errorBody(response)));
         }
         return response;
     }
 
+    private String errorBody(TransportResponse response) {
+        return response.body().length <= maxPayloadBytes ? response.bodyAsString() : "[omitted: oversized error body]";
+    }
+
     private TransportResponse exchange(String mockId, TransportRequest request) {
-        validateRequest(mockId, request);
-        TransportResponse response = transport.execute(mockId, request);
-        validateResponse(response, false, mockId);
+        int maxBytes = payloadLimit(request);
+        validateRequest(mockId, request, maxBytes);
+        TransportResponse response = transport.execute(mockId, request, maxBytes);
+        validateResponse(response, false, mockId, maxBytes);
         return response;
     }
 
     private TransportResponse exchangeStateChanging(String mockId, TransportRequest request) {
-        validateRequest(mockId, request);
+        int maxBytes = payloadLimit(request);
+        validateRequest(mockId, request, maxBytes);
         TransportResponse response;
         try {
-            response = transport.execute(mockId, request);
+            response = transport.execute(mockId, request, maxBytes);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
-        validateResponse(response, true, mockId);
+        validateResponse(response, true, mockId, maxBytes);
         return response;
     }
 
-    private void validateRequest(String mockId, TransportRequest request) {
+    private int payloadLimit(TransportRequest request) {
+        return request.target().startsWith("/__admin/mappings")
+                ? (int) Math.min(Integer.MAX_VALUE, maxCollectionScanBytes) : maxPayloadBytes;
+    }
+
+    private void validateRequest(String mockId, TransportRequest request, int maxBytes) {
         MockIdValidator.requireValid(mockId);
-        if (request.body().length > maxPayloadBytes) {
+        if (request.body().length > maxBytes) {
             throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
-                    Map.of("limitBytes", maxPayloadBytes));
+                    Map.of("limitBytes", maxBytes));
         }
     }
 
-    private void validateResponse(TransportResponse response, boolean stateMayHaveChanged, String mockId) {
-        if (response.body().length <= maxPayloadBytes) {
+    private void validateResponse(TransportResponse response, boolean stateMayHaveChanged, String mockId, int maxBytes) {
+        if (response.body().length <= maxBytes) {
             return;
         }
         Map<String, Object> details = new LinkedHashMap<>();
         if (stateMayHaveChanged) {
             details.put("mockId", mockId);
         }
-        details.put("limitBytes", maxPayloadBytes);
+        details.put("limitBytes", maxBytes);
         throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
                 stateMayHaveChanged, details);
     }

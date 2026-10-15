@@ -116,6 +116,14 @@ MCP always publishes the complete retained tool set. `get_body_file` requires Wi
 
 Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. `futureOnly` saves the desired configuration without replacing an active pod. `restartActive` replaces only a STARTING or RUNNING pod and is asynchronous, so `lifecycle` can be STARTING; it does not start a STOPPED or FAILED mock. Configuration rows use `lifecycle`, not `active`, expose baseline, user, and effective version fields, desired `wireMockVersion`, and nullable active `runtimeVersion`, and use null `user.resources` for inherited resources.
 
+## Stub output control
+
+`get_stub`, `list_stubs`, and `list_unmatched_stubs` omit inline response bodies by default. They retain request matchers and response metadata, including `bodyFileName`, and add `bodyBytes`. `create_stub`, `update_stub`, `persist_stub`, and `unpersist_stub` return a summary in `stub`: `{id,name,persistent,bodyBytes}`. An unnamed stub has `name: null`.
+
+All seven tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
+
+Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
+
 ## Encoded bodies
 
 `send_request` and `put_body_file` accept bytes only through an encoded body object. `sizeBytes` describes the decoded byte length. Body files have no stored media-type metadata; set the serving media type in the response headers of the stub that references the file.
