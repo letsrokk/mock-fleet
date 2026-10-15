@@ -33,6 +33,13 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
                                 .put("request", new JsonObject().put("urlPath", "/orders")))));
                 required.add("stubId").add("patch");
             }
+            case "delete_stubs" -> {
+                properties.put("stubIds", new JsonObject().put("type", "array")
+                        .put("description", "Distinct explicit stub IDs to delete")
+                        .put("items", string("WireMock stub ID").put("pattern", "[0-9A-Za-z-]{1,128}"))
+                        .put("minItems", 1).put("maxItems", config.maxPageSize()).put("uniqueItems", true));
+                required.add("stubIds");
+            }
             case "find_requests" -> {
                 addRequestPattern(properties, required, false);
                 addPagination(properties);

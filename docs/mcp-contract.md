@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 36 tools:
+The server publishes 37 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -17,6 +17,7 @@ snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
 reset_scenarios             export_mock_configs         import_mock_configs
 set_mock_pinned             patch_stub                  get_journal_summary
+delete_stubs
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -123,6 +124,14 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 All eight tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
 
 Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and patches and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
+
+## Bulk stub deletion
+
+`delete_stubs` accepts `{mockId,stubIds}` with distinct explicit IDs. The entire list is validated before any deletion; it must contain 1 to `maxPageSize` IDs (200 by default). Deletions run sequentially under the same per-mock MCP lock as single-stub mutations.
+
+The result is `{mockId,deletedCount,failedCount,results}`. Each result has `{stubId,deleted,error}` in input order. A success has `error: null`; a failure has `{code,retryable,stateMayHaveChanged}`. The batch continues after individual failures and returns a successful tool envelope even if some or all individual deletions fail, so inspect the counts and per-ID results. A failure with `stateMayHaveChanged: true` requires reconciliation before retrying. The operation is not atomic and does not roll back prior deletions.
+
+Persistence rules match `delete_stub`: persist a stored runtime-only mapping first when permanent deletion is intended. The bulk tool never persists mappings automatically and never deletes referenced body files. Already absent mappings follow the existing single-delete behavior.
 
 ## Journal counts
 

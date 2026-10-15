@@ -41,6 +41,11 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
             case "Stub" -> strict(properties("mockId", string(), "stub", openObject()));
             case "DeleteStub" -> strict(properties(
                     "mockId", string(), "stubId", string(), "deleted", bool()));
+            case "DeleteStubs" -> strict(properties(
+                    "mockId", string(), "deletedCount", integer(), "failedCount", integer(),
+                    "results", array(strict(properties("stubId", string(), "deleted", bool(),
+                            "error", strict(properties("code", string(), "retryable", bool(), "stateMayHaveChanged", bool()))
+                                    .put("type", new JsonArray().add("object").add("null")))))));
             case "SendRequest" -> strict(properties(
                     "mockId", string(), "response", response()));
             case "RequestPage" -> strict(properties(

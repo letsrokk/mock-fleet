@@ -1266,7 +1266,7 @@ public final class WireMockAdminClient {
         }
     }
 
-    private static String requireIdentifier(String value, String name) {
+    static String requireIdentifier(String value, String name) {
         if (value == null || !value.matches("[0-9A-Za-z-]{1,128}")) {
             throw new IllegalArgumentException(name + " is invalid");
         }

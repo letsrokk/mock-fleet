@@ -129,6 +129,58 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void bulkDeletionReportsEachOutcomeAndContinuesAfterAFailure() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(204, "");
+        transport.respond(500, "delete failed");
+        transport.respond(200, "{\"id\":\"second\"}");
+        transport.respond(204, "");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .deleteStubs("orders", List.of("first", "second", "third"));
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertEquals(2, result.path("deletedCount").asInt());
+            assertEquals(1, result.path("failedCount").asInt());
+            assertEquals("first", result.path("results").get(0).path("stubId").asText());
+            assertTrue(result.path("results").get(0).path("deleted").asBoolean());
+            assertTrue(result.path("results").get(0).path("error").isNull());
+            JsonNode failed = result.path("results").get(1);
+            assertFalse(failed.path("deleted").asBoolean());
+            assertEquals("WIREMOCK_ADMIN_ERROR", failed.path("error").path("code").asText());
+            assertTrue(failed.path("error").path("stateMayHaveChanged").asBoolean());
+            assertTrue(result.path("results").get(2).path("deleted").asBoolean());
+            assertEquals(5, transport.requestCount());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"invalid", "duplicate", "empty", "tooMany"})
+    void bulkDeletionValidatesTheWholeSelectionBeforeDeleting(String selection) {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        List<String> ids = switch (selection) {
+            case "invalid" -> List.of("first", "../invalid");
+            case "duplicate" -> List.of("first", "first");
+            case "empty" -> List.of();
+            default -> java.util.stream.IntStream.range(0, 201).mapToObj(i -> "stub-" + i).toList();
+        };
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).deleteStubs("orders", ids);
+            assertTrue(response.isError());
+            var error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_ARGUMENT", error.code());
+            assertFalse(error.stateMayHaveChanged());
+            assertEquals(1, transport.requestCount());
+        }
+    }
+
+    @Test
     void unavailableJournalDiagnosticsDoNotPreventStoppingARecording() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();

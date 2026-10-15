@@ -366,6 +366,42 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "delete_stubs", description = "Delete an explicit list of stub IDs and report every outcome, continuing after individual failures. Not atomic. Same persistence rules as delete_stub: persist a loaded stored stub first for permanent deletion. Referenced body files survive.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.DeleteStubs.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    public ToolResponse deleteStubs(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "Distinct explicit stub IDs to delete; at most the configured maximum page size") List<String> stubIds) {
+        return wireMock("delete_stubs", mockId, () -> coordinator.serialized(mockId, () -> {
+            if (stubIds == null || stubIds.isEmpty() || stubIds.size() > config.maxPageSize()) {
+                throw new IllegalArgumentException("stubIds must contain between 1 and " + config.maxPageSize() + " IDs");
+            }
+            Set<String> seen = new HashSet<>();
+            for (String id : stubIds) {
+                WireMockAdminClient.requireIdentifier(id, "stubId");
+                if (!seen.add(id)) {
+                    throw new IllegalArgumentException("stubIds must be distinct");
+                }
+            }
+            ObjectNode result = mapper.createObjectNode().put("mockId", mockId);
+            ArrayNode outcomes = result.putArray("results");
+            int deleted = 0;
+            for (String id : stubIds) {
+                ObjectNode outcome = outcomes.addObject().put("stubId", id);
+                try {
+                    wireMock.deleteStub(mockId, id);
+                    outcome.put("deleted", true).putNull("error");
+                    deleted++;
+                } catch (McpOperationException failure) {
+                    outcome.put("deleted", false).putObject("error").put("code", failure.code())
+                            .put("retryable", failure.retryable()).put("stateMayHaveChanged", failure.stateMayHaveChanged());
+                }
+            }
+            result.put("deletedCount", deleted).put("failedCount", stubIds.size() - deleted);
+            checkResultSize(mockId, result, true);
+            return McpToolExecutor.ToolResult.of("Deleted " + deleted + " of " + stubIds.size() + " stubs for " + mockId
+                    + "; " + (stubIds.size() - deleted) + " failed.", result);
+        }));
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files. Returns a summary by default.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse persistStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,

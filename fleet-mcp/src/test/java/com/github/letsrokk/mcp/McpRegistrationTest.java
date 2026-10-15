@@ -30,7 +30,7 @@ class McpRegistrationTest {
             "list_mocks", "get_mock_config", "export_mock_configs", "import_mock_configs",
             "list_option_definitions", "update_mock_config",
             "delete_mock_config", "start_mock", "stop_mock", "set_mock_pinned",
-            "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "patch_stub", "delete_stub",
+            "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "patch_stub", "delete_stub", "delete_stubs",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests", "get_journal_summary",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
             "get_recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
@@ -98,6 +98,12 @@ class McpRegistrationTest {
             assertEquals("boolean", schema.path("properties").path("includeBody").path("type").asText(), name);
             assertFalse(textValues(schema.path("required")).contains("includeBody"), name);
         }
+        JsonNode bulkIds = tool(tools, "delete_stubs").path("inputSchema").path("properties").path("stubIds");
+        assertEquals("array", bulkIds.path("type").asText());
+        assertEquals("string", bulkIds.path("items").path("type").asText());
+        assertTrue(bulkIds.path("uniqueItems").asBoolean());
+        assertEquals(1, bulkIds.path("minItems").asInt());
+        assertEquals(200, bulkIds.path("maxItems").asInt());
         JsonNode resources = updateConfig.path("properties").path("resources");
         assertTrue(resources.path("properties").has("requests"), updateConfig.toPrettyString());
         assertTrue(resources.path("properties").has("limits"));
