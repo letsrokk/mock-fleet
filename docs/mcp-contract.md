@@ -101,7 +101,7 @@ The selected option version and the deployment version catalog are separate chec
 
 MCP always publishes the complete retained tool set. `get_body_file` requires WireMock 3.7.0, and `list_unmatched_stubs` requires WireMock 3.13.0. Direct calls gate these tools against the target mock's active runtime version, so desired/runtime drift fails with the tool name, required version, and actual runtime version. Legacy WireMock 3.0.x targets resolve their runtime through Fleet API after the Admin version endpoint is absent; an unknown runtime fails closed.
 
-`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit `wireMockVersion` to inherit the catalog default. Explicit `null` is not accepted because the published input schema requires a string when the field is present. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
+`update_mock_config` takes the complete mock-specific option override and an optional exact `wireMockVersion`; omit `wireMockVersion` to inherit the catalog default. Explicit `null` is not accepted because the published input schema requires a string when the field is present. Saved options replace inherited values by flag name; flags not already inherited are appended. For example, overriding `--max-request-journal-entries 20` with `--max-request-journal-entries 200` produces one effective flag with value 200. Journal entries retain request and response data in memory, so larger caps and large bodies increase heap usage. The Fleet API is authoritative for option tokenization and validation, including split, combined, quoted, and equals syntax; options hidden for the desired WireMock version, unknown options, duplicates, stray values, missing values, invalid numbers, and invalid select values fail without persisting a mutation.
 
 ```json
 {
@@ -114,7 +114,7 @@ MCP always publishes the complete retained tool set. `get_body_file` requires Wi
 }
 ```
 
-Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. `futureOnly` saves the desired configuration without replacing an active pod. `restartActive` replaces only a STARTING or RUNNING pod and is asynchronous, so `lifecycle` can be STARTING; it does not start a STOPPED or FAILED mock. Configuration rows use `lifecycle`, not `active`, expose baseline, user, and effective version fields, desired `wireMockVersion`, and nullable active `runtimeVersion`, and use null `user.resources` for inherited resources.
+Omit `resources` to inherit baseline resources. Provide both `requests` and `limits`, including two empty maps, to replace inherited resources. `delete_mock_config` removes saved configuration overrides; stored stubs and body files survive and can reload when the same mock ID starts again. Update success is `{resourceVersion,mock,apply}`; delete success is `{resourceVersion,mockId,deleted,apply}`. `resourceVersion` is a string when the ConfigMap has one and can be null when the Fleet API legitimately has no version. Each `apply` is `{mockId,mode,lifecycle}`. `futureOnly` saves the desired configuration without replacing an active pod. `restartActive` replaces only a STARTING or RUNNING pod and is asynchronous, so `lifecycle` can be STARTING; it does not start a STOPPED or FAILED mock. Configuration rows use `lifecycle`, not `active`, expose baseline, user, and effective version fields, desired `wireMockVersion`, and nullable active `runtimeVersion`, and use null `user.resources` for inherited resources.
 
 ## Stub output control
 
@@ -175,9 +175,18 @@ Persistent stub mutations use recoverable transactions. A persistent update reco
   "mockId": "orders",
   "candidateIds": ["d13b8bb8-95bb-4c44-b7d7-601baa333c1c"],
   "candidateCount": 1,
-  "matchedRequests": true
+  "matchedRequests": true,
+  "scenarioStubs": [],
+  "journal": {"retainedRequests": 20, "configuredLimit": 20, "possiblyTruncated": true},
+  "warnings": ["The journal is at or above its configured limit; earlier requests may have been evicted. The running pod may use older settings, so this does not prove truncation."]
 }
 ```
+
+Set `recording.repeatsAsScenarios: false` in `start_recording`, or `snapshot.repeatsAsScenarios: false` in `snapshot_requests`, to ignore repeated requests instead of generating scenario steps. Native WireMock defaults are retained when this setting is omitted. Each `scenarioStubs` entry has `stubId`, `scenarioName`, nullable `requiredScenarioState`, and nullable `newScenarioState`. A warning explains that removing individual steps can break later requests; candidates are never automatically deduplicated or rewritten to remove scenarios.
+
+Before finalization, MCP samples the retained journal count without event bodies and reads the desired effective journal cap from Fleet configuration. `possiblyTruncated: true` means that the sampled journal is at or above that cap; it is a warning, not proof of eviction. It is null otherwise, including when the cap or count is unavailable. Desired settings can differ from those used by the running pod, and earlier eviction, resets, or concurrent traffic can affect completeness even below the cap. Missing diagnostics produce a warning and do not prevent stopping or snapshotting. A disabled journal also produces a warning.
+
+For intentional permanent deletion of a stub loaded from backing storage, call `persist_stub` and then `delete_stub`. WireMock deletes the saved mapping when the runtime mapping is persistent; deleting a runtime-only loaded copy can leave its source to reload on restart. `unpersist_stub` removes the backing mapping when transitioning a persistent stub to temporary, but is a no-op when it is already temporary. Referenced body files are retained by all of these stub operations.
 
 A zero-match operation returns an empty ID array, `candidateCount: 0`, and `matchedRequests: false`. Use `find_requests`, `count_requests`, `list_unmatched_requests`, `list_unmatched_stubs`, and `get_near_misses` for matched/missed analysis. `send_request` rejects every WireMock Admin path, including encoded or ambiguous variants. Recorder, proxy, webhook, and mapping targets reject private, loopback, link-local, multicast, metadata, and special-use destinations unless both the hostname exception and connection-time CIDR policy allow them.
 

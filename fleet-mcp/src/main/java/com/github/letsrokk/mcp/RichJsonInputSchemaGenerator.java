@@ -44,13 +44,13 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
             }
             case "start_recording" -> {
                 properties.put("recording", jsonObject("Native WireMock recorder JSON", new JsonArray()
-                        .add(new JsonObject().put("targetBaseUrl", "https://api.example.test")
+                        .add(new JsonObject().put("repeatsAsScenarios", false).put("targetBaseUrl", "https://api.example.test")
                                 .put("filters", new JsonObject().put("urlPathPattern", "/v1/.*")))));
                 required.add("recording");
             }
             case "snapshot_requests" -> {
                 properties.put("snapshot", jsonObject("Native WireMock snapshot JSON", new JsonArray()
-                        .add(new JsonObject().put("filters", new JsonObject()
+                        .add(new JsonObject().put("repeatsAsScenarios", false).put("filters", new JsonObject()
                                 .put("method", "GET").put("urlPathPattern", "/v1/.*")))));
                 required.add("snapshot");
             }

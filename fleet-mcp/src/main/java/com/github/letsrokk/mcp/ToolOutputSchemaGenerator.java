@@ -59,7 +59,14 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mockId", string(), "status", openObject()));
             case "RecordingCandidates" -> strict(properties(
                     "mockId", string(), "candidateIds", array(string()), "candidateCount", integer(),
-                    "matchedRequests", bool()));
+                    "matchedRequests", bool(), "scenarioStubs", array(strict(properties(
+                            "stubId", string(), "scenarioName", string(),
+                            "requiredScenarioState", nullableString(), "newScenarioState", nullableString()))),
+                    "journal", strict(properties(
+                            "retainedRequests", integer().put("type", new JsonArray().add("integer").add("null")),
+                            "configuredLimit", integer().put("type", new JsonArray().add("integer").add("null")),
+                            "possiblyTruncated", bool().put("type", new JsonArray().add("boolean").add("null")))),
+                    "warnings", array(string())));
             case "BodyFilePage" -> strict(properties(
                     "mockId", string(), "files", array(string()), "page", page()));
             case "GetBodyFile" -> strict(properties(

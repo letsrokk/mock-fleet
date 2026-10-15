@@ -34,7 +34,7 @@ public final class WireMockOptionCatalog {
             number("--logged-response-body-size-limit", "Response body log limit", "Logging and Diagnostics", "Truncates logged response bodies above this byte limit.", 0, 16777216),
             flag("--disable-banner", "Disable banner", "Logging and Diagnostics", "Prevents the WireMock logo being printed on startup."),
             flag("--no-request-journal", "Disable request journal", "Request Journal and Recording", "Turns off the in-memory journal of received requests."),
-            number("--max-request-journal-entries", "Max journal entries", "Request Journal and Recording", "Sets the maximum number of request journal entries.", 0, 100000),
+            number("--max-request-journal-entries", "Max journal entries", "Request Journal and Recording", "Sets the maximum number of request journal entries. Entries retain request and response data in memory; large bodies increase heap usage. Oldest entries are evicted when the limit is reached.", 0, 100000),
             flag("--record-mappings", "Record mappings", "Request Journal and Recording", "Records incoming requests as stub mappings."),
             input("--match-headers", "Match headers", "Request Journal and Recording", "Captures the named request headers when recording."),
             input("--filename-template", "Filename template", "Request Journal and Recording", "Sets the Handlebars filename template for recorded mappings."),

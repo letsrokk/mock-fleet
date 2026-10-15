@@ -566,14 +566,22 @@ public final class WireMockAdminClient {
             candidateIds.addAll(candidatesCreatedSince(mockId, baseline));
             throw recorderCleanupFailure(mockId, List.copyOf(candidateIds), invalidIds);
         }
+        ArrayNode scenarioStubs = mapper.createArrayNode();
         try {
             for (String id : candidateIds) {
                 JsonNode sanitized = sanitizer.removeSensitiveHeaders(getStub(mockId, id));
                 sendJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, sanitized);
+                if (sanitized.hasNonNull("scenarioName")) {
+                    ObjectNode scenario = scenarioStubs.addObject().put("stubId", id);
+                    for (String field : List.of("scenarioName", "requiredScenarioState", "newScenarioState")) {
+                        scenario.set(field, sanitized.has(field) ? sanitized.get(field) : mapper.nullNode());
+                    }
+                }
             }
         } catch (RuntimeException sanitizationFailure) {
             throw recorderCleanupFailure(mockId, List.copyOf(candidateIds), sanitizationFailure);
         }
+        ((ObjectNode) result).set("scenarioStubs", scenarioStubs);
         return result;
     }
 

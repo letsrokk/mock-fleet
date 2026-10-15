@@ -129,6 +129,46 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void unavailableJournalDiagnosticsDoNotPreventStoppingARecording() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(500, "journal unavailable");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"ids\":[]}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertTrue(result.path("journal").path("retainedRequests").isNull());
+            assertTrue(result.path("journal").path("possiblyTruncated").isNull());
+            assertTrue(result.path("warnings").toString().contains("unavailable"));
+        }
+    }
+
+    @Test
+    void stopRecordingWarnsWhenTheJournalIsAtItsConfiguredLimit() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":20},\"requestJournalDisabled\":false}");
+        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"ids\":[]}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            fleet.respond(200, "{\"mocks\":[{\"mockId\":\"orders\",\"effective\":{\"options\":[\"--max-request-journal-entries\",\"20\"]}}]}");
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertTrue(result.path("journal").path("possiblyTruncated").asBoolean());
+            assertEquals(20, result.path("journal").path("retainedRequests").asInt());
+            assertEquals(20, result.path("journal").path("configuredLimit").asInt());
+            assertTrue(result.path("warnings").toString().contains("evicted"));
+        }
+    }
+
+    @Test
     void journalSummaryPaginatesCurrentStubCountsAndPreservesJournalDisabledStatus() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
@@ -799,6 +839,7 @@ class FleetMcpToolsTrafficTest {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.respond(200, "{\"ids\":[]}");
         try (var fleet = new FleetApiHarness()) {
@@ -819,6 +860,7 @@ class FleetMcpToolsTrafficTest {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.respond(200, "{}");
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
@@ -840,9 +882,10 @@ class FleetMcpToolsTrafficTest {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
         transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
         transport.respond(200, "{\"ids\":[\"candidate-1\"]}");
-        transport.respond(200, "{\"id\":\"candidate-1\",\"request\":{},\"response\":{\"status\":200}}");
+        transport.respond(200, "{\"id\":\"candidate-1\",\"request\":{},\"response\":{\"status\":200},\"scenarioName\":\"recorded-sequence\",\"requiredScenarioState\":\"Started\",\"newScenarioState\":\"done\"}");
         transport.respond(200, "{\"id\":\"candidate-1\"}");
         try (var fleet = new FleetApiHarness()) {
             fleet.respond(200, running());
@@ -854,6 +897,8 @@ class FleetMcpToolsTrafficTest {
             assertEquals("candidate-1", result.path("candidateIds").get(0).asText());
             assertEquals(1, result.path("candidateCount").asInt());
             assertTrue(result.path("matchedRequests").asBoolean());
+            assertEquals("recorded-sequence", result.path("scenarioStubs").get(0).path("scenarioName").asText());
+            assertTrue(result.path("warnings").toString().contains("scenario steps"));
         }
     }
 
@@ -1011,6 +1056,8 @@ class FleetMcpToolsTrafficTest {
             String body;
             if ("/__admin/version".equals(request.target())) {
                 body = "{\"version\":\"3.13.2\"}";
+            } else if (request.target().equals("/__admin/requests?limit=0")) {
+                body = "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}";
             } else if (request.method() == HttpMethod.POST && "/__admin/mappings".equals(request.target())) {
                 createEntered.countDown();
                 await(releaseCreate);
