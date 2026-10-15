@@ -28,6 +28,88 @@ class WireMockAdminClientTest {
             67_108_864L, 100_000, new WireMockAdminClient.RecorderCleanupPolicy(1, 0, 0),
             new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void recordingHintsCompareExactMatchersAndExposeResponseAndScenarioDifferences(boolean snapshot) {
+        transport.respond(200, """
+                {"mappings":[
+                  {"id":"existing-a","name":"first","request":{"url":"/orders","method":"GET"},"response":{"body":"one"}},
+                  {"id":"existing-b","name":"second","request":{"method":"GET","url":"/orders"},"response":{"body":"two"},"scenarioName":"flow","requiredScenarioState":"Started","newScenarioState":"next"},
+                  {"id":"other","request":{"method":"POST","url":"/orders"},"response":{"body":"one"}},
+                  {"id":"protected","request":{"method":"GET","url":"/orders","headers":{"Authorization":{"equalTo":"secret"}}},"response":{"body":"one"}},
+                  {"id":"recovery","request":{"method":"GET","url":"/orders"},"metadata":{"_mockFleetMcpRecovery":{}},"response":{"body":"one"}}
+                ],"meta":{"total":5}}
+                """);
+        transport.respond(200, "{\"ids\":[\"recorded\"]}");
+        transport.respond(200, """
+                {"id":"recorded","request":{"method":"GET","url":"/orders"},"response":{"body":"one"},
+                 "scenarioName":"recorded-flow","requiredScenarioState":"Started","newScenarioState":"done"}
+                """);
+        transport.respond(200, "{\"id\":\"recorded\"}");
+
+        JsonNode result = snapshot ? client.snapshotRequests("orders", mapper.createObjectNode()) : client.stopRecording("orders");
+
+        assertTrue(result.path("duplicateAnalysisComplete").asBoolean());
+        assertEquals(1, result.path("possibleDuplicates").size());
+        JsonNode hint = result.path("possibleDuplicates").get(0);
+        assertEquals("recorded", hint.path("candidateId").asText());
+        assertEquals(2, hint.path("matches").size());
+        JsonNode first = hint.path("matches").get(0);
+        assertEquals("existing-a", first.path("stubId").asText());
+        assertEquals("first", first.path("name").asText());
+        assertTrue(first.path("responseEqual").asBoolean());
+        assertTrue(first.path("scenarioName").isNull());
+        JsonNode second = hint.path("matches").get(1);
+        assertEquals("existing-b", second.path("stubId").asText());
+        assertFalse(second.path("responseEqual").asBoolean());
+        assertEquals("flow", second.path("scenarioName").asText());
+        assertEquals("next", second.path("newScenarioState").asText());
+        assertEquals("recorded-flow", result.path("scenarioStubs").get(0).path("scenarioName").asText());
+        assertFalse(hint.toString().contains("secret"));
+        assertEquals(4, transport.requestCount());
+        assertEquals(HttpMethod.PUT, transport.requestAt(3).method());
+    }
+
+    @Test
+    void comparisonBudgetDoesNotSkipSanitizingRemainingCandidates() {
+        var limited = new WireMockAdminClient(transport, mapper, 4096, Set.of(), null, 4096, 2);
+        transport.respond(200, """
+                {"mappings":[{"id":"first","request":{},"response":{}},
+                             {"id":"second","request":{},"response":{}}],"meta":{"total":2}}
+                """);
+        transport.respond(200, "{\"ids\":[\"candidate-a\",\"candidate-b\"]}");
+        for (String id : List.of("candidate-a", "candidate-b")) {
+            transport.respond(200, "{\"id\":\"" + id + "\",\"request\":{},\"response\":{}}");
+            transport.respond(200, "{\"id\":\"" + id + "\"}");
+        }
+
+        JsonNode result = limited.stopRecording("orders");
+
+        assertEquals(2, result.path("ids").size());
+        assertFalse(result.path("duplicateAnalysisComplete").asBoolean(true));
+        assertEquals(1, result.path("possibleDuplicates").size());
+        assertEquals(2, result.path("possibleDuplicates").get(0).path("matches").size());
+        assertEquals(6, transport.requestCount());
+        assertEquals(HttpMethod.PUT, transport.requestAt(5).method());
+    }
+
+    @Test
+    void oversizedDuplicateHintsDoNotFailRecordingFinalization() {
+        var limited = new WireMockAdminClient(transport, mapper, 128, Set.of(), null, 4096, 100);
+        transport.respond(200, "{\"mappings\":[{\"id\":\"existing\",\"name\":\"" + "x".repeat(1024)
+                + "\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}],\"meta\":{\"total\":1}}");
+        transport.respond(200, "{\"ids\":[\"recorded\"]}");
+        transport.respond(200, "{\"id\":\"recorded\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}");
+        transport.respond(200, "{\"id\":\"recorded\"}");
+
+        JsonNode result = limited.stopRecording("orders");
+
+        assertFalse(result.path("duplicateAnalysisComplete").asBoolean(true));
+        assertTrue(result.path("possibleDuplicates").isEmpty());
+        assertEquals("recorded", result.path("ids").get(0).asText());
+        assertEquals(4, transport.requestCount());
+    }
+
     @Test
     void journalCountsAskWireMockForNoServeEventBodies() {
         transport.respond(200, "{\"requests\":[],\"meta\":{\"total\":20},\"requestJournalDisabled\":false}");

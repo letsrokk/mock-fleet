@@ -129,6 +129,71 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void incompleteAnalysisWarningCannotPushPartialHintsPastTheResultLimit() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
+        transport.respond(200, "{\"mappings\":[{\"id\":\"first\",\"name\":\"" + "x".repeat(3380)
+                + "\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}},"
+                + "{\"id\":\"second\",\"name\":\"" + "x".repeat(1500)
+                + "\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}],\"meta\":{\"total\":2}}");
+        transport.respond(200, "{\"ids\":[\"recorded\"]}");
+        transport.respond(200, "{\"id\":\"recorded\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}");
+        transport.respond(200, "{\"id\":\"recorded\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+            assertFalse(response.isError(), response.structuredContent().toString());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertEquals("recorded", result.path("candidateIds").get(0).asText());
+            assertTrue(result.path("possibleDuplicates").isEmpty());
+            assertFalse(result.path("duplicateAnalysisComplete").asBoolean(true));
+            assertTrue(result.path("warnings").toString().contains("Duplicate analysis is incomplete"));
+        }
+    }
+
+    @Test
+    void bulkDeletionRejectsAnOversizedOutcomeReportBeforeDeleting() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        List<String> ids = java.util.stream.IntStream.range(0, 40).mapToObj(i -> "stub-" + i).toList();
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).deleteStubs("orders", ids);
+            assertTrue(response.isError());
+            var error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("RESULT_TOO_LARGE", error.code());
+            assertFalse(error.stateMayHaveChanged());
+            assertEquals(1, transport.requestCount());
+        }
+    }
+
+    @Test
+    void recordingDropsOversizedDuplicateHintsWhileKeepingTheCandidateResult() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
+        transport.respond(200, "{\"mappings\":[{\"id\":\"existing\",\"name\":\"" + "x".repeat(3800)
+                + "\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}],\"meta\":{\"total\":1}}");
+        transport.respond(200, "{\"ids\":[\"recorded\"]}");
+        transport.respond(200, "{\"id\":\"recorded\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}");
+        transport.respond(200, "{\"id\":\"recorded\"}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).stopRecording("orders");
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertEquals("recorded", result.path("candidateIds").get(0).asText());
+            assertTrue(result.path("possibleDuplicates").isEmpty());
+            assertFalse(result.path("duplicateAnalysisComplete").asBoolean(true));
+            assertTrue(result.path("warnings").toString().contains("Duplicate analysis is incomplete"));
+        }
+    }
+
+    @Test
     void bulkDeletionReportsEachOutcomeAndContinuesAfterAFailure() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();
@@ -935,7 +1000,7 @@ class FleetMcpToolsTrafficTest {
         var transport = new QueuedTransport();
         transport.respond(200, "{\"version\":\"3.13.2\"}");
         transport.respond(200, "{\"meta\":{\"total\":0},\"requestJournalDisabled\":false}");
-        transport.respond(200, "{\"mappings\":[],\"meta\":{\"total\":0}}");
+        transport.respond(200, "{\"mappings\":[{\"id\":\"existing-1\",\"name\":\"prior\",\"request\":{},\"response\":{\"status\":201},\"scenarioName\":\"existing-flow\"}],\"meta\":{\"total\":1}}");
         transport.respond(200, "{\"ids\":[\"candidate-1\"]}");
         transport.respond(200, "{\"id\":\"candidate-1\",\"request\":{},\"response\":{\"status\":200},\"scenarioName\":\"recorded-sequence\",\"requiredScenarioState\":\"Started\",\"newScenarioState\":\"done\"}");
         transport.respond(200, "{\"id\":\"candidate-1\"}");
@@ -951,6 +1016,12 @@ class FleetMcpToolsTrafficTest {
             assertTrue(result.path("matchedRequests").asBoolean());
             assertEquals("recorded-sequence", result.path("scenarioStubs").get(0).path("scenarioName").asText());
             assertTrue(result.path("warnings").toString().contains("scenario steps"));
+            assertTrue(result.path("duplicateAnalysisComplete").asBoolean());
+            JsonNode match = result.path("possibleDuplicates").get(0).path("matches").get(0);
+            assertEquals("existing-1", match.path("stubId").asText());
+            assertFalse(match.path("responseEqual").asBoolean());
+            assertEquals("existing-flow", match.path("scenarioName").asText());
+            assertTrue(result.path("warnings").toString().contains("Same-matcher"));
         }
     }
 

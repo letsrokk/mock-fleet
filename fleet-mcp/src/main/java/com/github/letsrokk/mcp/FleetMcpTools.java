@@ -382,9 +382,17 @@ public final class FleetMcpTools {
             }
             ObjectNode result = mapper.createObjectNode().put("mockId", mockId);
             ArrayNode outcomes = result.putArray("results");
-            int deleted = 0;
+            result.put("deletedCount", stubIds.size()).put("failedCount", stubIds.size());
+            // Reserve room for the largest delete/read-back error before any deletion can occur.
             for (String id : stubIds) {
-                ObjectNode outcome = outcomes.addObject().put("stubId", id);
+                outcomes.addObject().put("stubId", id).put("deleted", false).putObject("error")
+                        .put("code", "INVALID_UPSTREAM_RESPONSE").put("retryable", false).put("stateMayHaveChanged", false);
+            }
+            checkResultSize(mockId, result, false);
+            int deleted = 0;
+            for (JsonNode row : outcomes) {
+                ObjectNode outcome = (ObjectNode) row;
+                String id = outcome.path("stubId").asText();
                 try {
                     wireMock.deleteStub(mockId, id);
                     outcome.put("deleted", true).putNull("error");
@@ -580,7 +588,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "stop_recording", description = "Stop recording and return temporary candidate IDs, scenario steps, and journal-completeness warnings. A full journal may have evicted earlier requests.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "stop_recording", description = "Stop recording and return temporary candidate IDs, scenario steps, journal warnings, and advisory same-matcher duplicate hints against existing stubs. A full journal may have evicted earlier requests.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse stopRecording(@ToolArg(description = "Mock ID") String mockId) {
         return wireMock("stop_recording", mockId, () -> coordinator.serialized(mockId, () ->
                 recordingReview(mockId, "Stopped recording for " + mockId + ". Review candidates with get_stub.",
@@ -588,7 +596,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, and journal warnings. Set snapshot.repeatsAsScenarios=false to ignore repeat requests.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, journal warnings, and advisory same-matcher duplicate hints. Set snapshot.repeatsAsScenarios=false to ignore repeat requests.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse snapshotRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock snapshot JSON") Map<String, Object> snapshot) {
         return wireMock("snapshot_requests", mockId, () -> coordinator.serialized(mockId, () -> {
@@ -1159,6 +1167,26 @@ public final class FleetMcpTools {
         }
         result.set("journal", journal);
         result.set("warnings", warnings);
+        JsonNode duplicates = recorded.path("possibleDuplicates");
+        result.set("possibleDuplicates", duplicates.isArray() ? duplicates : mapper.createArrayNode());
+        result.put("duplicateAnalysisComplete", recorded.path("duplicateAnalysisComplete").asBoolean(true));
+        if (!result.path("possibleDuplicates").isEmpty()) {
+            warnings.add("Same-matcher candidates may be intentional response variants or scenario steps. "
+                    + "Review responseEqual and scenario metadata before deleting any stub.");
+        }
+        String incompleteWarning = "Duplicate analysis is incomplete: comparison or output limits prevented returning all hints.";
+        boolean analysisComplete = result.path("duplicateAnalysisComplete").asBoolean();
+        if (!analysisComplete) {
+            warnings.add(incompleteWarning);
+        }
+        if (result.toString().getBytes(StandardCharsets.UTF_8).length > config.maxPayloadBytes()
+                && !result.path("possibleDuplicates").isEmpty()) {
+            result.set("possibleDuplicates", mapper.createArrayNode());
+            result.put("duplicateAnalysisComplete", false);
+            if (analysisComplete) {
+                warnings.add(incompleteWarning);
+            }
+        }
         checkResultSize(mockId, result, true);
         return McpToolExecutor.ToolResult.of(summary, result);
     }

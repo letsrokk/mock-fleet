@@ -64,7 +64,12 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mockId", string(), "status", openObject()));
             case "RecordingCandidates" -> strict(properties(
                     "mockId", string(), "candidateIds", array(string()), "candidateCount", integer(),
-                    "matchedRequests", bool(), "scenarioStubs", array(strict(properties(
+                    "matchedRequests", bool(), "duplicateAnalysisComplete", bool(),
+                    "possibleDuplicates", array(strict(properties("candidateId", string(),
+                            "matches", array(strict(properties("stubId", string(), "name", nullableString(),
+                                    "responseEqual", bool(), "scenarioName", nullableString(),
+                                    "requiredScenarioState", nullableString(), "newScenarioState", nullableString())))))),
+                    "scenarioStubs", array(strict(properties(
                             "stubId", string(), "scenarioName", string(),
                             "requiredScenarioState", nullableString(), "newScenarioState", nullableString()))),
                     "journal", strict(properties(

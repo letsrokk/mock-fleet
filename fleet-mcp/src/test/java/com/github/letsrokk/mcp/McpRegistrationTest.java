@@ -553,6 +553,7 @@ class McpRegistrationTest {
         return Stream.of(
                 Arguments.of("missing required argument", "get_mock_config", "{}"),
                 Arguments.of("wrong scalar type", "get_mock_config", "{\"mockId\":42}"),
+                Arguments.of("wrong bulk ID element type", "delete_stubs", "{\"mockId\":\"orders\",\"stubIds\":[42]}"),
                 Arguments.of("unknown root property", "get_mock_config",
                         "{\"mockId\":\"orders\",\"unexpected\":true}"),
                 Arguments.of("wrong nested type", "update_mock_config", """

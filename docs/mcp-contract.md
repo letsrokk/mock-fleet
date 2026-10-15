@@ -127,7 +127,7 @@ Internal mapping transfers, including persistence recovery markers, use the boun
 
 ## Bulk stub deletion
 
-`delete_stubs` accepts `{mockId,stubIds}` with distinct explicit IDs. The entire list is validated before any deletion; it must contain 1 to `maxPageSize` IDs (200 by default). Deletions run sequentially under the same per-mock MCP lock as single-stub mutations.
+`delete_stubs` accepts `{mockId,stubIds}` with distinct explicit IDs. The entire list and a reserved per-ID outcome report are checked before any deletion; it must contain 1 to `maxPageSize` IDs (200 by default). If the report would exceed `maxPayloadBytes`, the tool returns `RESULT_TOO_LARGE` before deleting anything; split the selection into smaller batches. Deletions run sequentially under the same per-mock MCP lock as single-stub mutations.
 
 The result is `{mockId,deletedCount,failedCount,results}`. Each result has `{stubId,deleted,error}` in input order. A success has `error: null`; a failure has `{code,retryable,stateMayHaveChanged}`. The batch continues after individual failures and returns a successful tool envelope even if some or all individual deletions fail, so inspect the counts and per-ID results. A failure with `stateMayHaveChanged: true` requires reconciliation before retrying. The operation is not atomic and does not roll back prior deletions.
 
@@ -186,12 +186,20 @@ Persistent stub mutations use recoverable transactions. A persistent update reco
   "candidateCount": 1,
   "matchedRequests": true,
   "scenarioStubs": [],
+  "possibleDuplicates": [],
+  "duplicateAnalysisComplete": true,
   "journal": {"retainedRequests": 20, "configuredLimit": 20, "possiblyTruncated": true},
   "warnings": ["The journal is at or above its configured limit; earlier requests may have been evicted. The running pod may use older settings, so this does not prove truncation."]
 }
 ```
 
 Set `recording.repeatsAsScenarios: false` in `start_recording`, or `snapshot.repeatsAsScenarios: false` in `snapshot_requests`, to ignore repeated requests instead of generating scenario steps. Native WireMock defaults are retained when this setting is omitted. Each `scenarioStubs` entry has `stubId`, `scenarioName`, nullable `requiredScenarioState`, and nullable `newScenarioState`. A warning explains that removing individual steps can break later requests; candidates are never automatically deduplicated or rewritten to remove scenarios.
+
+`possibleDuplicates` contains advisory exact-matcher comparisons against visible mappings present immediately before finalization. Each entry is `{candidateId,matches}`, where each match has `{stubId,name,responseEqual,scenarioName,requiredScenarioState,newScenarioState}`. Names and scenario fields can be null. Candidate scenario metadata is in `scenarioStubs`. `responseEqual` compares the complete response-definition JSON without returning response bodies; false means some response-definition field differs, not necessarily the body. Different response definitions or scenario steps may be intentional.
+
+Comparison uses the sanitized candidate's complete request-pattern JSON and the existing mapping's request-pattern JSON. Object property order does not matter; arrays, matcher forms, and header names remain significant. This is not semantic route-overlap detection, and stubs with different authentication matchers remain distinct. Candidates from the same finalization are not compared with each other. Recovery and discarded-candidate mappings are excluded. No duplicate hint changes or deletes a mapping.
+
+`duplicateAnalysisComplete` is false if comparison or output budgets prevent returning all hints. Comparisons reuse the existing bounded pre-finalization mapping scan, make no additional Admin calls, and are capped by `maxCollectionScanItems`; hint JSON is bounded by `maxPayloadBytes`. If hints would make the final tool result too large, they are omitted with a warning while candidate IDs and other recording results are retained. An empty hint array with incomplete analysis does not establish that no duplicate exists. External Admin writers can change mappings after the baseline was read.
 
 Before finalization, MCP samples the retained journal count without event bodies and reads the desired effective journal cap from Fleet configuration. `possiblyTruncated: true` means that the sampled journal is at or above that cap; it is a warning, not proof of eviction. It is null otherwise, including when the cap or count is unavailable. Desired settings can differ from those used by the running pod, and earlier eviction, resets, or concurrent traffic can affect completeness even below the cap. Missing diagnostics produce a warning and do not prevent stopping or snapshotting. A disabled journal also produces a warning.
 
