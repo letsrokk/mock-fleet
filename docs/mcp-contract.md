@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 34 tools:
+The server publishes 35 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -16,7 +16,7 @@ start_recording            get_recording_status        stop_recording
 snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
 reset_scenarios             export_mock_configs         import_mock_configs
-set_mock_pinned
+set_mock_pinned             patch_stub
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -118,11 +118,21 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 
 ## Stub output control
 
-`get_stub`, `list_stubs`, and `list_unmatched_stubs` omit inline response bodies by default. They retain request matchers and response metadata, including `bodyFileName`, and add `bodyBytes`. `create_stub`, `update_stub`, `persist_stub`, and `unpersist_stub` return a summary in `stub`: `{id,name,persistent,bodyBytes}`. An unnamed stub has `name: null`.
+`get_stub`, `list_stubs`, and `list_unmatched_stubs` omit inline response bodies by default. They retain request matchers and response metadata, including `bodyFileName`, and add `bodyBytes`. `create_stub`, `update_stub`, `persist_stub`, `unpersist_stub`, and `patch_stub` return a summary in `stub`: `{id,name,persistent,bodyBytes}`. An unnamed stub has `name: null`.
 
-All seven tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
+All eight tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
 
-Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
+Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and patches and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
+
+## Partial stub updates
+
+`update_stub` replaces a complete mapping. Use `patch_stub` to change a name, matcher, priority, or other mapping fields without sending the response body back through MCP:
+
+```json
+{"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c","patch":{"name":"orders lookup","request":{"queryParameters":{"q":{"matches":"(?i)term"}}},"priority":null}}
+```
+
+Patches follow JSON Merge Patch semantics: omitted fields are preserved, nested objects are merged, `null` removes a field, and arrays are replaced as a whole. The patch must be an object and cannot contain `id`, `uuid`, or `persistent`; use `persist_stub` or `unpersist_stub` for persistence changes. Outbound policy checks apply to the complete merged mapping before writing it. Persistent patches reuse the recoverable update transaction, including retry reconciliation. Results use the same compact summary and optional `includeBody` as other stub writes. Updates are serialized with other MCP mutations for that mock; external Admin API writers are not covered by that lock.
 
 ## Encoded bodies
 

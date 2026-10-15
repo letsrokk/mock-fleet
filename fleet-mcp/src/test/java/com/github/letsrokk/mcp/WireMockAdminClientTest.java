@@ -29,6 +29,55 @@ class WireMockAdminClientTest {
             new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
     @Test
+    void patchPreservesALargeBodyAndMergesNestedObjectsWithNullRemoval() throws Exception {
+        ObjectNode before = (ObjectNode) mapper.readTree("""
+                {"id":"server-id","persistent":false,"name":"old","priority":5,
+                 "request":{"method":"GET","url":"/old","headers":{"A":{"equalTo":"a"}}},
+                 "response":{"status":200},"metadata":{"old":true}}
+                """);
+        ((ObjectNode) before.path("response")).put("body", "x".repeat(2 * 1024 * 1024));
+        ObjectNode patch = (ObjectNode) mapper.readTree("""
+                {"name":"new","priority":null,"request":{"url":"/new","headers":null},
+                 "metadata":{"old":null,"tags":["a","b"]}}
+                """);
+        ObjectNode expected = before.deepCopy();
+        expected.put("name", "new").remove("priority");
+        ((ObjectNode) expected.path("request")).put("url", "/new").remove("headers");
+        expected.set("metadata", mapper.readTree("{\"tags\":[\"a\",\"b\"]}"));
+        transport.respond(404, "");
+        transport.respond(200, before.toString());
+        transport.respond(200, expected.toString());
+
+        JsonNode result = client.patchStub("orders", "server-id", patch, ignored -> {});
+
+        assertEquals(expected, result);
+        assertEquals(expected, transport.jsonAt(mapper, 2));
+        assertEquals("x".repeat(2 * 1024 * 1024), result.path("response").path("body").asText());
+    }
+
+    @Test
+    void patchResumesAnExistingPersistentUpdateTransaction() throws Exception {
+        String before = "{\"id\":\"server-id\",\"persistent\":true,\"name\":\"old\",\"response\":{\"status\":200}}";
+        String after = "{\"id\":\"server-id\",\"persistent\":true,\"name\":\"new\",\"response\":{\"status\":200}}";
+        transport.respond(200, recoveryMarker("update", before, after));
+        transport.respond(200, after);
+        transport.respond(204, "");
+        transport.respond(404, "");
+
+        assertEquals(mapper.readTree(after), client.patchStub("orders", "server-id",
+                mapper.createObjectNode().put("name", "new"), ignored -> {}));
+        assertEquals(4, transport.requestCount());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"id", "uuid", "persistent"})
+    void patchRejectsServerManagedFieldsBeforeDispatch(String field) {
+        assertThrows(IllegalArgumentException.class, () -> client.patchStub("orders", "server-id",
+                mapper.createObjectNode().putNull(field), ignored -> {}));
+        assertEquals(0, transport.requestCount());
+    }
+
+    @Test
     void uploadsBodyFilesAsOpaqueBytes() {
         transport.respond(201, "");
 

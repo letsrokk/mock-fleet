@@ -26,6 +26,13 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
                 required.add("stubId");
                 addMapping(properties, required, false);
             }
+            case "patch_stub" -> {
+                properties.put("stubId", string("WireMock stub UUID"));
+                properties.put("patch", jsonObject("JSON Merge Patch: omit to preserve, null to remove, arrays replace",
+                        new JsonArray().add(new JsonObject().put("name", "renamed")
+                                .put("request", new JsonObject().put("urlPath", "/orders")))));
+                required.add("stubId").add("patch");
+            }
             case "find_requests" -> {
                 addRequestPattern(properties, required, false);
                 addPagination(properties);
@@ -49,7 +56,7 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
             }
             default -> throw new IllegalArgumentException("Unsupported rich input schema tool: " + tool.name());
         }
-        if (tool.name().equals("create_stub") || tool.name().equals("update_stub")) {
+        if (tool.name().equals("create_stub") || tool.name().equals("update_stub") || tool.name().equals("patch_stub")) {
             properties.put("includeBody", new JsonObject().put("type", "boolean")
                     .put("description", "Return the full mapping with inline response bodies; defaults to false"));
         }

@@ -129,6 +129,25 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void patchRejectsADisallowedTargetInTheMergedMappingBeforeWriting() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(404, "");
+        transport.respond(200, "{\"id\":\"stub-1\",\"request\":{\"url\":\"/orders\"},\"response\":{\"status\":200}}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).patchStub("orders", "stub-1",
+                    Map.of("response", Map.of("proxyBaseUrl", "http://127.0.0.1")), null);
+            assertTrue(response.isError());
+            var error = ((McpToolExecutor.ErrorEnvelope) response.structuredContent()).error();
+            assertEquals("INVALID_ARGUMENT", error.code());
+            assertFalse(error.stateMayHaveChanged());
+            assertEquals(3, transport.requestCount());
+        }
+    }
+
+    @Test
     void persistingALargeAlreadyPersistentStubReturnsASmallSummary() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();

@@ -30,7 +30,7 @@ class McpRegistrationTest {
             "list_mocks", "get_mock_config", "export_mock_configs", "import_mock_configs",
             "list_option_definitions", "update_mock_config",
             "delete_mock_config", "start_mock", "stop_mock", "set_mock_pinned",
-            "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "delete_stub",
+            "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "patch_stub", "delete_stub",
             "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
             "get_recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
@@ -93,7 +93,7 @@ class McpRegistrationTest {
                     registeredTool.path("name").asText());
         }
         for (String name : List.of("get_stub", "list_stubs", "list_unmatched_stubs", "create_stub",
-                "update_stub", "persist_stub", "unpersist_stub")) {
+                "update_stub", "patch_stub", "persist_stub", "unpersist_stub")) {
             JsonNode schema = tool(tools, name).path("inputSchema");
             assertEquals("boolean", schema.path("properties").path("includeBody").path("type").asText(), name);
             assertFalse(textValues(schema.path("required")).contains("includeBody"), name);
@@ -115,6 +115,7 @@ class McpRegistrationTest {
 
         Map<String, String> arbitraryJsonArguments = Map.of(
                 "create_stub", "mapping",
+                "patch_stub", "patch",
                 "send_request", "headers",
                 "find_requests", "requestPattern",
                 "start_recording", "recording",
@@ -211,7 +212,7 @@ class McpRegistrationTest {
                 .extract().asString();
 
         JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
-        assertEquals(34, tools.size());
+        assertEquals(EXPECTED_TOOLS.size(), tools.size());
         for (JsonNode tool : tools) {
             JsonNode schema = tool.path("outputSchema");
             assertEquals(2, schema.path("oneOf").size(), tool.path("name").asText() + ": " + schema);

@@ -168,6 +168,40 @@ public final class WireMockAdminClient {
         String id = requireIdentifier(stubId, "stubId");
         PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
         JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
+        return replaceStub(mockId, id, mapping, current, pending);
+    }
+
+    public JsonNode patchStub(String mockId, String stubId, ObjectNode patch, Consumer<JsonNode> validate) {
+        for (String field : List.of("id", "uuid", "persistent")) {
+            if (patch.has(field)) {
+                throw new IllegalArgumentException("patch cannot change " + field);
+            }
+        }
+        validateRequest(mockId, jsonRequest(HttpMethod.PUT, "/__admin/mappings", patch), maxPayloadBytes);
+        String id = requireIdentifier(stubId, "stubId");
+        PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
+        JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
+        ObjectNode merged = mergePatch(current, patch);
+        validate.accept(merged);
+        return replaceStub(mockId, id, merged, current, pending);
+    }
+
+    private ObjectNode mergePatch(JsonNode current, ObjectNode patch) {
+        ObjectNode merged = current.isObject() ? current.deepCopy() : mapper.createObjectNode();
+        patch.properties().forEach(field -> {
+            if (field.getValue().isNull()) {
+                merged.remove(field.getKey());
+            } else if (field.getValue() instanceof ObjectNode object) {
+                merged.set(field.getKey(), mergePatch(merged.path(field.getKey()), object));
+            } else {
+                merged.set(field.getKey(), field.getValue().deepCopy());
+            }
+        });
+        return merged;
+    }
+
+    private JsonNode replaceStub(String mockId, String id, ObjectNode mapping, JsonNode current,
+            PersistentTransaction pending) {
         ObjectNode payload = serverManagedCopy(mapping);
         copyIfPresent(current, payload, "id");
         copyIfPresent(current, payload, "uuid");

@@ -342,6 +342,19 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "patch_stub", description = "Partially update a stub using JSON Merge Patch: omitted fields are preserved, null removes fields, arrays are replaced. Cannot change id, uuid, or persistent; use persistence tools. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    public ToolResponse patchStub(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "WireMock stub UUID") String stubId,
+            @ToolArg(description = "JSON Merge Patch object for a native WireMock mapping") Map<String, Object> patch,
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+        return wireMock("patch_stub", mockId, () -> coordinator.serialized(mockId, () -> {
+            JsonNode updated = wireMock.patchStub(mockId, stubId, object(patch, "patch"), outboundTargets::validate);
+            return McpToolExecutor.ToolResult.of("Patched stub " + stubId + ".",
+                    stubResult(mockId, updated, includeBody, true));
+        }));
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "delete_stub", description = "Delete a WireMock stub without deleting referenced body files.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.DeleteStub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse deleteStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId) {
