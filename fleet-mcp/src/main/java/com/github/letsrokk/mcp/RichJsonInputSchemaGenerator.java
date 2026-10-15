@@ -56,16 +56,19 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
                 required.add("recording");
             }
             case "snapshot_requests" -> {
-                properties.put("snapshot", jsonObject("Native WireMock snapshot JSON", new JsonArray()
+                properties.put("snapshot", jsonObject("Native WireMock snapshot JSON. Put request matchers (including bodyPatterns), ids, and allowNonProxied inside filters", new JsonArray()
                         .add(new JsonObject().put("repeatsAsScenarios", false).put("filters", new JsonObject()
-                                .put("method", "GET").put("urlPathPattern", "/v1/.*")))));
+                                .put("method", "POST").put("urlPath", "/soap")
+                                .put("bodyPatterns", new JsonArray().add(new JsonObject().put("contains", "<Action>A</Action>")))))
+                        .add(new JsonObject().put("repeatsAsScenarios", false).put("filters", new JsonObject()
+                                .put("ids", new JsonArray().add("d13b8bb8-95bb-4c44-b7d7-601baa333c1c"))))));
                 required.add("snapshot");
             }
             default -> throw new IllegalArgumentException("Unsupported rich input schema tool: " + tool.name());
         }
         if (tool.name().equals("create_stub") || tool.name().equals("update_stub") || tool.name().equals("patch_stub")) {
             properties.put("includeBody", new JsonObject().put("type", "boolean")
-                    .put("description", "Return the full mapping with inline response bodies; defaults to false"));
+                    .put("description", "Return the full mapping with inline response bodies; defaults to true. Set false for compact output").put("default", true));
         }
         return new JsonObject().put("type", "object").put("properties", properties)
                 .put("required", required).put("additionalProperties", false);
