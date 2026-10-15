@@ -111,6 +111,27 @@ class WireMockAdminClientTest {
     }
 
     @Test
+    void serveEventReadsUseNativeJournalEndpointsAndValidateIdentifiersBeforeSending() {
+        transport.respond(200, "{\"requests\":[]}");
+        client.listServeEventsPage("orders", "stub-1", 10, 0, 4096, 100);
+        assertEquals(HttpMethod.GET, transport.last().method());
+        assertEquals("/__admin/requests?matchingStub=stub-1", transport.last().target());
+
+        transport.respond(200, "{\"requests\":[]}");
+        client.listServeEventsPage("orders", null, 10, 0, 4096, 100);
+        assertEquals("/__admin/requests", transport.last().target());
+
+        transport.respond(200, "{\"id\":\"event-1\"}");
+        assertEquals("event-1", client.getServeEvent("orders", "event-1").path("id").asText());
+        assertEquals(HttpMethod.GET, transport.last().method());
+        assertEquals("/__admin/requests/event-1", transport.last().target());
+        assertThrows(IllegalArgumentException.class, () -> client.getServeEvent("orders", "../reset"));
+        assertThrows(IllegalArgumentException.class,
+                () -> client.listServeEventsPage("orders", "stub&unmatched=true", 10, 0, 4096, 100));
+        assertEquals(3, transport.requestCount());
+    }
+
+    @Test
     void journalCountsAskWireMockForNoServeEventBodies() {
         transport.respond(200, "{\"requests\":[],\"meta\":{\"total\":20},\"requestJournalDisabled\":false}");
         JsonNode result = client.journalCount("orders", "server-id", false);

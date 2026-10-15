@@ -277,6 +277,22 @@ public final class WireMockAdminClient {
                 "requests", limit, position, maxBytes, maxItems);
     }
 
+    public JsonNode listServeEventsPage(String mockId, String stubId, int limit, long position,
+            long maxBytes, int maxItems) {
+        String endpoint = "/__admin/requests";
+        if (stubId != null) {
+            endpoint += "?matchingStub=" + requireIdentifier(stubId, "stubId");
+        }
+        return sanitizedCollectionPage(mockId,
+                new TransportRequest(HttpMethod.GET, endpoint, JSON_HEADERS, new byte[0]),
+                "requests", limit, position, maxBytes, maxItems);
+    }
+
+    public JsonNode getServeEvent(String mockId, String eventId) {
+        return sanitizer.redactHeaders(getJson(mockId,
+                "/__admin/requests/" + requireIdentifier(eventId, "eventId")));
+    }
+
     public JsonNode journalCount(String mockId, String stubId, boolean unmatched) {
         String endpoint = "/__admin/requests?limit=0";
         if (stubId != null) {
@@ -892,6 +908,7 @@ public final class WireMockAdminClient {
 
     private int payloadLimit(TransportRequest request) {
         return request.target().startsWith("/__admin/mappings")
+                || (request.method() == HttpMethod.GET && request.target().startsWith("/__admin/requests/"))
                 ? (int) Math.min(Integer.MAX_VALUE, maxCollectionScanBytes) : maxPayloadBytes;
     }
 

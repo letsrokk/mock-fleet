@@ -276,12 +276,12 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_stubs", description = "List WireMock stubs without inline response bodies by default. Keep compact output for matcher inspection; set includeBody=true only when response bodies are needed. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_stubs", description = "List WireMock stubs with inline response bodies by default. Set includeBody=false for compact matcher inspection. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listStubs(
             @ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Opaque continuation cursor", required = false) String cursor,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         JsonNode scope = scope(mockId, null);
         return wireMock("list_stubs", mockId, () -> McpToolExecutor.ToolResult.of("Listed stubs for " + mockId + ".",
                 stubCollectionResult(includeBody, mockId, wireMock.listStubs(mockId, pageSize(limit),
@@ -290,11 +290,11 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests, omitting inline response bodies by default. Requires WireMock 3.13+ and may start the pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "list_unmatched_stubs", description = "List stubs that have not matched journaled requests, with inline response bodies by default. Set includeBody=false for compact output. Requires WireMock 3.13+ and may start the pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.StubPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listUnmatchedStubs(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,
             @ToolArg(description = "Opaque continuation cursor", required = false) String cursor,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         JsonNode scope = scope(mockId, null);
         return wireMock("list_unmatched_stubs", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Listed unmatched stubs for " + mockId + ".",
@@ -306,19 +306,19 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "get_stub", description = "Get a WireMock stub by ID without inline response bodies by default. Inspect matchers and metadata compactly; set includeBody=true only when the response body is needed. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "get_stub", description = "Get a WireMock stub by ID with inline response bodies by default. Set includeBody=false for compact matcher inspection. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse getStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("get_stub", mockId, () -> McpToolExecutor.ToolResult.of(
                 "Loaded stub " + stubId + ".", stubResult(mockId, wireMock.getStub(mockId, stubId), includeBody, false)));
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "create_stub", description = "Create a temporary WireMock stub and return a summary by default. Client-supplied id, uuid, and persistent fields are ignored.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "create_stub", description = "Create a temporary WireMock stub and return its full mapping by default. Set includeBody=false for a compact summary. Client-supplied id, uuid, and persistent fields are ignored.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse createStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("create_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
@@ -328,11 +328,11 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "update_stub", description = "Replace a complete WireMock stub mapping while preserving its persistence state. Use patch_stub for name, matcher, or priority edits without resending the body. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "update_stub", description = "Replace a complete WireMock stub mapping while preserving its persistence state. Use patch_stub for name, matcher, or priority edits without resending the body. Returns the full mapping by default; set includeBody=false for a compact summary.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse updateStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "Native WireMock stub mapping JSON") Map<String, Object> mapping,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("update_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             ObjectNode payload = object(mapping, "mapping");
             outboundTargets.validate(payload);
@@ -342,11 +342,11 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "patch_stub", description = "Partially update a stub using JSON Merge Patch: omitted fields are preserved, null removes fields, arrays are replaced. Rename by setting patch.name; for several stubs, call once per selected ID. Cannot change id, uuid, or persistent; use persistence tools. Returns a summary by default.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
+    @Tool(name = "patch_stub", description = "Partially update a stub using JSON Merge Patch: omitted fields are preserved, null removes fields, arrays are replaced. Rename by setting patch.name; for several stubs, call once per selected ID. Cannot change id, uuid, or persistent; use persistence tools. Returns the full mapping by default; set includeBody=false for a compact summary.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = false))
     public ToolResponse patchStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
             @ToolArg(description = "JSON Merge Patch object for a native WireMock mapping") Map<String, Object> patch,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("patch_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             JsonNode updated = wireMock.patchStub(mockId, stubId, object(patch, "patch"), outboundTargets::validate);
             return McpToolExecutor.ToolResult.of("Patched stub " + stubId + ".",
@@ -410,10 +410,10 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files. Returns a summary by default.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "persist_stub", description = "Idempotently persist a temporary stub after verifying referenced body files. Returns the full mapping by default; set includeBody=false for a compact summary.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse persistStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("persist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             requireStorage();
             JsonNode stub = wireMock.getStub(mockId, stubId);
@@ -424,10 +424,10 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files. Returns a summary by default.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "unpersist_stub", description = "Idempotently make a persistent stub temporary without deleting body files. Returns the full mapping by default; set includeBody=false for a compact summary.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.Stub.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = true, openWorldHint = false))
     public ToolResponse unpersistStub(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "WireMock stub UUID") String stubId,
-            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to false", required = false) Boolean includeBody) {
+            @ToolArg(description = "Include the full mapping with inline response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
         return wireMock("unpersist_stub", mockId, () -> coordinator.serialized(mockId, () -> {
             requireStorage();
             return McpToolExecutor.ToolResult.of("Stub " + stubId + " is temporary.",
@@ -454,7 +454,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "find_requests", description = "Find journaled requests matching a native WireMock request pattern. Sensitive headers are redacted.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RequestPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    @Tool(name = "find_requests", description = "Find journaled requests matching a native WireMock request pattern. Sensitive headers are redacted. For event IDs, matched stub IDs, and served responses, use list_serve_events and get_serve_event.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RequestPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse findRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock request-pattern JSON") Map<String, Object> requestPattern,
             @ToolArg(description = "Page size", required = false) Integer limit,
@@ -467,6 +467,42 @@ public final class FleetMcpTools {
                         () -> wireMock.findRequestsPage(mockId, pattern, pageSize(limit),
                                 cursorPosition("find_requests", scope, cursor), config.maxCollectionScanBytes(),
                                 config.maxCollectionScanItems())), "requests", "requests", "find_requests", scope)));
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "list_serve_events", description = "Inspect retained journal events without creating stubs. Returns event IDs, matched stub IDs, requests, and actual served responses. Bodies are included by default; set includeBody=false for compact output. Sensitive headers are redacted. Use event IDs in snapshot.filters.ids to snapshot selected events. Journal eviction or new traffic can change pagination. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ServeEventPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse listServeEvents(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "Only events served by this stub ID; omit for all retained events", required = false) String stubId,
+            @ToolArg(description = "Page size", required = false) Integer limit,
+            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor,
+            @ToolArg(description = "Include request and served response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
+        JsonNode scope = scope(mockId, stubId == null ? null : mapper.getNodeFactory().textNode(stubId));
+        return wireMock("list_serve_events", mockId, () -> {
+            JsonNode source = boundedCollectionPage("list_serve_events", scope, cursor,
+                    () -> wireMock.listServeEventsPage(mockId, stubId, pageSize(limit),
+                            cursorPosition("list_serve_events", scope, cursor), config.maxCollectionScanBytes(),
+                            config.maxCollectionScanItems()));
+            ObjectNode result = collectionResult(mockId, source, "requests", "events", "list_serve_events", scope);
+            ArrayNode events = mapper.createArrayNode();
+            for (JsonNode event : result.path("events")) {
+                events.add(serveEventView(event, includeBody));
+            }
+            result.set("events", events);
+            checkResultSize(mockId, result, false);
+            return McpToolExecutor.ToolResult.of("Loaded serve events for " + mockId + ".", result);
+        });
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "get_serve_event", description = "Read a retained journal event by eventId from list_serve_events, including the actual served response. Bodies are included by default; set includeBody=false for compact output. Sensitive headers are redacted. Evicted or reset events are unavailable. This may start an inactive mock pod.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.ServeEvent.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse getServeEvent(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "WireMock serve-event UUID from list_serve_events") String eventId,
+            @ToolArg(description = "Include request and served response bodies; defaults to true. Set false for compact output", required = false, defaultValue = "true") Boolean includeBody) {
+        return wireMock("get_serve_event", mockId, () -> {
+            ObjectNode result = wrapped(mockId, "event", serveEventView(wireMock.getServeEvent(mockId, eventId), includeBody));
+            checkResultSize(mockId, result, false);
+            return McpToolExecutor.ToolResult.of("Loaded serve event " + eventId + ".", result);
+        });
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
@@ -596,7 +632,7 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
-    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, journal warnings, and advisory duplicate hints. Hints compare exact matcher JSON. An absent hint does not prove a candidate is new. Check duplicateAnalysisComplete, responseEqual, and scenario metadata before deleting. Set snapshot.repeatsAsScenarios=false to ignore repeat requests.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
+    @Tool(name = "snapshot_requests", description = "Create sanitized temporary recorder candidates with persist=false and outputFormat=IDS, scenario steps, journal warnings, and advisory duplicate hints. Hints compare exact matcher JSON. An absent hint does not prove a candidate is new. Check duplicateAnalysisComplete, responseEqual, and scenario metadata before deleting. Set snapshot.repeatsAsScenarios=false to ignore repeat requests. Put native request matchers, including bodyPatterns, inside snapshot.filters; use snapshot.filters.ids for serve-event IDs and snapshot.filters.allowNonProxied=true to include non-proxied events. Use list_serve_events/get_serve_event to inspect responses without creating stubs.", inputSchema = @Tool.InputSchema(generator = RichJsonInputSchemaGenerator.class), outputSchema = @Tool.OutputSchema(from = OutputSchemas.RecordingCandidates.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = true, idempotentHint = false, openWorldHint = true))
     public ToolResponse snapshotRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Native WireMock snapshot JSON") Map<String, Object> snapshot) {
         return wireMock("snapshot_requests", mockId, () -> coordinator.serialized(mockId, () -> {
@@ -923,6 +959,27 @@ public final class FleetMcpTools {
         return encoded;
     }
 
+    private ObjectNode serveEventView(JsonNode event, Boolean includeBody) {
+        if (!event.path("id").isTextual() || !event.path("request").isObject()
+                || !event.path("wasMatched").isBoolean()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "WireMock serve event is malformed", false,
+                    Map.of());
+        }
+        ObjectNode view = mapper.createObjectNode();
+        view.set("id", event.path("id"));
+        view.set("stubId", event.path("stubMapping").has("id")
+                ? event.path("stubMapping").path("id") : mapper.nullNode());
+        view.set("wasMatched", event.path("wasMatched"));
+        for (String field : List.of("request", "response")) {
+            JsonNode value = event.has(field) ? event.get(field).deepCopy() : mapper.nullNode();
+            if (Boolean.FALSE.equals(includeBody) && value instanceof ObjectNode object) {
+                object.remove(List.of("body", "bodyAsBase64"));
+            }
+            view.set(field, value);
+        }
+        return view;
+    }
+
     private ObjectNode stubResult(String mockId, JsonNode stub, Boolean includeBody, boolean mutation) {
         ObjectNode result = wrapped(mockId, "stub", stubView(stub, includeBody, mutation));
         checkResultSize(mockId, result, mutation);
@@ -942,7 +999,7 @@ public final class FleetMcpTools {
     }
 
     private JsonNode stubView(JsonNode stub, Boolean includeBody, boolean summary) {
-        if (Boolean.TRUE.equals(includeBody)) {
+        if (!Boolean.FALSE.equals(includeBody)) {
             return stub;
         }
         ObjectNode view;

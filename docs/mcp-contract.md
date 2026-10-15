@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 37 tools:
+The server publishes 39 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -17,7 +17,7 @@ snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
 reset_scenarios             export_mock_configs         import_mock_configs
 set_mock_pinned             patch_stub                  get_journal_summary
-delete_stubs
+delete_stubs               list_serve_events           get_serve_event
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -42,7 +42,7 @@ Every closed tool-input object rejects unknown properties. Native WireMock mappi
 
 ## Collection pagination
 
-`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, `list_scenarios`, and `get_journal_summary` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
+`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_serve_events`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, `list_scenarios`, and `get_journal_summary` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and filter, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
 
 Every collection returns `page` with the same metadata:
 
@@ -119,9 +119,11 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 
 ## Stub output control
 
-`get_stub`, `list_stubs`, and `list_unmatched_stubs` omit inline response bodies by default. They retain request matchers and response metadata, including `bodyFileName`, and add `bodyBytes`. `create_stub`, `update_stub`, `persist_stub`, `unpersist_stub`, and `patch_stub` return a summary in `stub`: `{id,name,persistent,bodyBytes}`. An unnamed stub has `name: null`.
+`get_stub`, `list_stubs`, `list_unmatched_stubs`, `create_stub`, `update_stub`, `persist_stub`, `unpersist_stub`, and `patch_stub` accept optional `includeBody`, which defaults to **true**. Omitting the option or passing `true` returns the full mapping, including inline `response.body`, `response.jsonBody`, or `response.base64Body`. Full results do not add `bodyBytes`. A `bodyFileName` reference remains a reference; use `get_body_file` to read that file.
 
-All eight tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
+Pass `includeBody: false` for compact output. Reads retain request matchers and response metadata, including `bodyFileName`, and add `bodyBytes`. Writes return a summary in `stub`: `{id,name,persistent,bodyBytes}`. An unnamed stub has `name: null`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. The option affects returned data only; stored mappings are unchanged.
+
+This changes the v2.8.0 default, which was compact output. Clients that need the previous behavior must pass `includeBody: false`. The published input schemas advertise the option and `default: true`. After upgrading, reconnect the MCP client and refresh its tool discovery. If an option is missing, inspect the deployed server's `tools/list` and application version; patching a stub is unnecessary for reading its body.
 
 Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and patches and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
 
@@ -132,6 +134,28 @@ Internal mapping transfers, including persistence recovery markers, use the boun
 The result is `{mockId,deletedCount,failedCount,results}`. Each result has `{stubId,deleted,error}` in input order. A success has `error: null`; a failure has `{code,retryable,stateMayHaveChanged}`. The batch continues after individual failures and returns a successful tool envelope even if some or all individual deletions fail, so inspect the counts and per-ID results. A failure with `stateMayHaveChanged: true` requires reconciliation before retrying. The operation is not atomic and does not roll back prior deletions.
 
 Persistence rules match `delete_stub`: persist a stored runtime-only mapping first when permanent deletion is intended. The bulk tool never persists mappings automatically and never deletes referenced body files. Already absent mappings follow the existing single-delete behavior.
+
+## Inspect served responses
+
+`list_serve_events` reads retained journal events without creating or modifying stubs. It accepts `{mockId,stubId?,limit?,cursor?,includeBody?}`. Omit `stubId` for all events, or pass a proxy catch-all stub ID to inspect traffic served by that mapping. `get_serve_event` accepts `{mockId,eventId,includeBody?}` using an ID from the list.
+
+List results are `{mockId,events,page}`; single-event results are `{mockId,event}`. Each event has `{id,stubId,wasMatched,request,response}`. `stubId` is null when no mapping is available. `request` and `response` use native WireMock logged data, including served status and headers; `response` can be null when no response was retained. Stub definitions are excluded so the response describes the served result rather than its template. Sensitive request/response headers and request cookies follow the existing redaction policy.
+
+Both tools default `includeBody` to **true**. Native logged bodies use `body` and/or `bodyAsBase64`, including binary responses. Pass `includeBody: false` to omit these two fields from both the request and response. Internal single-event reads and collection scans use `maxCollectionScanBytes` (64 MiB by default); returned results are bounded by `maxPayloadBytes` (1 MiB by default). If a result is too large, pass `includeBody: false` or reduce the list page size. Bodies are never silently truncated by MCP or exported to files.
+
+For example, list compact event metadata:
+
+```json
+{"mockId":"orders","limit":10,"includeBody":false}
+```
+
+Then read a selected event and its bodies with `get_serve_event`:
+
+```json
+{"mockId":"orders","eventId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c"}
+```
+
+Events can disappear after journal eviction, reset, or pod replacement. WireMock's journal settings determine which bodies are retained and whether they are truncated upstream. Pagination reads a changing journal and can omit or repeat events during concurrent traffic. `find_requests` continues to return native request-pattern matches only; its request records have neither serve-event IDs nor served responses.
 
 ## Journal counts
 
@@ -149,7 +173,7 @@ The tool requests count metadata with WireMock's `limit=0`, so journal request a
 {"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c","patch":{"name":"orders lookup","request":{"queryParameters":{"q":{"matches":"(?i)term"}}},"priority":null}}
 ```
 
-Patches follow JSON Merge Patch semantics: omitted fields are preserved, nested objects are merged, `null` removes a field, and arrays are replaced as a whole. The patch must be an object and cannot contain `id`, `uuid`, or `persistent`; use `persist_stub` or `unpersist_stub` for persistence changes. Outbound policy checks apply to the complete merged mapping before writing it. Persistent patches reuse the recoverable update transaction, including retry reconciliation. Results use the same compact summary and optional `includeBody` as other stub writes. Updates are serialized with other MCP mutations for that mock; external Admin API writers are not covered by that lock.
+Patches follow JSON Merge Patch semantics: omitted fields are preserved, nested objects are merged, `null` removes a field, and arrays are replaced as a whole. The patch must be an object and cannot contain `id`, `uuid`, or `persistent`; use `persist_stub` or `unpersist_stub` for persistence changes. Outbound policy checks apply to the complete merged mapping before writing it. Persistent patches reuse the recoverable update transaction, including retry reconciliation. Results include the full mapping by default; pass `includeBody: false` for the same compact summary as other stub writes. Updates are serialized with other MCP mutations for that mock; external Admin API writers are not covered by that lock.
 
 ## Common workflows
 
@@ -173,13 +197,13 @@ Call `stop_mock` with `{"mockId":"orders"}` and wait for a successful STOPPED re
 
 ### Inspect matchers or response bodies
 
-Use the default compact `get_stub` or `list_stubs` output to inspect matchers and metadata. Request a full mapping only when the response body is needed, for example with `get_stub`:
+Use `get_stub` to read a full mapping and its inline response body:
 
 ```json
 {"mockId":"orders","stubId":"d13b8bb8-95bb-4c44-b7d7-601baa333c1c","includeBody":true}
 ```
 
-There is no arbitrary `fields` selector. Select the fields you need from the returned mapping; keep `includeBody` omitted for routine inspection.
+The example also works with `includeBody` omitted. Pass `includeBody: false` to inspect matchers and metadata without inline response bodies. There is no arbitrary `fields` selector.
 
 ### Monitor proxy fall-throughs
 
@@ -236,6 +260,36 @@ Persistent stub mutations use recoverable transactions. A persistent update reco
   "warnings": ["The journal is at or above its configured limit; earlier requests may have been evicted. The running pod may use older settings, so this does not prove truncation."]
 }
 ```
+
+Snapshot selection uses native fields inside `snapshot.filters`. Request-body matching works alongside URL and method matching, for example:
+
+```json
+{
+  "mockId": "orders",
+  "snapshot": {
+    "repeatsAsScenarios": false,
+    "filters": {
+      "method": "POST",
+      "urlPath": "/soap",
+      "bodyPatterns": [{"contains": "<Action>A</Action>"}]
+    }
+  }
+}
+```
+
+Alternatively, use serve-event IDs returned by `list_serve_events`:
+
+```json
+{
+  "mockId": "orders",
+  "snapshot": {
+    "repeatsAsScenarios": false,
+    "filters": {"ids": ["d13b8bb8-95bb-4c44-b7d7-601baa333c1c"]}
+  }
+}
+```
+
+Snapshotting includes proxied events by default. To include non-proxied events, set `snapshot.filters.allowNonProxied: true`. Keep `bodyPatterns`, `ids`, and `allowNonProxied` inside `filters`, not at the top level of `snapshot`. Snapshotting creates temporary stubs; use the serve-event read tools when you only need to inspect traffic.
 
 Set `recording.repeatsAsScenarios: false` in `start_recording`, or `snapshot.repeatsAsScenarios: false` in `snapshot_requests`, to ignore repeated requests instead of generating scenario steps. Native WireMock defaults are retained when this setting is omitted. Each `scenarioStubs` entry has `stubId`, `scenarioName`, nullable `requiredScenarioState`, and nullable `newScenarioState`. A warning explains that removing individual steps can break later requests; candidates are never automatically deduplicated or rewritten to remove scenarios.
 

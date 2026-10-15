@@ -50,6 +50,9 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mockId", string(), "response", response()));
             case "RequestPage" -> strict(properties(
                     "mockId", string(), "requests", array(openObject()), "page", page()));
+            case "ServeEventPage" -> strict(properties(
+                    "mockId", string(), "events", array(serveEvent()), "page", page()));
+            case "ServeEvent" -> strict(properties("mockId", string(), "event", serveEvent()));
             case "CountRequests" -> strict(properties(
                     "mockId", string(), "count", integer()));
             case "JournalSummary" -> strict(properties(
@@ -118,6 +121,12 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                 "message", nullableString(),
                 "retryAfterMs", new JsonObject().put("type", new JsonArray().add("integer").add("null"))
                         .put("minimum", 0)));
+    }
+
+    private JsonObject serveEvent() {
+        return strict(properties("id", string(), "stubId", nullableString(), "wasMatched", bool(),
+                "request", openObject(),
+                "response", openObject().put("type", new JsonArray().add("object").add("null"))));
     }
 
     private JsonObject response() {

@@ -22,6 +22,8 @@ public final class OutputSchemas {
     public static final class DeleteStubs {}
     public static final class SendRequest {}
     public static final class RequestPage {}
+    public static final class ServeEventPage {}
+    public static final class ServeEvent {}
     public static final class CountRequests {}
     public static final class JournalSummary {}
     public static final class NearMisses {}

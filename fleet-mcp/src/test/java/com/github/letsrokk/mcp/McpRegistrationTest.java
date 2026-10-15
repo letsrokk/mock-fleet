@@ -31,7 +31,7 @@ class McpRegistrationTest {
             "list_option_definitions", "update_mock_config",
             "delete_mock_config", "start_mock", "stop_mock", "set_mock_pinned",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "patch_stub", "delete_stub", "delete_stubs",
-            "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests", "get_journal_summary",
+            "persist_stub", "unpersist_stub", "send_request", "find_requests", "list_serve_events", "get_serve_event", "count_requests", "get_journal_summary",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
             "get_recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
             "put_body_file", "delete_body_file", "list_scenarios", "reset_scenarios");
@@ -93,10 +93,11 @@ class McpRegistrationTest {
                     registeredTool.path("name").asText());
         }
         for (String name : List.of("get_stub", "list_stubs", "list_unmatched_stubs", "create_stub",
-                "update_stub", "patch_stub", "persist_stub", "unpersist_stub")) {
+                "update_stub", "patch_stub", "persist_stub", "unpersist_stub", "list_serve_events", "get_serve_event")) {
             JsonNode schema = tool(tools, name).path("inputSchema");
             assertEquals("boolean", schema.path("properties").path("includeBody").path("type").asText(), name);
             assertFalse(textValues(schema.path("required")).contains("includeBody"), name);
+            assertTrue(schema.path("properties").path("includeBody").path("default").asBoolean(), name);
         }
         JsonNode bulkIds = tool(tools, "delete_stubs").path("inputSchema").path("properties").path("stubIds");
         assertEquals("array", bulkIds.path("type").asText());
@@ -378,7 +379,7 @@ class McpRegistrationTest {
         JsonNode tools = new ObjectMapper().readTree(response).path("result").path("tools");
 
         for (String name : List.of("list_mocks", "list_stubs", "list_unmatched_stubs",
-                "find_requests", "list_unmatched_requests", "get_near_misses", "list_body_files", "list_scenarios")) {
+                "find_requests", "list_serve_events", "list_unmatched_requests", "get_near_misses", "list_body_files", "list_scenarios")) {
             JsonNode input = tool(tools, name).path("inputSchema").path("properties");
             assertTrue(input.has("cursor"), name);
             assertFalse(input.has("offset"), name);
@@ -419,7 +420,7 @@ class McpRegistrationTest {
         }
 
         for (String name : List.of("list_mocks", "list_stubs", "list_unmatched_stubs",
-                "find_requests", "list_unmatched_requests", "get_near_misses", "list_body_files",
+                "find_requests", "list_serve_events", "list_unmatched_requests", "get_near_misses", "list_body_files",
                 "list_scenarios")) {
             JsonNode limit = tool(tools, name).path("inputSchema").path("properties").path("limit");
             assertEquals(1, limit.path("minimum").asInt(), name);
