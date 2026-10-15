@@ -158,14 +158,50 @@ public final class WireMockAdminClient {
     public JsonNode createStub(String mockId, ObjectNode mapping) {
         ObjectNode payload = serverManagedCopy(mapping);
         payload.put("persistent", false);
+        validateRequest(mockId, jsonRequest(HttpMethod.POST, "/__admin/mappings", payload), maxPayloadBytes);
         return requireMutationMapping(mockId, null,
                 sendMutationJson(mockId, HttpMethod.POST, "/__admin/mappings", payload));
     }
 
     public JsonNode updateStub(String mockId, String stubId, ObjectNode mapping) {
+        validateRequest(mockId, jsonRequest(HttpMethod.PUT, "/__admin/mappings", mapping), maxPayloadBytes);
         String id = requireIdentifier(stubId, "stubId");
         PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
         JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
+        return replaceStub(mockId, id, mapping, current, pending);
+    }
+
+    public JsonNode patchStub(String mockId, String stubId, ObjectNode patch, Consumer<JsonNode> validate) {
+        for (String field : List.of("id", "uuid", "persistent")) {
+            if (patch.has(field)) {
+                throw new IllegalArgumentException("patch cannot change " + field);
+            }
+        }
+        validateRequest(mockId, jsonRequest(HttpMethod.PUT, "/__admin/mappings", patch), maxPayloadBytes);
+        String id = requireIdentifier(stubId, "stubId");
+        PersistentTransaction pending = loadRecoveryTransaction(mockId, id);
+        JsonNode current = pending == null ? getStub(mockId, id) : pending.before();
+        ObjectNode merged = mergePatch(current, patch);
+        validate.accept(merged);
+        return replaceStub(mockId, id, merged, current, pending);
+    }
+
+    private ObjectNode mergePatch(JsonNode current, ObjectNode patch) {
+        ObjectNode merged = current.isObject() ? current.deepCopy() : mapper.createObjectNode();
+        patch.properties().forEach(field -> {
+            if (field.getValue().isNull()) {
+                merged.remove(field.getKey());
+            } else if (field.getValue() instanceof ObjectNode object) {
+                merged.set(field.getKey(), mergePatch(merged.path(field.getKey()), object));
+            } else {
+                merged.set(field.getKey(), field.getValue().deepCopy());
+            }
+        });
+        return merged;
+    }
+
+    private JsonNode replaceStub(String mockId, String id, ObjectNode mapping, JsonNode current,
+            PersistentTransaction pending) {
         ObjectNode payload = serverManagedCopy(mapping);
         copyIfPresent(current, payload, "id");
         copyIfPresent(current, payload, "uuid");
@@ -241,6 +277,27 @@ public final class WireMockAdminClient {
                 "requests", limit, position, maxBytes, maxItems);
     }
 
+    public JsonNode journalCount(String mockId, String stubId, boolean unmatched) {
+        String endpoint = "/__admin/requests?limit=0";
+        if (stubId != null) {
+            endpoint += "&matchingStub=" + requireIdentifier(stubId, "stubId");
+        }
+        if (unmatched) {
+            endpoint += "&unmatched=true";
+        }
+        JsonNode response = getJson(mockId, endpoint);
+        JsonNode total = response.path("meta").path("total");
+        if (!total.isIntegralNumber() || !total.canConvertToLong() || total.asLong() < 0
+                || !response.path("requestJournalDisabled").isBoolean()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "WireMock journal count is malformed",
+                    false, Map.of("mockId", mockId));
+        }
+        ObjectNode result = mapper.createObjectNode();
+        result.set("count", total);
+        result.set("requestJournalDisabled", response.path("requestJournalDisabled"));
+        return result;
+    }
+
     public JsonNode countRequests(String mockId, JsonNode requestPattern) {
         return sendJson(mockId, HttpMethod.POST, "/__admin/requests/count", requestPattern);
     }
@@ -299,7 +356,8 @@ public final class WireMockAdminClient {
     }
 
     public JsonNode stopRecording(String mockId) {
-        Set<String> baseline = mappingIds(mockId);
+        RecordingDuplicates duplicates = new RecordingDuplicates();
+        Set<String> baseline = mappingIds(mockId, duplicates::remember);
         JsonNode result;
         try {
             result = sendMutationWithoutBodyJson(mockId, HttpMethod.POST, "/__admin/recordings/stop");
@@ -307,14 +365,15 @@ public final class WireMockAdminClient {
             throw recorderMutationFailure(mockId, baseline, failure);
         }
         try {
-            return sanitizeRecorderCandidates(mockId, result, baseline);
+            return sanitizeRecorderCandidates(mockId, result, baseline, duplicates);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
     }
 
     public JsonNode snapshotRequests(String mockId, ObjectNode snapshotSpec) {
-        Set<String> baseline = mappingIds(mockId);
+        RecordingDuplicates duplicates = new RecordingDuplicates();
+        Set<String> baseline = mappingIds(mockId, duplicates::remember);
         ObjectNode payload = snapshotSpec.deepCopy();
         payload.put("persist", false);
         payload.put("outputFormat", "IDS");
@@ -325,7 +384,7 @@ public final class WireMockAdminClient {
             throw recorderMutationFailure(mockId, baseline, failure);
         }
         try {
-            return sanitizeRecorderCandidates(mockId, result, baseline);
+            return sanitizeRecorderCandidates(mockId, result, baseline, duplicates);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
@@ -488,7 +547,8 @@ public final class WireMockAdminClient {
         return uncertain;
     }
 
-    private JsonNode sanitizeRecorderCandidates(String mockId, JsonNode result, Set<String> baseline) {
+    private JsonNode sanitizeRecorderCandidates(String mockId, JsonNode result, Set<String> baseline,
+            RecordingDuplicates duplicates) {
         JsonNode ids = result.path("ids");
         Set<String> candidateIds = new LinkedHashSet<>();
         McpOperationException invalidIds = ids.isArray() ? null : invalidRecorderCandidateIds(mockId);
@@ -509,14 +569,25 @@ public final class WireMockAdminClient {
             candidateIds.addAll(candidatesCreatedSince(mockId, baseline));
             throw recorderCleanupFailure(mockId, List.copyOf(candidateIds), invalidIds);
         }
+        ArrayNode scenarioStubs = mapper.createArrayNode();
         try {
             for (String id : candidateIds) {
                 JsonNode sanitized = sanitizer.removeSensitiveHeaders(getStub(mockId, id));
                 sendJson(mockId, HttpMethod.PUT, "/__admin/mappings/" + id, sanitized);
+                duplicates.compare(id, sanitized);
+                if (sanitized.hasNonNull("scenarioName")) {
+                    ObjectNode scenario = scenarioStubs.addObject().put("stubId", id);
+                    for (String field : List.of("scenarioName", "requiredScenarioState", "newScenarioState")) {
+                        scenario.set(field, sanitized.has(field) ? sanitized.get(field) : mapper.nullNode());
+                    }
+                }
             }
         } catch (RuntimeException sanitizationFailure) {
             throw recorderCleanupFailure(mockId, List.copyOf(candidateIds), sanitizationFailure);
         }
+        ((ObjectNode) result).set("scenarioStubs", scenarioStubs);
+        ((ObjectNode) result).set("possibleDuplicates", duplicates.hints);
+        ((ObjectNode) result).put("duplicateAnalysisComplete", duplicates.complete);
         return result;
     }
 
@@ -620,6 +691,10 @@ public final class WireMockAdminClient {
     }
 
     private Set<String> mappingIds(String mockId) {
+        return mappingIds(mockId, ignored -> {});
+    }
+
+    private Set<String> mappingIds(String mockId, Consumer<JsonNode> visitor) {
         Set<String> ids = new LinkedHashSet<>();
         scanMappings(mockId, mapping -> {
             if (isRecoveryMapping(mapping)
@@ -630,6 +705,7 @@ public final class WireMockAdminClient {
             if (id.isTextual()) {
                 try {
                     ids.add(requireIdentifier(id.asText(), "mapping ID"));
+                    visitor.accept(mapping);
                 } catch (IllegalArgumentException ignored) {
                     // WireMock-generated mapping IDs are UUIDs; malformed entries cannot be addressed safely.
                 }
@@ -774,7 +850,7 @@ public final class WireMockAdminClient {
         TransportResponse response = exchange(mockId, request);
         if (response.status() < 200 || response.status() >= 300) {
             throw new McpOperationException("WIREMOCK_ADMIN_ERROR", "WireMock returned HTTP " + response.status(),
-                    response.status() >= 500, Map.of("status", response.status(), "body", response.bodyAsString()));
+                    response.status() >= 500, Map.of("status", response.status(), "body", errorBody(response)));
         }
         return response;
     }
@@ -784,47 +860,58 @@ public final class WireMockAdminClient {
         if (response.status() < 200 || response.status() >= 300) {
             throw new McpOperationException("WIREMOCK_ADMIN_ERROR", "WireMock returned HTTP " + response.status(),
                     response.status() >= 500, response.status() >= 500,
-                    Map.of("mockId", mockId, "status", response.status(), "body", response.bodyAsString()));
+                    Map.of("mockId", mockId, "status", response.status(), "body", errorBody(response)));
         }
         return response;
     }
 
+    private String errorBody(TransportResponse response) {
+        return response.body().length <= maxPayloadBytes ? response.bodyAsString() : "[omitted: oversized error body]";
+    }
+
     private TransportResponse exchange(String mockId, TransportRequest request) {
-        validateRequest(mockId, request);
-        TransportResponse response = transport.execute(mockId, request);
-        validateResponse(response, false, mockId);
+        int maxBytes = payloadLimit(request);
+        validateRequest(mockId, request, maxBytes);
+        TransportResponse response = transport.execute(mockId, request, maxBytes);
+        validateResponse(response, false, mockId, maxBytes);
         return response;
     }
 
     private TransportResponse exchangeStateChanging(String mockId, TransportRequest request) {
-        validateRequest(mockId, request);
+        int maxBytes = payloadLimit(request);
+        validateRequest(mockId, request, maxBytes);
         TransportResponse response;
         try {
-            response = transport.execute(mockId, request);
+            response = transport.execute(mockId, request, maxBytes);
         } catch (RuntimeException failure) {
             throw mutationFailure(mockId, failure);
         }
-        validateResponse(response, true, mockId);
+        validateResponse(response, true, mockId, maxBytes);
         return response;
     }
 
-    private void validateRequest(String mockId, TransportRequest request) {
+    private int payloadLimit(TransportRequest request) {
+        return request.target().startsWith("/__admin/mappings")
+                ? (int) Math.min(Integer.MAX_VALUE, maxCollectionScanBytes) : maxPayloadBytes;
+    }
+
+    private void validateRequest(String mockId, TransportRequest request, int maxBytes) {
         MockIdValidator.requireValid(mockId);
-        if (request.body().length > maxPayloadBytes) {
+        if (request.body().length > maxBytes) {
             throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
-                    Map.of("limitBytes", maxPayloadBytes));
+                    Map.of("limitBytes", maxBytes));
         }
     }
 
-    private void validateResponse(TransportResponse response, boolean stateMayHaveChanged, String mockId) {
-        if (response.body().length <= maxPayloadBytes) {
+    private void validateResponse(TransportResponse response, boolean stateMayHaveChanged, String mockId, int maxBytes) {
+        if (response.body().length <= maxBytes) {
             return;
         }
         Map<String, Object> details = new LinkedHashMap<>();
         if (stateMayHaveChanged) {
             details.put("mockId", mockId);
         }
-        details.put("limitBytes", maxPayloadBytes);
+        details.put("limitBytes", maxBytes);
         throw new McpOperationException("RESULT_TOO_LARGE", "Response payload exceeds the configured limit", false,
                 stateMayHaveChanged, details);
     }
@@ -1190,7 +1277,7 @@ public final class WireMockAdminClient {
         }
     }
 
-    private static String requireIdentifier(String value, String name) {
+    static String requireIdentifier(String value, String name) {
         if (value == null || !value.matches("[0-9A-Za-z-]{1,128}")) {
             throw new IllegalArgumentException(name + " is invalid");
         }
@@ -1211,6 +1298,54 @@ public final class WireMockAdminClient {
         return "WIREMOCK_ADMIN_ERROR".equals(error.code())
                 && Integer.valueOf(500).equals(error.details().get("status"))
                 && String.valueOf(error.details().get("body")).contains("Stale file handle");
+    }
+
+    private final class RecordingDuplicates {
+        private final Map<JsonNode, List<JsonNode>> byRequest = new LinkedHashMap<>();
+        private final ArrayNode hints = mapper.createArrayNode();
+        private boolean complete = true;
+        private long bytes = 2;
+        private int comparisons;
+
+        void remember(JsonNode mapping) {
+            JsonNode request = mapping.path("request");
+            if (request.isObject()) {
+                byRequest.computeIfAbsent(request, ignored -> new ArrayList<>()).add(mapping);
+            }
+        }
+
+        void compare(String candidateId, JsonNode candidate) {
+            if (!complete) {
+                return;
+            }
+            List<JsonNode> existing = byRequest.getOrDefault(candidate.path("request"), List.of());
+            if (existing.isEmpty()) {
+                return;
+            }
+            ObjectNode hint = mapper.createObjectNode().put("candidateId", candidateId);
+            ArrayNode matches = hint.putArray("matches");
+            bytes += hint.toString().getBytes(StandardCharsets.UTF_8).length + 1;
+            for (JsonNode mapping : existing) {
+                if (++comparisons > maxCollectionScanItems) {
+                    complete = false;
+                    break;
+                }
+                ObjectNode match = mapper.createObjectNode().put("stubId", mapping.path("id").asText());
+                match.put("responseEqual", candidate.path("response").equals(mapping.path("response")));
+                for (String field : List.of("name", "scenarioName", "requiredScenarioState", "newScenarioState")) {
+                    match.set(field, mapping.has(field) ? mapping.get(field) : mapper.nullNode());
+                }
+                bytes += match.toString().getBytes(StandardCharsets.UTF_8).length + 1;
+                if (bytes > maxPayloadBytes) {
+                    complete = false;
+                    break;
+                }
+                matches.add(match);
+            }
+            if (!matches.isEmpty()) {
+                hints.add(hint);
+            }
+        }
     }
 
     record RecorderCleanupPolicy(int polls, int requiredStableScans, long intervalMillis) {

@@ -6,6 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public interface FleetProxyTransport {
     TransportResponse execute(String mockId, TransportRequest request);
 
+    default TransportResponse execute(String mockId, TransportRequest request, int maxBytes) {
+        return execute(mockId, request);
+    }
+
     default CollectionScan scanCollection(String mockId, TransportRequest request, ObjectMapper mapper,
             String collectionField, long position, int limit, long maxBytes, int maxItems) {
         TransportResponse response = execute(mockId, request);

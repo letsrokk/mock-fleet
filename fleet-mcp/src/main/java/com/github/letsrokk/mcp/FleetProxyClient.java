@@ -43,7 +43,12 @@ public final class FleetProxyClient implements FleetProxyTransport {
 
     @Override
     public TransportResponse execute(String mockId, TransportRequest request) {
-        return metrics.internalCall("proxy", () -> executeInternal(mockId, request));
+        return execute(mockId, request, maxPayloadBytes);
+    }
+
+    @Override
+    public TransportResponse execute(String mockId, TransportRequest request, int maxBytes) {
+        return metrics.internalCall("proxy", () -> executeInternal(mockId, request, maxBytes));
     }
 
     @Override
@@ -53,10 +58,10 @@ public final class FleetProxyClient implements FleetProxyTransport {
                 position, limit, maxBytes, maxItems));
     }
 
-    private TransportResponse executeInternal(String mockId, TransportRequest request) {
-        if (request.body().length > maxPayloadBytes) {
+    private TransportResponse executeInternal(String mockId, TransportRequest request, int maxBytes) {
+        if (request.body().length > maxBytes) {
             throw new McpOperationException("RESULT_TOO_LARGE", "Request payload exceeds the configured limit", false,
-                    java.util.Map.of("limitBytes", maxPayloadBytes));
+                    java.util.Map.of("limitBytes", maxBytes));
         }
         FleetProxyRequestFactory.ProxyRequest resolved = requestFactory.create(mockId, request.target());
         HttpRequest<Buffer> outbound = client.requestAbs(request.method(), resolved.uri().toString())
@@ -66,7 +71,7 @@ public final class FleetProxyClient implements FleetProxyTransport {
         if (resolved.hostHeader() != null) {
             outbound.putHeader("Host", resolved.hostHeader());
         }
-        return HttpTransportSupport.await(outbound, request.body(), maxPayloadBytes);
+        return HttpTransportSupport.await(outbound, request.body(), maxBytes);
     }
 
     private CollectionScan scanCollectionInternal(String mockId, TransportRequest request, ObjectMapper mapper,

@@ -26,6 +26,20 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
                 required.add("stubId");
                 addMapping(properties, required, false);
             }
+            case "patch_stub" -> {
+                properties.put("stubId", string("WireMock stub UUID"));
+                properties.put("patch", jsonObject("JSON Merge Patch: omit to preserve, null to remove, arrays replace",
+                        new JsonArray().add(new JsonObject().put("name", "renamed")
+                                .put("request", new JsonObject().put("urlPath", "/orders")))));
+                required.add("stubId").add("patch");
+            }
+            case "delete_stubs" -> {
+                properties.put("stubIds", new JsonObject().put("type", "array")
+                        .put("description", "Distinct explicit stub IDs to delete")
+                        .put("items", string("WireMock stub ID").put("pattern", "[0-9A-Za-z-]{1,128}"))
+                        .put("minItems", 1).put("maxItems", config.maxPageSize()).put("uniqueItems", true));
+                required.add("stubIds");
+            }
             case "find_requests" -> {
                 addRequestPattern(properties, required, false);
                 addPagination(properties);
@@ -37,17 +51,21 @@ public final class RichJsonInputSchemaGenerator implements InputSchemaGenerator<
             }
             case "start_recording" -> {
                 properties.put("recording", jsonObject("Native WireMock recorder JSON", new JsonArray()
-                        .add(new JsonObject().put("targetBaseUrl", "https://api.example.test")
+                        .add(new JsonObject().put("repeatsAsScenarios", false).put("targetBaseUrl", "https://api.example.test")
                                 .put("filters", new JsonObject().put("urlPathPattern", "/v1/.*")))));
                 required.add("recording");
             }
             case "snapshot_requests" -> {
                 properties.put("snapshot", jsonObject("Native WireMock snapshot JSON", new JsonArray()
-                        .add(new JsonObject().put("filters", new JsonObject()
+                        .add(new JsonObject().put("repeatsAsScenarios", false).put("filters", new JsonObject()
                                 .put("method", "GET").put("urlPathPattern", "/v1/.*")))));
                 required.add("snapshot");
             }
             default -> throw new IllegalArgumentException("Unsupported rich input schema tool: " + tool.name());
+        }
+        if (tool.name().equals("create_stub") || tool.name().equals("update_stub") || tool.name().equals("patch_stub")) {
+            properties.put("includeBody", new JsonObject().put("type", "boolean")
+                    .put("description", "Return the full mapping with inline response bodies; defaults to false"));
         }
         return new JsonObject().put("type", "object").put("properties", properties)
                 .put("required", required).put("additionalProperties", false);

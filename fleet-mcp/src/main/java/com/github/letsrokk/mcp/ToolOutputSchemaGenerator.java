@@ -41,12 +41,22 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
             case "Stub" -> strict(properties("mockId", string(), "stub", openObject()));
             case "DeleteStub" -> strict(properties(
                     "mockId", string(), "stubId", string(), "deleted", bool()));
+            case "DeleteStubs" -> strict(properties(
+                    "mockId", string(), "deletedCount", integer(), "failedCount", integer(),
+                    "results", array(strict(properties("stubId", string(), "deleted", bool(),
+                            "error", strict(properties("code", string(), "retryable", bool(), "stateMayHaveChanged", bool()))
+                                    .put("type", new JsonArray().add("object").add("null")))))));
             case "SendRequest" -> strict(properties(
                     "mockId", string(), "response", response()));
             case "RequestPage" -> strict(properties(
                     "mockId", string(), "requests", array(openObject()), "page", page()));
             case "CountRequests" -> strict(properties(
                     "mockId", string(), "count", integer()));
+            case "JournalSummary" -> strict(properties(
+                    "mockId", string(), "total", integer(), "unmatched", integer(),
+                    "requestJournalDisabled", bool(), "stubs", array(strict(properties(
+                            "stubId", string(), "name", nullableString(), "proxyStub", bool(), "count", integer()))),
+                    "page", page()));
             case "NearMisses" -> strict(properties(
                     "mockId", string(), "nearMisses", array(openObject()), "page", page()));
             case "Reset" -> strict(properties("mockId", string(), "reset", bool()));
@@ -54,7 +64,19 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mockId", string(), "status", openObject()));
             case "RecordingCandidates" -> strict(properties(
                     "mockId", string(), "candidateIds", array(string()), "candidateCount", integer(),
-                    "matchedRequests", bool()));
+                    "matchedRequests", bool(), "duplicateAnalysisComplete", bool(),
+                    "possibleDuplicates", array(strict(properties("candidateId", string(),
+                            "matches", array(strict(properties("stubId", string(), "name", nullableString(),
+                                    "responseEqual", bool(), "scenarioName", nullableString(),
+                                    "requiredScenarioState", nullableString(), "newScenarioState", nullableString())))))),
+                    "scenarioStubs", array(strict(properties(
+                            "stubId", string(), "scenarioName", string(),
+                            "requiredScenarioState", nullableString(), "newScenarioState", nullableString()))),
+                    "journal", strict(properties(
+                            "retainedRequests", integer().put("type", new JsonArray().add("integer").add("null")),
+                            "configuredLimit", integer().put("type", new JsonArray().add("integer").add("null")),
+                            "possiblyTruncated", bool().put("type", new JsonArray().add("boolean").add("null")))),
+                    "warnings", array(string())));
             case "BodyFilePage" -> strict(properties(
                     "mockId", string(), "files", array(string()), "page", page()));
             case "GetBodyFile" -> strict(properties(
