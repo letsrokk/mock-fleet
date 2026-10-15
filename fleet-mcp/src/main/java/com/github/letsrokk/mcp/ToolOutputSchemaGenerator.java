@@ -47,6 +47,11 @@ public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
                     "mockId", string(), "requests", array(openObject()), "page", page()));
             case "CountRequests" -> strict(properties(
                     "mockId", string(), "count", integer()));
+            case "JournalSummary" -> strict(properties(
+                    "mockId", string(), "total", integer(), "unmatched", integer(),
+                    "requestJournalDisabled", bool(), "stubs", array(strict(properties(
+                            "stubId", string(), "name", nullableString(), "proxyStub", bool(), "count", integer()))),
+                    "page", page()));
             case "NearMisses" -> strict(properties(
                     "mockId", string(), "nearMisses", array(openObject()), "page", page()));
             case "Reset" -> strict(properties("mockId", string(), "reset", bool()));

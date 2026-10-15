@@ -22,6 +22,7 @@ public final class OutputSchemas {
     public static final class SendRequest {}
     public static final class RequestPage {}
     public static final class CountRequests {}
+    public static final class JournalSummary {}
     public static final class NearMisses {}
     public static final class Reset {}
     public static final class RecordingStatus {}

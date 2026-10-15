@@ -29,6 +29,15 @@ class WireMockAdminClientTest {
             new WireMockAdminClient.BodyFileReadPolicy(3, 0));
 
     @Test
+    void journalCountsAskWireMockForNoServeEventBodies() {
+        transport.respond(200, "{\"requests\":[],\"meta\":{\"total\":20},\"requestJournalDisabled\":false}");
+        JsonNode result = client.journalCount("orders", "server-id", false);
+        assertEquals(20, result.path("count").asInt());
+        assertFalse(result.path("requestJournalDisabled").asBoolean());
+        assertEquals("/__admin/requests?limit=0&matchingStub=server-id", transport.last().target());
+    }
+
+    @Test
     void patchPreservesALargeBodyAndMergesNestedObjectsWithNullRemoval() throws Exception {
         ObjectNode before = (ObjectNode) mapper.readTree("""
                 {"id":"server-id","persistent":false,"name":"old","priority":5,

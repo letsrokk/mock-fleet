@@ -2,7 +2,7 @@
 
 Mock Fleet exposes stateful Streamable HTTP at `/__fleet/mcp`. Initialize a session, send `notifications/initialized`, then call tools with the returned `Mcp-Session-Id` and protocol version `2025-11-25`.
 
-The server publishes 35 tools:
+The server publishes 36 tools:
 
 ```text
 list_mocks                 get_mock_config             list_option_definitions
@@ -16,7 +16,7 @@ start_recording            get_recording_status        stop_recording
 snapshot_requests          list_body_files             get_body_file
 put_body_file              delete_body_file            list_scenarios
 reset_scenarios             export_mock_configs         import_mock_configs
-set_mock_pinned             patch_stub
+set_mock_pinned             patch_stub                  get_journal_summary
 ```
 
 `get_recording_status` replaces `recording_status`; the old name is not registered. `start_mock` is explicit, and every WireMock Admin or traffic tool also performs the same start preflight. A RUNNING response continues. A STARTING response returns `isError: true` with `error.code=MOCK_STARTING`, `retryable=true`, and `details.retryAfterMs`; wait and call the tool again. Terminal startup errors keep their Fleet error code and diagnostics.
@@ -41,7 +41,7 @@ Every closed tool-input object rejects unknown properties. Native WireMock mappi
 
 ## Collection pagination
 
-`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, and `list_scenarios` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
+`list_mocks`, `list_stubs`, `list_unmatched_stubs`, `find_requests`, `list_unmatched_requests`, `get_near_misses`, `list_body_files`, `list_scenarios`, and `get_journal_summary` accept `limit` and an optional opaque `cursor`. Do not decode or modify a cursor. A cursor is bound to its tool, mock, and canonical request pattern, so reuse with a different tool or filter returns `INVALID_ARGUMENT`.
 
 Every collection returns `page` with the same metadata:
 
@@ -123,6 +123,14 @@ Omit `resources` to inherit baseline resources. Provide both `requests` and `lim
 All eight tools accept optional `includeBody: true` to return the original full mapping. Full results do not add `bodyBytes`. Compact results count UTF-8 bytes for `body`, serialized JSON bytes for `jsonBody`, and decoded bytes for `base64Body`. `bodyBytes` is zero when no inline body exists, or null for a `bodyFileName` reference; the tools do not read body files to calculate their size. Response bodies are omitted only from results; stored mappings are unchanged.
 
 Internal mapping transfers, including persistence recovery markers, use the bounded `maxCollectionScanBytes` budget (64 MiB by default). Client-supplied create/update mappings and patches and returned stub results remain subject to `maxPayloadBytes` (1 MiB by default). A compact result can therefore succeed when the full mapping exceeds the tool-output limit. Oversized results return `RESULT_TOO_LARGE`; request compact output or a smaller page. If a write succeeded before its result exceeded the limit, the error reports `stateMayHaveChanged: true`.
+
+## Journal counts
+
+`get_journal_summary` returns `{mockId,total,unmatched,requestJournalDisabled,stubs,page}`. `total` and `unmatched` cover the whole retained journal. Each current stub row is `{stubId,name,proxyStub,count}`; counts measure requests actually served by that stub ID, rather than requests that could match its current matcher. `proxyStub` describes whether the current mapping has a `proxyBaseUrl`.
+
+Use optional `stubId` to inspect a specific proxy catch-all or other stub. Otherwise, `limit` and `cursor` paginate counts for current stubs. Stubs deleted since serving requests are absent from these rows, so row counts need not sum to `total - unmatched`. Disabled journals return `requestJournalDisabled: true`; their zero counts do not prove that no traffic occurred.
+
+The tool requests count metadata with WireMock's `limit=0`, so journal request and response bodies are not transferred. Each page makes one lightweight count request per selected stub, plus total/unmatched count requests and the mapping lookup. Results sample a changing journal across several calls and are not a consistent snapshot or lifetime metrics. Eviction, resets, and entry removal can reduce counts. Use `count_requests` for counts by native request pattern.
 
 ## Partial stub updates
 

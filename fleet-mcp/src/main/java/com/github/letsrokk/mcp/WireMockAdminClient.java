@@ -277,6 +277,27 @@ public final class WireMockAdminClient {
                 "requests", limit, position, maxBytes, maxItems);
     }
 
+    public JsonNode journalCount(String mockId, String stubId, boolean unmatched) {
+        String endpoint = "/__admin/requests?limit=0";
+        if (stubId != null) {
+            endpoint += "&matchingStub=" + requireIdentifier(stubId, "stubId");
+        }
+        if (unmatched) {
+            endpoint += "&unmatched=true";
+        }
+        JsonNode response = getJson(mockId, endpoint);
+        JsonNode total = response.path("meta").path("total");
+        if (!total.isIntegralNumber() || !total.canConvertToLong() || total.asLong() < 0
+                || !response.path("requestJournalDisabled").isBoolean()) {
+            throw new McpOperationException("INVALID_UPSTREAM_RESPONSE", "WireMock journal count is malformed",
+                    false, Map.of("mockId", mockId));
+        }
+        ObjectNode result = mapper.createObjectNode();
+        result.set("count", total);
+        result.set("requestJournalDisabled", response.path("requestJournalDisabled"));
+        return result;
+    }
+
     public JsonNode countRequests(String mockId, JsonNode requestPattern) {
         return sendJson(mockId, HttpMethod.POST, "/__admin/requests/count", requestPattern);
     }

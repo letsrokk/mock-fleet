@@ -439,6 +439,50 @@ public final class FleetMcpTools {
     }
 
     @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
+    @Tool(name = "get_journal_summary", description = "Count retained journal entries and requests served by each current stub without transferring event bodies. Optional stubId selects one stub, including a proxy catch-all. Per-stub counts are paginated; totals cover the whole retained journal, not lifetime traffic. Calls are not a single snapshot.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.JournalSummary.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
+    public ToolResponse getJournalSummary(@ToolArg(description = "Mock ID") String mockId,
+            @ToolArg(description = "Only count requests served by this stub UUID", required = false) String stubId,
+            @ToolArg(description = "Page size for current stub counts", required = false) Integer limit,
+            @ToolArg(description = "Opaque continuation cursor", required = false) String cursor) {
+        JsonNode scope = scope(mockId, mapper.createObjectNode().put("stubId", stubId));
+        return wireMock("get_journal_summary", mockId, () -> {
+            int size = pageSize(limit);
+            int position = mappingCursorPosition("get_journal_summary", scope, cursor);
+            if (stubId != null && position != 0) {
+                throw new IllegalArgumentException("A single-stub summary cannot use a continuation cursor");
+            }
+            JsonNode total = wireMock.journalCount(mockId, null, false);
+            JsonNode unmatched = wireMock.journalCount(mockId, null, true);
+            JsonNode mappings;
+            if (stubId == null) {
+                mappings = wireMock.listStubs(mockId, size, position);
+            } else {
+                ObjectNode single = mapper.createObjectNode();
+                single.putArray("mappings").add(wireMock.getStub(mockId, stubId));
+                single.putObject("meta").put("limit", size).put("returned", 1)
+                        .put("hasMore", false).put("nextPosition", 1);
+                mappings = single;
+            }
+            ObjectNode result = collectionResult(mockId, mappings, "mappings", "stubs", "get_journal_summary", scope);
+            ArrayNode counts = mapper.createArrayNode();
+            for (JsonNode stub : result.path("stubs")) {
+                String id = stub.path("id").asText();
+                JsonNode count = wireMock.journalCount(mockId, id, false);
+                ObjectNode row = counts.addObject().put("stubId", id);
+                row.set("name", stub.has("name") ? stub.get("name") : mapper.nullNode());
+                row.put("proxyStub", stub.path("response").hasNonNull("proxyBaseUrl"));
+                row.set("count", count.path("count"));
+            }
+            result.set("stubs", counts);
+            result.set("total", total.path("count"));
+            result.set("unmatched", unmatched.path("count"));
+            result.set("requestJournalDisabled", total.path("requestJournalDisabled"));
+            checkStubResultSize(mockId, result, false);
+            return McpToolExecutor.ToolResult.of("Counted retained journal entries for " + mockId + ".", result);
+        });
+    }
+
+    @ToolGuardrails(input = StrictToolInputGuardrail.class, output = StructuredToolErrorGuardrail.class)
     @Tool(name = "list_unmatched_requests", description = "List unmatched journal requests with sensitive headers redacted.", outputSchema = @Tool.OutputSchema(from = OutputSchemas.RequestPage.class, generator = ToolOutputSchemaGenerator.class), annotations = @Tool.Annotations(readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false))
     public ToolResponse listUnmatchedRequests(@ToolArg(description = "Mock ID") String mockId,
             @ToolArg(description = "Page size", required = false) Integer limit,

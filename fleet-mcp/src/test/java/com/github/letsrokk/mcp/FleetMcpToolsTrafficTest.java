@@ -129,6 +129,54 @@ class FleetMcpToolsTrafficTest {
     }
 
     @Test
+    void journalSummaryPaginatesCurrentStubCountsAndPreservesJournalDisabledStatus() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        String count = "{\"meta\":{\"total\":0},\"requestJournalDisabled\":true}";
+        transport.respond(200, count);
+        transport.respond(200, count);
+        transport.respond(200, "{\"mappings\":[{\"id\":\"first\"},{\"id\":\"second\"}],\"meta\":{\"total\":2}}");
+        transport.respond(200, count);
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper).getJournalSummary("orders", null, 1, null);
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertTrue(result.path("requestJournalDisabled").asBoolean());
+            assertEquals(1, result.path("stubs").size());
+            assertTrue(result.path("page").path("hasMore").asBoolean());
+            assertTrue(result.path("page").path("nextCursor").isTextual());
+        }
+    }
+
+    @Test
+    void journalSummaryFiltersCountsByTheStubThatActuallyServedRequests() {
+        ObjectMapper mapper = new ObjectMapper();
+        var transport = new QueuedTransport();
+        transport.respond(200, "{\"version\":\"3.13.2\"}");
+        transport.respond(200, "{\"meta\":{\"total\":20},\"requestJournalDisabled\":false}");
+        transport.respond(200, "{\"meta\":{\"total\":2},\"requestJournalDisabled\":false}");
+        transport.respond(200, "{\"id\":\"proxy-stub\",\"name\":\"catch-all\",\"response\":{\"proxyBaseUrl\":\"https://example.test\"}}");
+        transport.respond(200, "{\"meta\":{\"total\":7},\"requestJournalDisabled\":false}");
+        try (var fleet = new FleetApiHarness()) {
+            fleet.respond(200, running());
+            ToolResponse response = tools(fleet.client(), transport, mapper)
+                    .getJournalSummary("orders", "proxy-stub", 10, null);
+            assertFalse(response.isError());
+            JsonNode result = (JsonNode) response.structuredContent();
+            assertEquals(20, result.path("total").asInt());
+            assertEquals(2, result.path("unmatched").asInt());
+            JsonNode stub = result.path("stubs").get(0);
+            assertEquals("proxy-stub", stub.path("stubId").asText());
+            assertEquals(7, stub.path("count").asInt());
+            assertTrue(stub.path("proxyStub").asBoolean());
+            assertFalse(result.toString().contains("example.test"));
+            assertFalse(result.path("page").path("hasMore").asBoolean());
+        }
+    }
+
+    @Test
     void patchRejectsADisallowedTargetInTheMergedMappingBeforeWriting() {
         ObjectMapper mapper = new ObjectMapper();
         var transport = new QueuedTransport();

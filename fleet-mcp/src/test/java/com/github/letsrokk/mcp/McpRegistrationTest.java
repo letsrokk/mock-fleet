@@ -31,7 +31,7 @@ class McpRegistrationTest {
             "list_option_definitions", "update_mock_config",
             "delete_mock_config", "start_mock", "stop_mock", "set_mock_pinned",
             "list_stubs", "list_unmatched_stubs", "get_stub", "create_stub", "update_stub", "patch_stub", "delete_stub",
-            "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests",
+            "persist_stub", "unpersist_stub", "send_request", "find_requests", "count_requests", "get_journal_summary",
             "list_unmatched_requests", "get_near_misses", "reset_request_journal", "start_recording",
             "get_recording_status", "stop_recording", "snapshot_requests", "list_body_files", "get_body_file",
             "put_body_file", "delete_body_file", "list_scenarios", "reset_scenarios");
