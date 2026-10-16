@@ -25,6 +25,14 @@ public record MockPodLifecycle(String attemptId, String podName, MockLifecycleSt
         return new MockPodLifecycle(attemptId, podName, MockLifecycleStatus.STARTING, null, startedAtEpochMillis);
     }
 
+    public static MockPodLifecycle startingWithPreviousPod(String attemptId, String previousPodName,
+                                                          long startedAtEpochMillis) {
+        String message = previousPodName == null || previousPodName.isBlank()
+                ? null : "Waiting for previous pod to terminate.";
+        return new MockPodLifecycle(attemptId, previousPodName, MockLifecycleStatus.STARTING,
+                message, startedAtEpochMillis);
+    }
+
     public static MockPodLifecycle running(String attemptId, String podName) {
         return new MockPodLifecycle(attemptId, podName, MockLifecycleStatus.RUNNING, null, 0L);
     }

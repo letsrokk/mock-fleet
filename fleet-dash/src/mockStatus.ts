@@ -8,7 +8,7 @@ type MockStatusPresentation = {
 
 export function mockStatusPresentation(status: MockStatus, message: string | null): MockStatusPresentation {
   if (status === "STARTING") {
-    return { label: "Starting", className: "starting", detail: null };
+    return { label: message ? "Waiting" : "Starting", className: "starting", detail: message };
   }
   if (status === "FAILED") {
     return { label: "Failed", className: "failed", detail: message };

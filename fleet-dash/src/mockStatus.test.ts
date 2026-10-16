@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { mockStatusPresentation } from "./mockStatus";
 
 describe("mock status presentation", () => {
+  it("explains when startup is waiting for the previous pod to terminate", () => {
+    expect(mockStatusPresentation("STARTING", "Waiting for previous pod to terminate.")).toEqual({
+      label: "Waiting",
+      className: "starting",
+      detail: "Waiting for previous pod to terminate."
+    });
+  });
+
   it("shows startup progress without an error message", () => {
     expect(mockStatusPresentation("STARTING", null)).toEqual({
       label: "Starting",

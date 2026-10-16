@@ -135,7 +135,7 @@ public class PodState {
                     ? null
                     : current.podName();
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle starting = MockPodLifecycle.starting(attemptId, previousPodName, nowEpochMillis);
+            MockPodLifecycle starting = MockPodLifecycle.startingWithPreviousPod(attemptId, previousPodName, nowEpochMillis);
             reserveAndPublishStarting(mockId, attemptId, starting);
             return new StartClaim(true, starting, null, previousPodName);
         });
@@ -164,7 +164,7 @@ public class PodState {
                 previousLastAccessEpochMillis = lastAccessTimeMap.remove(pod.podName());
             }
             String attemptId = UUID.randomUUID().toString();
-            MockPodLifecycle replacement = MockPodLifecycle.starting(
+            MockPodLifecycle replacement = MockPodLifecycle.startingWithPreviousPod(
                     attemptId, previousPodName, System.currentTimeMillis());
             reserveAndPublishStarting(mockId, attemptId, replacement);
             return new RestartClaim(true, replacement, previousPodName,

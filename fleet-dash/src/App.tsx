@@ -1018,7 +1018,7 @@ export default function App() {
                   <td className="mono" data-label="Mock ID">{row.mockId}</td>
                   <td className="mono" data-label="Pod Name">{row.podName ?? "Waiting for Kubernetes"}</td>
                   <td data-label="Status">
-                    <span className="mock-status-content">
+                    <span className={`mock-status-content ${status.className}`}>
                       <span className={`mock-status ${status.className}`}>{status.label}</span>
                       {status.detail ? <span className="mock-status-detail" title={status.detail}>{status.detail}</span> : null}
                     </span>

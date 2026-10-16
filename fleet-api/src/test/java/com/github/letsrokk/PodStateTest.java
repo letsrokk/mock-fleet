@@ -162,7 +162,8 @@ class PodStateTest {
         IMap<String, MockPodRef> podMap = podMap();
         IMap<String, MockPodLifecycle> lifecycleMap = lifecycleMap();
         PodState podState = podStateWithMaps(podMap, lifecycleMap);
-        MockPodLifecycle starting = MockPodLifecycle.starting("attempt-1", null, 1_000L);
+        MockPodLifecycle starting = new MockPodLifecycle("attempt-1", "previous-pod", MockLifecycleStatus.STARTING,
+                "Waiting for previous pod to terminate.", 1_000L);
         when(lifecycleMap.get("demo")).thenReturn(starting);
 
         assertEquals(true, podState.markStartupPodName("demo", "attempt-1", "mock-fleet-demo-1"));
@@ -203,6 +204,7 @@ class PodStateTest {
 
         assertEquals(true, claim.claimed());
         assertEquals(MockLifecycleStatus.STARTING, claim.lifecycle().status());
+        assertEquals("Waiting for previous pod to terminate.", claim.lifecycle().message());
         assertEquals("mock-fleet-demo-1", claim.lifecycle().podName());
         assertEquals("mock-fleet-demo-1", claim.previousPodName());
         verify(lifecycleMap).put("demo", claim.lifecycle());
@@ -219,6 +221,7 @@ class PodStateTest {
         assertEquals(true, claim.claimed());
         assertEquals(null, claim.lifecycle().podName());
         assertEquals(null, claim.previousPodName());
+        assertEquals(null, claim.lifecycle().message());
     }
 
     @Test
@@ -248,6 +251,7 @@ class PodStateTest {
 
         assertEquals(true, replacement.claimed());
         assertEquals(MockLifecycleStatus.STARTING, replacement.lifecycle().status());
+        assertEquals("Waiting for previous pod to terminate.", replacement.lifecycle().message());
         assertEquals("mock-fleet-demo-1", replacement.lifecycle().podName());
         assertEquals("mock-fleet-demo-1", replacement.previousPodName());
         org.junit.jupiter.api.Assertions.assertNotEquals("attempt-1", replacement.lifecycle().attemptId());
