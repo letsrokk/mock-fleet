@@ -486,6 +486,8 @@ h1 {
 
 .mock-status-content { min-width: 0; }
 
+.mock-status-content.starting .mock-status-detail { color: var(--warning); }
+
 .danger-button.unavailable:disabled { cursor: not-allowed; }
 
 .filter-row,
