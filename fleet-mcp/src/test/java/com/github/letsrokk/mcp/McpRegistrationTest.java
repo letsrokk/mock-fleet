@@ -59,6 +59,8 @@ class McpRegistrationTest {
                 .body(containsString("jvm_memory_used_bytes"))
                 .body(containsString("jvm_threads_live_threads"))
                 .body(containsString("process_uptime_seconds"))
+                .body(org.hamcrest.Matchers.not(containsString("netty_")))
+                .body(org.hamcrest.Matchers.not(containsString("worker_pool_")))
                 .body(containsString("mock_fleet_mcp_target_blocks_total"));
     }
 

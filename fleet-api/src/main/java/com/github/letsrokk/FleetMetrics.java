@@ -38,23 +38,14 @@ public class FleetMetrics {
             }
         }
         registry.counter("mock_fleet_start_reservations_reclaimed");
-        registerMockSeries("unknown");
-        wireMockOptions.onConfigChange(() -> wireMockOptions.effectiveConfig().mockConfigs().keySet()
-                .forEach(mockId -> registerMockSeries(mockIdLabel(mockId))));
-    }
-
-    private void registerMockSeries(String mockId) {
         for (String outcome : new String[]{"success", "error", "rejected", "cancelled"}) {
-            registry.counter("mock_fleet_start_attempts", "outcome", outcome, "mock_id", mockId);
-            if (!"rejected".equals(outcome)) {
-                registry.timer("mock_fleet_start_duration_by_mock", "outcome", outcome, "mock_id", mockId);
-            }
+            registry.counter("mock_fleet_start_attempts", "outcome", outcome, "mock_id", "unknown");
         }
         for (String reason : new String[]{"capacity", "queue_full"}) {
-            registry.counter("mock_fleet_start_rejections", "reason", reason, "mock_id", mockId);
+            registry.counter("mock_fleet_start_rejections", "reason", reason);
         }
         for (String outcome : new String[]{"deleted", "already_absent", "error"}) {
-            registry.counter("mock_fleet_pod_deletions", "outcome", outcome, "mock_id", mockId);
+            registry.counter("mock_fleet_pod_deletions", "outcome", outcome);
         }
     }
 
@@ -99,17 +90,19 @@ public class FleetMetrics {
         registry.counter("mock_fleet_start_attempts", "outcome", outcome, "mock_id", label).increment();
         if (!"rejected".equals(outcome)) {
             long elapsed = sample.stop(registry.timer("mock_fleet_start_duration", "outcome", outcome));
-            registry.timer("mock_fleet_start_duration_by_mock", "outcome", outcome, "mock_id", label)
-                    .record(elapsed, TimeUnit.NANOSECONDS);
+            if ("success".equals(outcome)) {
+                registry.timer("mock_fleet_start_duration_by_mock", "outcome", outcome, "mock_id", label)
+                        .record(elapsed, TimeUnit.NANOSECONDS);
+            }
         }
     }
 
-    void startRejected(String reason, String mockId) {
-        registry.counter("mock_fleet_start_rejections", "reason", reason, "mock_id", mockIdLabel(mockId)).increment();
+    void startRejected(String reason) {
+        registry.counter("mock_fleet_start_rejections", "reason", reason).increment();
     }
 
-    void podDeleted(String outcome, String mockId) {
-        registry.counter("mock_fleet_pod_deletions", "outcome", outcome, "mock_id", mockIdLabel(mockId)).increment();
+    void podDeleted(String outcome) {
+        registry.counter("mock_fleet_pod_deletions", "outcome", outcome).increment();
     }
 
     private String mockIdLabel(String mockId) {

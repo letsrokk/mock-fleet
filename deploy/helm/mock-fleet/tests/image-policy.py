@@ -117,3 +117,15 @@ assert "MOCK_FLEET_WIREMOCK_CATALOG_SEED" in discovery
 assert "MOCK_FLEET_WIREMOCK_CATALOG_SEED" not in initializer
 assert "mock-fleet-wiremock-version-catalog" in render({"mockOps": {"enabled": True}}, "wiremock-user-config-init.yaml")
 print("Discovery catalog ownership render checks passed")
+
+for component in ("api", "proxy", "mcp"):
+    for netty, vertx in ((False, False), (True, False), (False, True), (True, True)):
+        values = {"fleet": {"mcp": {"enabled": True}}}
+        if netty or vertx:
+            values["metrics"] = {"binders": {"netty": netty, "vertx": vertx}}
+        deployment = render(values, f"{component}-deployment.yaml")
+        for name, enabled in (("NETTY", netty), ("VERTX", vertx)):
+            assert re.search(rf'MOCK_FLEET_METRICS_{name}_ENABLED\n\s+value: "{str(enabled).lower()}"', deployment)
+for name in ("netty", "vertx"):
+    render({"metrics": {"binders": {name: "invalid"}}}, valid=False)
+print("Metrics binder render checks passed")

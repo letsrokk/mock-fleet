@@ -67,6 +67,10 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           env:
+            - name: MOCK_FLEET_METRICS_NETTY_ENABLED
+              value: {{ .Values.metrics.binders.netty | quote }}
+            - name: MOCK_FLEET_METRICS_VERTX_ENABLED
+              value: {{ .Values.metrics.binders.vertx | quote }}
             - name: KUBERNETES_NAMESPACE
               valueFrom:
                 fieldRef:

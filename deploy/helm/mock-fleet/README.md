@@ -217,6 +217,8 @@ API, proxy, and MCP expose Prometheus metrics on their existing HTTP listener (t
 
 Each includes JVM memory, garbage collection, threads, class loading, and process/system metrics through [Quarkus Micrometer's standard binders](https://quarkus.io/guides/telemetry-micrometer/), plus HTTP metrics. MCP retains its existing tool metrics. The dashboard, managed WireMock containers, and short-lived Mock Ops command are excluded.
 
+Netty allocator/event-loop metrics (`netty_*`) and Vert.x worker-pool metrics (`worker_pool_*`) are omitted by default in all three services. Set `metrics.binders.netty=true` and/or `metrics.binders.vertx=true` to export them. These values set `MOCK_FLEET_METRICS_NETTY_ENABLED` and `MOCK_FLEET_METRICS_VERTX_ENABLED`; standalone services accept the same environment variables. Restart the services after changing them. Runtime meter filters control these two families because Quarkus binder enablement is fixed at build time. HTTP server/client metrics remain enabled independently.
+
 Scrape every replica directly: a load-balanced Service address hides individual process counters. These paths work with a pod IP as the host in both HOST and PATH routing modes; they require no mock subdomain and do not resolve or start a mock. The paths above are direct pod endpoints, not ingress route guarantees.
 
 ### Scrape configuration
@@ -270,7 +272,9 @@ Confirm one target per API/proxy/MCP replica in Prometheus and `up{job="mock-fle
 
 ### API lifecycle metrics
 
-All outcome and reason combinations are registered at zero for configured mocks and `mock_id="unknown"` on startup and configuration reload. Start attempt, rejection, and pod deletion counters, plus the per-mock startup timer, include `mock_id`. Only valid IDs in the merged baseline and user mock configuration receive their own label; unconfigured or invalid IDs use `unknown`, including valid mocks started using defaults. Reloads register newly configured mocks without resetting existing counters or timer samples. Series for removed mocks remain exported until the API replica restarts; their counters retain the last value, while timer `_max` values expire normally. Subsequent events for a removed mock use `unknown`. Labels omit pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
+Configured per-mock series appear only when an event is recorded, rather than at startup or configuration reload. Start attempts retain `mock_id`; per-mock startup durations retain `mock_id` and record only `outcome="success"`. Rejections and pod deletions are fleet-wide counters labeled only by reason or outcome. The aggregate startup histogram, rejection and deletion counters, and startup attempts with `mock_id="unknown"` are registered at zero on startup.
+
+Only valid IDs in the merged baseline and user mock configuration receive their own label; unconfigured or invalid IDs use `unknown`, including valid mocks started using defaults. Reloads preserve existing counters and timer samples. Series for removed mocks remain exported until the API replica restarts; their counters retain the last value, while timer `_max` values expire normally. Subsequent events for a removed mock use `unknown`. Labels omit pod names, URLs, and exception messages to bound the number of time series, following [Prometheus instrumentation guidance](https://prometheus.io/docs/practices/instrumentation/).
 
 | Metric | Type | Meaning |
 | --- | --- | --- |
@@ -280,17 +284,17 @@ All outcome and reason combinations are registered at zero for configured mocks 
 | `mock_fleet_start_queue_depth` | Local gauge | Tasks waiting in this API replica's startup executor. |
 | `mock_fleet_start_workers_active` | Local gauge | Startup tasks executing on this replica. |
 | `mock_fleet_start_attempts_total{outcome="success\|error\|rejected\|cancelled",mock_id="…"}` | Counter | One terminal outcome per submitted startup attempt; callers sharing an existing attempt add no event. Executor rejection is `rejected`; shutdown cancellation of queued tasks is `cancelled`; interrupted executing starts are `error`. |
-| `mock_fleet_start_rejections_total{reason="capacity\|queue_full",mock_id="…"}` | Counter | Admission rejections at the cluster capacity limit or the local executor queue. |
+| `mock_fleet_start_rejections_total{reason="capacity\|queue_full"}` | Counter | Admission rejections at the cluster capacity limit or the local executor queue. |
 | `mock_fleet_start_duration_seconds{outcome="success\|error\|cancelled"}` | Histogram | Accepted startup time from submission through completion, including time in the queue. Rejected attempts are excluded. |
-| `mock_fleet_start_duration_by_mock_seconds{outcome="success\|error\|cancelled",mock_id="…"}` | Timer | The same accepted startup duration per configured mock; exports `_count`, `_sum`, and `_max`, without buckets. |
-| `mock_fleet_pod_deletions_total{outcome="deleted\|already_absent\|error",mock_id="…"}` | Counter | Deletion operation outcomes, including idempotent requests; not a count of distinct deleted pods. |
+| `mock_fleet_start_duration_by_mock_seconds{outcome="success",mock_id="…"}` | Timer | Successful startup duration per configured mock; exports `_count`, `_sum`, and `_max`, without buckets. |
+| `mock_fleet_pod_deletions_total{outcome="deleted\|already_absent\|error"}` | Counter | Deletion operation outcomes, including idempotent requests; not a count of distinct deleted pods. |
 | `mock_fleet_start_reservations_reclaimed_total` | Counter | Stale/expired startup reservations successfully removed by reconciliation. |
 
 The `|` notation in the table lists allowed label values. Startup duration exports `_bucket`, `_count`, and `_sum` series, with bucket boundaries of 0.1, 0.5, 1, 2, 5, 10, 30, 60, and 120 seconds, plus `+Inf`.
 
-Zero initialization provides a baseline for rate and increase queries once scraped. Events before the first scrape can still be missed. Prometheus [`increase()`](https://prometheus.io/docs/prometheus/latest/querying/functions/#increase) extrapolates over the query window, so its result can differ from the integer event count.
+Zero initialization provides a baseline for fleet-wide rate and increase queries once scraped. Per-mock series first appear with an event, so rate/delta backends can miss their first increment. Events before the first scrape can still be missed. Prometheus [`increase()`](https://prometheus.io/docs/prometheus/latest/querying/functions/#increase) extrapolates over the query window, so its result can differ from the integer event count.
 
-The aggregate `mock_fleet_start_duration_seconds` metric retains its existing labels and buckets; it has no `mock_id`. Sum the counters over `mock_id` to preserve existing totals. For per-mock average startup time, use:
+The aggregate `mock_fleet_start_duration_seconds` metric retains its existing labels and buckets; it has no `mock_id`. Sum startup attempt counters over `mock_id` to obtain fleet-wide totals. Queries that group rejections or deletions by `mock_id` must use fleet-wide reason/outcome totals instead. For per-mock average successful startup time, use:
 
 ```promql
 sum by (mock_id, outcome) (rate(mock_fleet_start_duration_by_mock_seconds_sum[5m]))
