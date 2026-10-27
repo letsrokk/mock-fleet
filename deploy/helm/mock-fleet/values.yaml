@@ -5,6 +5,9 @@ clusterDomain: cluster.local
 
 metrics:
   enabled: false
+  binders:
+    netty: false
+    vertx: false
 
 fleet:
   proxy:

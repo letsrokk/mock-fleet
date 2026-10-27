@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FleetMetricsTest {
 
     @Test
-    void initializesConfiguredSeriesOnStartupAndReloadWithoutResettingExistingValues() {
+    void createsMockSeriesOnlyOnUseWithoutResettingExistingValues() {
         WireMockOptions options = new WireMockOptions();
         options.load(new ByteArrayInputStream("""
                 wiremock:
@@ -32,13 +32,23 @@ class FleetMetricsTest {
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         try {
             FleetMetrics metrics = new FleetMetrics(registry, options);
-            assertZeroSeries(registry, "mock-a");
+            assertNoMockSeries(registry, "mock-a");
+            for (String outcome : List.of("success", "error", "cancelled", "rejected")) {
+                assertEquals(0, registry.get("mock_fleet_start_attempts")
+                        .tags("mock_id", "unknown", "outcome", outcome).counter().count());
+            }
+            for (String reason : List.of("capacity", "queue_full")) {
+                assertEquals(0, registry.get("mock_fleet_start_rejections").tag("reason", reason).counter().count());
+            }
+            for (String outcome : List.of("deleted", "already_absent", "error")) {
+                assertEquals(0, registry.get("mock_fleet_pod_deletions").tag("outcome", outcome).counter().count());
+            }
             assertFalse(registry.scrape().contains("invalid_id"));
 
             metrics.finishStart(metrics.start(), "error", "mock-a");
             options.setUserConfig(WireMockConfigDocument.of(List.of(), null,
                     Map.of("mock-b", new WireMockPodConfig(List.of(), null))));
-            assertZeroSeries(registry, "mock-b");
+            assertNoMockSeries(registry, "mock-b");
             assertEquals(1, registry.get("mock_fleet_start_attempts")
                     .tags("mock_id", "mock-a", "outcome", "error").counter().count());
 
@@ -57,32 +67,14 @@ class FleetMetricsTest {
                       mocks:
                         - id: mock-c
                     """.getBytes(StandardCharsets.UTF_8)));
-            assertZeroSeries(registry, "mock-c");
+            assertNoMockSeries(registry, "mock-c");
         } finally {
             registry.close();
         }
     }
 
-    private void assertZeroSeries(PrometheusMeterRegistry registry, String mockId) {
-        CollectorRegistry samples = registry.getPrometheusRegistry();
-        for (String outcome : List.of("success", "error", "cancelled", "rejected")) {
-            assertEquals(0.0, samples.getSampleValue("mock_fleet_start_attempts_total",
-                    new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
-            if (!"rejected".equals(outcome)) {
-                for (String suffix : List.of("count", "sum", "max")) {
-                    assertEquals(0.0, samples.getSampleValue("mock_fleet_start_duration_by_mock_seconds_" + suffix,
-                            new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
-                }
-            }
-        }
-        for (String reason : List.of("capacity", "queue_full")) {
-            assertEquals(0.0, samples.getSampleValue("mock_fleet_start_rejections_total",
-                    new String[]{"mock_id", "reason"}, new String[]{mockId, reason}));
-        }
-        for (String outcome : List.of("deleted", "already_absent", "error")) {
-            assertEquals(0.0, samples.getSampleValue("mock_fleet_pod_deletions_total",
-                    new String[]{"mock_id", "outcome"}, new String[]{mockId, outcome}));
-        }
+    private void assertNoMockSeries(PrometheusMeterRegistry registry, String mockId) {
+        assertFalse(registry.scrape().contains("mock_id=\"" + mockId + "\""));
     }
 
     @Test
@@ -110,10 +102,10 @@ class FleetMetricsTest {
                     clock.add(Duration.ofSeconds(2));
                     metrics.finishStart(sample, outcome, mockId);
                 }
-                metrics.startRejected("capacity", mockId);
-                metrics.startRejected("queue_full", mockId);
+                metrics.startRejected("capacity");
+                metrics.startRejected("queue_full");
                 for (String outcome : List.of("deleted", "already_absent", "error")) {
-                    metrics.podDeleted(outcome, mockId);
+                    metrics.podDeleted(outcome);
                 }
             }
 
@@ -122,7 +114,7 @@ class FleetMetricsTest {
                 for (String outcome : List.of("success", "error", "cancelled", "rejected")) {
                     assertEquals(expected, registry.get("mock_fleet_start_attempts")
                             .tags("outcome", outcome, "mock_id", label).counter().count());
-                    if (!"rejected".equals(outcome)) {
+                    if ("success".equals(outcome)) {
                         var timer = registry.get("mock_fleet_start_duration_by_mock")
                                 .tags("outcome", outcome, "mock_id", label).timer();
                         assertEquals(expected, timer.count());
@@ -130,30 +122,31 @@ class FleetMetricsTest {
                         assertEquals(2, timer.max(TimeUnit.SECONDS));
                     }
                 }
-                for (String reason : List.of("capacity", "queue_full")) {
-                    assertEquals(expected, registry.get("mock_fleet_start_rejections")
-                            .tags("reason", reason, "mock_id", label).counter().count());
-                }
-                for (String outcome : List.of("deleted", "already_absent", "error")) {
-                    assertEquals(expected, registry.get("mock_fleet_pod_deletions")
-                            .tags("outcome", outcome, "mock_id", label).counter().count());
-                }
+            }
+            for (String reason : List.of("capacity", "queue_full")) {
+                assertEquals(4, registry.get("mock_fleet_start_rejections")
+                        .tag("reason", reason).counter().count());
+            }
+            for (String outcome : List.of("deleted", "already_absent", "error")) {
+                assertEquals(4, registry.get("mock_fleet_pod_deletions")
+                        .tag("outcome", outcome).counter().count());
             }
             for (String outcome : List.of("success", "error", "cancelled")) {
                 var aggregate = registry.get("mock_fleet_start_duration").tag("outcome", outcome).timer();
                 assertEquals(4, aggregate.count());
                 assertEquals(8, aggregate.totalTime(TimeUnit.SECONDS));
             }
-            assertTrue(registry.find("mock_fleet_start_duration_by_mock").tag("outcome", "rejected")
-                    .timers().isEmpty());
+            for (String outcome : List.of("error", "cancelled", "rejected")) {
+                assertTrue(registry.find("mock_fleet_start_duration_by_mock").tag("outcome", outcome)
+                        .timers().isEmpty());
+            }
 
             String scrape = registry.scrape();
             assertFalse(scrape.contains("unconfigured"));
             assertFalse(scrape.contains("invalid_id"));
             assertFalse(scrape.contains("mock_fleet_start_duration_by_mock_seconds_bucket"));
             assertTrue(scrape.contains("mock_fleet_start_duration_seconds_bucket"));
-            for (String series : List.of("mock_fleet_start_attempts_total", "mock_fleet_start_rejections_total",
-                    "mock_fleet_pod_deletions_total", "mock_fleet_start_duration_by_mock_seconds_count",
+            for (String series : List.of("mock_fleet_start_attempts_total", "mock_fleet_start_duration_by_mock_seconds_count",
                     "mock_fleet_start_duration_by_mock_seconds_sum", "mock_fleet_start_duration_by_mock_seconds_max")) {
                 var lines = scrape.lines().filter(line -> line.startsWith(series + "{")).toList();
                 assertFalse(lines.isEmpty(), series);
@@ -162,10 +155,15 @@ class FleetMetricsTest {
             assertTrue(scrape.lines().filter(line -> line.startsWith("mock_fleet_start_duration_seconds"))
                     .noneMatch(line -> line.contains("mock_id=")));
 
+            for (String series : List.of("mock_fleet_start_rejections_total", "mock_fleet_pod_deletions_total")) {
+                var lines = scrape.lines().filter(line -> line.startsWith(series + "{")).toList();
+                assertFalse(lines.isEmpty(), series);
+                assertTrue(lines.stream().noneMatch(line -> line.contains("mock_id=")), series);
+            }
             options.setUserConfig(WireMockConfigDocument.empty());
-            metrics.startRejected("capacity", "mock-b");
-            assertEquals(3, registry.get("mock_fleet_start_rejections")
-                    .tags("reason", "capacity", "mock_id", "unknown").counter().count());
+            metrics.finishStart(metrics.start(), "error", "mock-b");
+            assertEquals(3, registry.get("mock_fleet_start_attempts")
+                    .tags("outcome", "error", "mock_id", "unknown").counter().count());
         } finally {
             registry.close();
         }

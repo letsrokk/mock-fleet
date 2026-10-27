@@ -5,6 +5,17 @@ import io.smallrye.config.ConfigMapping;
 @ConfigMapping(prefix = "mock-fleet")
 public interface MockFleetConfig {
 
+    MetricsConfig metrics();
+
+    interface MetricsConfig {
+        BindersConfig binders();
+    }
+
+    interface BindersConfig {
+        boolean netty();
+        boolean vertx();
+    }
+
     ApiConfig api();
 
     RoutingConfig routing();

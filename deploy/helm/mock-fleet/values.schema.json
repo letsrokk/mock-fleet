@@ -10,9 +10,17 @@
     "metrics": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean" },
+        "binders": {
+          "type": "object",
+          "properties": {
+            "netty": { "type": "boolean" },
+            "vertx": { "type": "boolean" }
+          },
+          "required": ["netty", "vertx"]
+        }
       },
-      "required": ["enabled"]
+      "required": ["enabled", "binders"]
     },
     "fleet": {
       "type": "object",

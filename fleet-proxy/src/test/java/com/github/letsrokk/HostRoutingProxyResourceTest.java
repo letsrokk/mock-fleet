@@ -93,6 +93,8 @@ class HostRoutingProxyResourceTest {
         String scrape = given().header("Host", "10.42.0.17:8080").accept("text/plain")
                 .get("/__fleet/proxy/metrics").then().statusCode(200).extract().asString();
         assertTrue(scrape.contains("uri=\"/proxy\""));
+        assertFalse(scrape.contains("netty_"));
+        assertFalse(scrape.contains("worker_pool_"));
         assertFalse(scrape.contains("customer-one"));
         assertFalse(scrape.contains("customer-two"));
         assertFalse(scrape.contains("metrics-test"));

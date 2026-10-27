@@ -30,10 +30,12 @@ class FleetResourceTest {
                 .body(org.hamcrest.Matchers.containsString("mock_fleet_start_attempts_total"))
                 .body(org.hamcrest.Matchers.containsString("mock_fleet_start_duration_seconds_bucket"));
         String scrape = given().accept("text/plain").get("/__fleet/api/metrics").asString();
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("netty_"));
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("worker_pool_"));
         org.junit.jupiter.api.Assertions.assertTrue(scrape.lines()
                 .filter(line -> line.startsWith("mock_fleet_start_attempts_total{"))
                 .allMatch(line -> line.contains("mock_id=\"unknown\"")));
-        org.junit.jupiter.api.Assertions.assertTrue(scrape.contains("mock_fleet_start_duration_by_mock_seconds_count"));
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("mock_fleet_start_duration_by_mock_seconds_count"));
         org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("mock_fleet_start_duration_by_mock_seconds_bucket"));
         org.junit.jupiter.api.Assertions.assertTrue(scrape.lines()
                 .filter(line -> line.startsWith("mock_fleet_start_duration_seconds_bucket{"))

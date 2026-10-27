@@ -180,7 +180,7 @@ public class PodManager {
             startExecutor.execute(task);
         } catch (RejectedExecutionException rejection) {
             PodCreationException failure = new PodCreationException("Mock start queue is full.");
-            metrics.startRejected("queue_full", mockId);
+            metrics.startRejected("queue_full");
             task.cancelBeforeStart(failure, "rejected");
             throw new StartQueueFullException(mockId, stateMayHaveChanged);
         }
@@ -791,7 +791,7 @@ public class PodManager {
 
     boolean deletePod(Pod pod, String mockId) {
         if (pod == null || pod.getMetadata() == null) {
-            metrics.podDeleted("error", mockId);
+            metrics.podDeleted("error");
             return false;
         }
         return deletePod(pod.getMetadata().getName(), mockId);
@@ -851,7 +851,7 @@ public class PodManager {
             LOG.warnf(failure, "Failed while deleting pod '%s'.", podName);
             return false;
         } finally {
-            metrics.podDeleted(outcome, mockId);
+            metrics.podDeleted(outcome);
         }
     }
 

@@ -9,6 +9,17 @@ import java.util.Optional;
 @ConfigMapping(prefix = "mock-fleet")
 public interface MockFleetConfig {
 
+    MetricsConfig metrics();
+
+    interface MetricsConfig {
+        BindersConfig binders();
+    }
+
+    interface BindersConfig {
+        boolean netty();
+        boolean vertx();
+    }
+
     String namespace();
 
     Duration inactivityThreshold();
