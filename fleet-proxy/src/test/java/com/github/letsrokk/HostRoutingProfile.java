@@ -9,6 +9,7 @@ public class HostRoutingProfile implements QuarkusTestProfile {
     @Override
     public Map<String, String> getConfigOverrides() {
         return Map.of(
-                "mock-fleet.routing.mode", "HOST");
+                "mock-fleet.routing.mode", "HOST",
+                "mock-fleet.metrics.binders.http", "true");
     }
 }

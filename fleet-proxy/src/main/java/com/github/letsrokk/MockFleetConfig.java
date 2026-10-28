@@ -14,6 +14,7 @@ public interface MockFleetConfig {
     interface BindersConfig {
         boolean netty();
         boolean vertx();
+        boolean http();
     }
 
     ApiConfig api();

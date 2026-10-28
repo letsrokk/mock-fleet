@@ -50,6 +50,8 @@ spec:
               value: {{ .Values.metrics.binders.netty | quote }}
             - name: MOCK_FLEET_METRICS_VERTX_ENABLED
               value: {{ .Values.metrics.binders.vertx | quote }}
+            - name: MOCK_FLEET_METRICS_HTTP_ENABLED
+              value: {{ .Values.metrics.binders.http | quote }}
             - name: FLEET_MCP_API_BASE_URL
               value: {{ include "mock-fleet.mcpApiBaseUrl" . | quote }}
             - name: FLEET_MCP_PROXY_BASE_URL

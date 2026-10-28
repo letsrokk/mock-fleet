@@ -36,6 +36,7 @@ mock-fleet:
     binders:
       netty: ${MOCK_FLEET_METRICS_NETTY_ENABLED:false}
       vertx: ${MOCK_FLEET_METRICS_VERTX_ENABLED:false}
+      http: ${MOCK_FLEET_METRICS_HTTP_ENABLED:false}
   namespace: ${MOCK_FLEET_NAMESPACE:mock-fleet}
   inactivity-threshold: ${MOCK_FLEET_INACTIVITY_THRESHOLD:1M}
   pod-creation-timeout: ${MOCK_FLEET_POD_CREATION_TIMEOUT:1M}

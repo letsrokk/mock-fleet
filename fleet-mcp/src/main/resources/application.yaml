@@ -40,6 +40,7 @@ mock-fleet:
     binders:
       netty: ${MOCK_FLEET_METRICS_NETTY_ENABLED:false}
       vertx: ${MOCK_FLEET_METRICS_VERTX_ENABLED:false}
+      http: ${MOCK_FLEET_METRICS_HTTP_ENABLED:false}
   mcp:
     api-base-url: ${FLEET_MCP_API_BASE_URL:http://localhost:8081}
     proxy-base-url: ${FLEET_MCP_PROXY_BASE_URL:http://localhost:8082}

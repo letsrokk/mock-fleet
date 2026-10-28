@@ -124,8 +124,8 @@ class FleetResourceTest {
 
         verify(podManager).startMock("demo");
         String scrape = given().accept("text/plain").get("/__fleet/api/metrics").asString();
-        org.junit.jupiter.api.Assertions.assertTrue(scrape.contains("uri=\"/__fleet/api/mocks/{mockId}/start\""));
-        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("/__fleet/api/mocks/demo/start"));
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("http_server_"));
+        org.junit.jupiter.api.Assertions.assertFalse(scrape.contains("http_client_"));
     }
 
     @Test
