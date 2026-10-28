@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run with python3 deploy/helm/mock-fleet/tests/image-policy.py (requires Helm)."""
 import json
+from itertools import product
 import re
 import subprocess
 import tempfile
@@ -119,13 +120,13 @@ assert "mock-fleet-wiremock-version-catalog" in render({"mockOps": {"enabled": T
 print("Discovery catalog ownership render checks passed")
 
 for component in ("api", "proxy", "mcp"):
-    for netty, vertx in ((False, False), (True, False), (False, True), (True, True)):
+    for netty, vertx, http in product((False, True), repeat=3):
         values = {"fleet": {"mcp": {"enabled": True}}}
-        if netty or vertx:
-            values["metrics"] = {"binders": {"netty": netty, "vertx": vertx}}
+        if netty or vertx or http:
+            values["metrics"] = {"binders": {"netty": netty, "vertx": vertx, "http": http}}
         deployment = render(values, f"{component}-deployment.yaml")
-        for name, enabled in (("NETTY", netty), ("VERTX", vertx)):
+        for name, enabled in (("NETTY", netty), ("VERTX", vertx), ("HTTP", http)):
             assert re.search(rf'MOCK_FLEET_METRICS_{name}_ENABLED\n\s+value: "{str(enabled).lower()}"', deployment)
-for name in ("netty", "vertx"):
+for name in ("netty", "vertx", "http"):
     render({"metrics": {"binders": {name: "invalid"}}}, valid=False)
 print("Metrics binder render checks passed")

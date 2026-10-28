@@ -11,8 +11,10 @@ public class MetricsBinderFilter {
     @Singleton
     MeterFilter optionalBinders(
             @ConfigProperty(name = "mock-fleet.metrics.binders.netty") boolean netty,
-            @ConfigProperty(name = "mock-fleet.metrics.binders.vertx") boolean vertx) {
+            @ConfigProperty(name = "mock-fleet.metrics.binders.vertx") boolean vertx,
+            @ConfigProperty(name = "mock-fleet.metrics.binders.http") boolean http) {
         return MeterFilter.deny(id -> (!netty && id.getName().startsWith("netty."))
-                || (!vertx && id.getName().startsWith("worker.pool.")));
+                || (!vertx && id.getName().startsWith("worker.pool."))
+                || (!http && (id.getName().startsWith("http.server.") || id.getName().startsWith("http.client."))));
     }
 }

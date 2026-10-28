@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking change:** HTTP server/client metrics (`http_server_*`, `http_client_*`) are now disabled by default in fleet-api, fleet-proxy, and fleet-mcp. Set Helm `metrics.binders.http=true` or standalone `MOCK_FLEET_METRICS_HTTP_ENABLED=true` and restart the services to retain these metrics for existing dashboards and alerts.
+
 - Initialize configured per-mock counters and timers at zero on startup and configuration reload so scrapers can observe a baseline before the first event. Reloads preserve recorded values; removed mock series remain exported until API restart, with timer maxima expiring normally.
 
 ## v2.6.3

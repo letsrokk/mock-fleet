@@ -15,9 +15,10 @@
           "type": "object",
           "properties": {
             "netty": { "type": "boolean" },
-            "vertx": { "type": "boolean" }
+            "vertx": { "type": "boolean" },
+            "http": { "type": "boolean" }
           },
-          "required": ["netty", "vertx"]
+          "required": ["netty", "vertx", "http"]
         }
       },
       "required": ["enabled", "binders"]

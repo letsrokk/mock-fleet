@@ -30,6 +30,7 @@ mock-fleet:
     binders:
       netty: ${MOCK_FLEET_METRICS_NETTY_ENABLED:false}
       vertx: ${MOCK_FLEET_METRICS_VERTX_ENABLED:false}
+      http: ${MOCK_FLEET_METRICS_HTTP_ENABLED:false}
   connection-pools:
     api-max-size: ${MOCK_FLEET_CONNECTION_POOLS_API_MAX_SIZE:50}
     mock-max-size: ${MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE:20}
