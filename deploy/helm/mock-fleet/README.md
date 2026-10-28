@@ -342,7 +342,7 @@ The latency query returns `NaN` when no successful starts occurred in the window
 
 ## Upgrade And Security Notes
 
-- Runtime dependencies now use Quarkus 3.33.3.1 and Hazelcast 5.7.0. Fleet Proxy also rejects absolute, scheme-relative, fragmented, malformed-percent, and backslash-bearing request targets before resolution or outbound I/O, and it removes inbound authority, framing, and hop-by-hop headers before forwarding. These changes do not add API, Admin-route, or MCP authentication.
+- Runtime dependencies now use Quarkus 3.40.1.1 and Hazelcast 5.7.0. Fleet Proxy also rejects absolute, scheme-relative, fragmented, malformed-percent, and backslash-bearing request targets before resolution or outbound I/O, and it removes inbound authority, framing, and hop-by-hop headers before forwarding. These changes do not add API, Admin-route, or MCP authentication.
 - The plaintext WireMock options `--ca-keystore-password`, `--keystore-password`, `--key-manager-password`, and `--truststore-password` are unsupported in both `--name=value` and split-argument forms. New writes are rejected before persistence. Existing values are redacted from API output and fail closed when a mock starts. Before upgrading, remove these entries from `wiremock.default.options` and every `wiremock.mocks[].options` list in `<release-fullname>-wiremock-user-config`, and from `wiremock.config.default.options` or `wiremock.config.mocks[].options` in Helm values. Password-protected keystores are unsupported until a Secret-backed path exists. Treat the retained ConfigMap as sensitive until cleanup is complete.
 - Saved overrides in `<release-fullname>-wiremock-user-config` are runtime data, not a ConfigMap rendered into desired state. An initialization job runs before Helm installs/upgrades and Argo CD full syncs. It creates an empty configuration only if the object is missing, otherwise preserves its data and adds deletion/pruning protection. The API still requires this object and returns HTTP 503 `CONFIG_UNAVAILABLE` if it is absent; it cannot create ConfigMaps.
 - In static mode, `wiremock.containerImage` must match an exact tag in `wiremock.supportedImageTags`, including its numeric image revision. In discovered mode, its semantic version must be inside `mockOps.allowedVersionRange`. All candidate images use exact stable 3.x.y tags with optional numeric image revisions; digests, floating tags, prereleases, Alpine variants, and duplicate semantic versions in the seed list are rejected. Replace the removed `mockOps.defaultVersionConstraint` key with `mockOps.allowedVersionRange`, for example `[3.13,3.14)` instead of `3.13.x`. The old key is rejected by the chart schema.
@@ -536,8 +536,8 @@ MCP publishes 31 tools, including `start_mock` and `get_recording_status`; `reco
 | --- | --- | --- |
 | `wiremock.podNamePrefix` | `mock-fleet` | Base prefix used for spawned WireMock pod names. |
 | `wiremock.containerName` | `wiremock` | Container name used for spawned WireMock pods. |
-| `wiremock.containerImage` | `wiremock/wiremock:3.13.2-2` | Exact initial/fallback default image. Must match a static allowed tag or fall within the discovered interval. |
-| `wiremock.supportedImageTags` | `[3.13.2-2, 3.12.1-2, 3.11.0-1, 3.10.0-1, 3.9.2-1]` | Exact static allowlist; initial seeds when Mock Ops is enabled. Each semantic version must be unique. |
+| `wiremock.containerImage` | `wiremock/wiremock:3.13.2-3` | Exact initial/fallback default image. Must match a static allowed tag or fall within the discovered interval. |
+| `wiremock.supportedImageTags` | `[3.13.2-3, 3.12.1-2, 3.11.0-1, 3.10.0-1, 3.9.2-1]` | Exact static allowlist; initial seeds when Mock Ops is enabled. Each semantic version must be unique. |
 | `wiremock.containerImagePullPolicy` | `IfNotPresent` | Image pull policy for spawned WireMock pods. |
 | `wiremock.terminationGracePeriodSeconds` | `5` | Graceful shutdown window for spawned WireMock pods. Fleet waits for full pod removal before replacement. |
 | `wiremock.serviceAccount.create` | `true` | Create a dedicated service account for managed WireMock pods. |
@@ -592,7 +592,7 @@ For a private registry, configure one pull secret for both discovery and image p
 
 ```yaml
 wiremock:
-  containerImage: registry.example.com/team/wiremock:3.13.2-2
+  containerImage: registry.example.com/team/wiremock:3.13.2-3
   serviceAccount:
     imagePullSecrets:
       - name: wiremock-pull
