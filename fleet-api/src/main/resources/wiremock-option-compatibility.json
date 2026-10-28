@@ -31,7 +31,7 @@
     { "version": "3.12.1", "imageTag": "3.12.1-2" },
     { "version": "3.13.0", "imageTag": "3.13.0-1" },
     { "version": "3.13.1", "imageTag": "3.13.1-1" },
-    { "version": "3.13.2", "imageTag": "3.13.2-2" }
+    { "version": "3.13.2", "imageTag": "3.13.2-3" }
   ],
   "options": [
     { "name": "--admin-api-basic-auth", "unavailableReason": "SECRET_STORAGE_REQUIRED" },
