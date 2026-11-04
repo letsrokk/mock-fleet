@@ -35,6 +35,7 @@ public interface MockFleetConfig {
     interface RoutingConfig {
         RoutingMode mode();
         String host();
+        boolean rewriteLocationHeaders();
     }
 
     enum RoutingMode {

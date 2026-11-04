@@ -32,6 +32,12 @@
             {
               "type": "object",
               "properties": {
+                "routing": {
+                  "type": "object",
+                  "properties": {
+                    "rewriteLocationHeaders": { "type": "boolean" }
+                  }
+                },
                 "connectionPools": {
                   "type": "object",
                   "properties": {

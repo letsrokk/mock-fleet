@@ -83,6 +83,15 @@ class HostRoutingProxyResourceTest {
     }
 
     @Test
+    void preservesRootRelativeLocationsInHostMode() {
+        mockUpstream("demo");
+        nextResponse.set(new UpstreamResponse(307, "", Map.of("Location", List.of("/next?c=d"))));
+        given().header("Host", "demo.mock-fleet.localhost").redirects().follow(false)
+                .get("/start")
+                .then().statusCode(307).header("Location", "/next?c=d");
+    }
+
+    @Test
     void boundsHttpMetricLabelsAcrossArbitraryMockPaths() {
         mockUpstream("metrics-test");
         for (String path : List.of("/orders/customer-one", "/customers/customer-two")) {

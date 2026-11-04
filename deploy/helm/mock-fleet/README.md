@@ -42,6 +42,14 @@ Both values must be positive integers. Each proxy replica has a separate API poo
 
 Outside Helm, set `MOCK_FLEET_CONNECTION_POOLS_API_MAX_SIZE` and `MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE` on `fleet-proxy`. The application defaults are also 50 and 20. Changing these settings requires restarting the proxy.
 
+## Proxy redirect locations
+
+In PATH mode, `fleet.proxy.routing.rewriteLocationHeaders` defaults to `true`: a mock response with `Location: /next` becomes `Location: /<mockId>/next`. Absolute URLs, network-path references (`//host/path`), and HOST-mode responses pass through unchanged. Query strings and fragments are preserved.
+
+The proxy treats a leading `/<mockId>` followed by `/`, `?`, `#`, or the end of the value as already prefixed. For example, `/demo/next` stays unchanged for mock `demo`, while `/demo-other/next` becomes `/demo/demo-other/next`. This also treats a literal upstream path starting with the same segment as already prefixed; the proxy cannot distinguish the two meanings.
+
+Set `fleet.proxy.routing.rewriteLocationHeaders=false` to preserve `Location` headers verbatim. Outside Helm, use `MOCK_FLEET_ROUTING_REWRITE_LOCATION_HEADERS=false`. Restart the proxy after changing the setting.
+
 ## Cluster Security Prerequisites
 
 The chart renders `NetworkPolicy` objects, but Kubernetes accepts them even when the installed network plugin does not enforce them. A NetworkPolicy-capable CNI, such as Calico or Cilium, is a deployment prerequisite. Installing and configuring that CNI, and proving that it enforces the rendered selectors, belongs to the cluster operator. `make local-deploy` neither checks nor changes CNI capability. The bridge CNI in the Minikube cluster reviewed for this release accepted the policies but did not enforce them.
@@ -403,6 +411,7 @@ The admission policy accepts zero identity projections or exactly one projection
 | `fleet.proxy.image.tag` | `""` | Proxy image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.proxy.image.pullPolicy` | `IfNotPresent` | Proxy image pull policy. |
 | `fleet.proxy.routing.mode` | `HOST` | Mock routing mode: `HOST` or `PATH`. |
+| `fleet.proxy.routing.rewriteLocationHeaders` | `true` | In PATH mode, prefix root-relative `Location` headers with `/<mockId>` unless that complete path segment is already present at the start. Absolute URLs and `//host/path` references pass through. HOST mode is unaffected. Set to `false` to preserve mock response headers verbatim. |
 | `fleet.proxy.logging.json` | `false` | Enable JSON console logging for the proxy. |
 | `fleet.proxy.logging.level` | `INFO` | Proxy `com.github.letsrokk` log level; use `TRACE` to log proxied requests. |
 | `fleet.proxy.replicas` | `2` | Proxy replica count when dev mode is disabled. |
