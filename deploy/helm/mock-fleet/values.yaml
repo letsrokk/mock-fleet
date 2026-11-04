@@ -22,6 +22,7 @@ fleet:
       pullPolicy: IfNotPresent
     routing:
       mode: HOST
+      rewriteLocationHeaders: true
     connectionPools:
       apiMaxSize: 50
       mockMaxSize: 20

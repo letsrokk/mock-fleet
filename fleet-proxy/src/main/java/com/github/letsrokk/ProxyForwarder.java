@@ -76,7 +76,7 @@ public class ProxyForwarder {
                             resolvedRequest.mockId(),
                             upstream,
                             requestTarget.rawPathAndQuery());
-                    forwardWithRetry(upstream, requestTarget, routingContext, requestBody, 0)
+                    forwardWithRetry(upstream, requestTarget, routingContext, requestBody, resolvedRequest.mockId(), 0)
                             .onFailure(error -> handleFailure(routingContext, host, error));
                 })
                 .onFailure(error -> handleFailure(routingContext, host, error));
@@ -102,8 +102,8 @@ public class ProxyForwarder {
     }
 
     private io.vertx.core.Future<Void> forwardWithRetry(URI upstream, OriginFormRequestTarget requestTarget,
-                                                        RoutingContext routingContext, Buffer body, int attempt) {
-        return forward(upstream, requestTarget, routingContext, body)
+                                                        RoutingContext routingContext, Buffer body, String mockId, int attempt) {
+        return forward(upstream, requestTarget, routingContext, body, mockId)
                 .recover(error -> {
                     if (!shouldRetryConnectFailure(error, attempt)) {
                         return io.vertx.core.Future.failedFuture(error);
@@ -114,12 +114,12 @@ public class ProxyForwarder {
                             upstream, attempt + 1, MAX_CONNECT_RETRIES, delayMs);
 
                     return vertx.timer(delayMs)
-                            .flatMap(ignored -> forwardWithRetry(upstream, requestTarget, routingContext, body, attempt + 1));
+                            .flatMap(ignored -> forwardWithRetry(upstream, requestTarget, routingContext, body, mockId, attempt + 1));
                 });
     }
 
     private io.vertx.core.Future<Void> forward(URI upstream, OriginFormRequestTarget requestTarget,
-                                               RoutingContext routingContext, Buffer body) {
+                                               RoutingContext routingContext, Buffer body, String mockId) {
         String targetUri = requestTarget.appendTo(upstream).toString();
         HttpRequest<Buffer> request = client()
                 .requestAbs(routingContext.request().method(), targetUri)
@@ -128,9 +128,9 @@ public class ProxyForwarder {
         copyForwardableRequestHeaders(routingContext.request().headers(), request.headers());
 
         if (body == null || body.length() == 0) {
-            return request.send().compose(response -> writeResponse(routingContext, response));
+            return request.send().compose(response -> writeResponse(routingContext, response, mockId));
         }
-        return request.sendBuffer(body).compose(response -> writeResponse(routingContext, response));
+        return request.sendBuffer(body).compose(response -> writeResponse(routingContext, response, mockId));
     }
 
     static void copyForwardableRequestHeaders(MultiMap inboundHeaders, MultiMap outboundHeaders) {
@@ -155,18 +155,34 @@ public class ProxyForwarder {
         return excludedHeaders;
     }
 
-    private io.vertx.core.Future<Void> writeResponse(RoutingContext routingContext, HttpResponse<Buffer> response) {
+    private io.vertx.core.Future<Void> writeResponse(RoutingContext routingContext, HttpResponse<Buffer> response, String mockId) {
         LOG.tracef("Proxy response method=%s uri=%s status=%d.",
                 routingContext.request().method(),
                 routingContext.request().uri(),
                 response.statusCode());
         routingContext.response().setStatusCode(response.statusCode());
-        response.headers().forEach(header -> routingContext.response().headers().add(header.getKey(), header.getValue()));
+        response.headers().forEach(header -> routingContext.response().headers().add(header.getKey(),
+                HttpHeaders.LOCATION.equalsIgnoreCase(header.getKey())
+                        ? rewriteLocation(header.getValue(), mockId) : header.getValue()));
         Buffer responseBody = response.body();
         if (responseBody == null || responseBody.length() == 0) {
             return routingContext.response().end();
         }
         return routingContext.response().end(responseBody);
+    }
+
+    private String rewriteLocation(String location, String mockId) {
+        if (config.routing().mode() != MockFleetConfig.RoutingMode.PATH
+                || !config.routing().rewriteLocationHeaders()
+                || !location.startsWith("/") || location.startsWith("//")) {
+            return location;
+        }
+        String prefix = "/" + mockId;
+        if (location.equals(prefix) || location.startsWith(prefix + "/")
+                || location.startsWith(prefix + "?") || location.startsWith(prefix + "#")) {
+            return location;
+        }
+        return prefix + location;
     }
 
     private long retryDelayMs(int attempt) {

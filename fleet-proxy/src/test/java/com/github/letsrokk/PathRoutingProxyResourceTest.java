@@ -114,6 +114,44 @@ class PathRoutingProxyResourceTest {
     }
 
     @Test
+    void rewritesRootRelativeLocationsWithoutDuplicatingMockPrefix() {
+        mockUpstream("demo");
+        Map<String, String> locations = Map.ofEntries(
+                Map.entry("/a/b?c=d#fragment", "/demo/a/b?c=d#fragment"),
+                Map.entry("/", "/demo/"),
+                Map.entry("/demo", "/demo"),
+                Map.entry("/demo/next", "/demo/next"),
+                Map.entry("/demo?c=d", "/demo?c=d"),
+                Map.entry("/demo#fragment", "/demo#fragment"),
+                Map.entry("/demo-other/next", "/demo/demo-other/next"),
+                Map.entry("https://other.example/x", "https://other.example/x"),
+                Map.entry("//other.example/x", "//other.example/x"),
+                Map.entry("next", "next"));
+        locations.forEach((location, expected) -> {
+            nextResponse.set(new UpstreamResponse(307, "", Map.of("location", List.of(location))));
+            given().header("Host", "mock-fleet.localhost").redirects().follow(false)
+                    .get("/demo/start")
+                    .then().statusCode(307).header("Location", expected);
+        });
+    }
+
+    @Test
+    void followsRedirectBackThroughTheSameMock() {
+        for (int status : List.of(302, 307)) {
+            when(fleetApiClient.resolveUpstreamBaseUrl("demo")).thenReturn(
+                    Future.succeededFuture(upstreamBaseUrl),
+                    Future.succeededFuture("http://127.0.0.1:" + alternateUpstreamServer.actualPort()));
+            nextResponse.set(new UpstreamResponse(status, "", Map.of("Location", List.of("/next?c=d"))));
+
+            given().header("Host", "mock-fleet.localhost").redirects().follow(true)
+                    .get("/demo/start")
+                    .then().statusCode(200).body(is("alternate"));
+
+            assertEquals("/next?c=d", alternateCapturedRequest.get().uri());
+        }
+    }
+
+    @Test
     void stripsMockIdPrefixBeforeForwardingToUpstream() {
         mockUpstream("demo");
 

@@ -39,3 +39,4 @@ mock-fleet:
   routing:
     mode: ${MOCK_FLEET_ROUTING_MODE:HOST}
     host: ${MOCK_FLEET_ROUTING_HOST:mock-fleet.localhost}
+    rewrite-location-headers: ${MOCK_FLEET_ROUTING_REWRITE_LOCATION_HEADERS:true}

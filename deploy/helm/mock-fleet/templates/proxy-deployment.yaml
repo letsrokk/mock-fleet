@@ -50,6 +50,8 @@ spec:
               value: {{ .Values.metrics.binders.http | quote }}
             - name: MOCK_FLEET_ROUTING_MODE
               value: {{ .Values.fleet.proxy.routing.mode | quote }}
+            - name: MOCK_FLEET_ROUTING_REWRITE_LOCATION_HEADERS
+              value: {{ .Values.fleet.proxy.routing.rewriteLocationHeaders | quote }}
             - name: MOCK_FLEET_ROUTING_HOST
               value: {{ .Values.ingress.host | quote }}
             - name: MOCK_FLEET_API_BASE_URL
