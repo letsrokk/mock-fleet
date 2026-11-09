@@ -571,7 +571,9 @@ class PodStateTest {
         @SuppressWarnings("unchecked")
         EntryAddedListener<String, MockPodRef> listener =
                 (EntryAddedListener<String, MockPodRef>) listenerCaptor.getValue();
-        listener.entryAdded(mock(EntryEvent.class));
+        @SuppressWarnings("unchecked")
+        EntryEvent<String, MockPodRef> event = mock(EntryEvent.class);
+        listener.entryAdded(event);
 
         assertEquals(1L, nextChange.toCompletableFuture().get(1, TimeUnit.SECONDS));
         podState.removePodListener();

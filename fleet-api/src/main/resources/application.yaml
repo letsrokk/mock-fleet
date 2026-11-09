@@ -9,7 +9,8 @@ quarkus:
         path: /__fleet/api/metrics
   log:
     console:
-      json: ${QUARKUS_LOG_CONSOLE_JSON:false}
+      json:
+        enabled: ${QUARKUS_LOG_CONSOLE_JSON_ENABLED:false}
     category:
       "com.github.letsrokk":
         min-level: TRACE

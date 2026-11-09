@@ -60,7 +60,7 @@ spec:
               value: {{ .Values.fleet.proxy.connectionPools.apiMaxSize | quote }}
             - name: MOCK_FLEET_CONNECTION_POOLS_MOCK_MAX_SIZE
               value: {{ .Values.fleet.proxy.connectionPools.mockMaxSize | quote }}
-            - name: QUARKUS_LOG_CONSOLE_JSON
+            - name: QUARKUS_LOG_CONSOLE_JSON_ENABLED
               value: {{ .Values.fleet.proxy.logging.json | quote }}
             - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
               value: {{ .Values.fleet.proxy.logging.level | quote }}

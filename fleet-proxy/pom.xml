@@ -132,7 +132,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
-                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <argLine>-Xshare:off @{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
@@ -151,7 +152,8 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <argLine>-Xshare:off @{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>

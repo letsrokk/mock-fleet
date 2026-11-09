@@ -195,7 +195,7 @@ class MappingsResourceTest {
 
     private void assertInlineFileResponse(String fileName, Matcher<? super String> contentTypeMatcher) throws IOException {
         Path file = Files.createTempFile("mapping", ".tmp");
-        Files.writeString(file, "content");
+        Files.writeString(file, fileName.endsWith(".xml") ? "<mapping/>" : "content");
         when(mappingsService.file("demo", fileName)).thenReturn(opened(fileName, file));
 
         given()

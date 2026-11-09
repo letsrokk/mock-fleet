@@ -2,6 +2,8 @@
 
 Build the Java services with JDK 25 (LTS) and the checked-in Maven wrappers. The dashboard requires Node.js 26 (LTS); install its dependencies with `npm ci` in `fleet-dash`.
 
+Java test output is written to each module's `target/surefire-reports` directory. CI uploads these reports, including failure-path diagnostics, as `fleet-<module>-test-reports` artifacts even when a build fails.
+
 The local lifecycle targets require a running Minikube cluster. For an example setup, see [letsrokk/minikube](https://github.com/letsrokk/minikube).
 
 Deploy locally:

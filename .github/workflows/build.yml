@@ -40,6 +40,7 @@ jobs:
       mcp: ${{ inputs.build_all || steps.filter.outputs.mcp == 'true' }}
       mock_ops: ${{ inputs.build_all || steps.filter.outputs.mock_ops == 'true' }}
       dash: ${{ inputs.build_all || steps.filter.outputs.dash == 'true' }}
+      wiremock_matrix: ${{ inputs.build_all || steps.filter.outputs.wiremock_matrix == 'true' }}
 
     steps:
       - name: Checkout
@@ -63,11 +64,13 @@ jobs:
               - 'fleet-mcp/**'
               - 'fleet-api/mvnw'
               - 'fleet-api/.mvn/**'
-              - 'fleet-api/tests/verify-wiremock-option-matrix.sh'
-              - 'fleet-api/src/main/resources/wiremock-option-compatibility.json'
               - '.github/workflows/build.yml'
             mock_ops:
               - 'fleet-mock-ops/**'
+              - '.github/workflows/build.yml'
+            wiremock_matrix:
+              - 'fleet-api/tests/verify-wiremock-option-matrix.sh'
+              - 'fleet-api/src/main/resources/wiremock-option-compatibility.json'
               - '.github/workflows/build.yml'
             dash:
               - 'fleet-dash/**'
@@ -89,6 +92,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-proxy/pom.xml
 
       - name: Set proxy version
         if: ${{ inputs.maven_version != '' }}
@@ -98,6 +102,14 @@ jobs:
       - name: Build proxy
         working-directory: fleet-proxy
         run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-proxy-test-reports
+          path: fleet-proxy/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload proxy package
         uses: actions/upload-artifact@v7.0.2
@@ -122,6 +134,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-api/pom.xml
 
       - name: Set API version
         if: ${{ inputs.maven_version != '' }}
@@ -131,6 +144,14 @@ jobs:
       - name: Build API
         working-directory: fleet-api
         run: ./mvnw -B package -Dquarkus.container-image.build=false
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-api-test-reports
+          path: fleet-api/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload API package
         uses: actions/upload-artifact@v7.0.2
@@ -155,6 +176,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-mcp/pom.xml
 
       - name: Set MCP version
         if: ${{ inputs.maven_version != '' }}
@@ -163,8 +185,13 @@ jobs:
       - name: Build MCP
         run: ./fleet-api/mvnw -B -f fleet-mcp/pom.xml package -Dquarkus.container-image.build=false
 
-      - name: Verify WireMock 3.x option matrix
-        run: fleet-api/tests/verify-wiremock-option-matrix.sh
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-mcp-test-reports
+          path: fleet-mcp/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload MCP package
         uses: actions/upload-artifact@v7.0.2
@@ -189,6 +216,7 @@ jobs:
           distribution: temurin
           java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-mock-ops/pom.xml
 
       - name: Set Mock Ops version
         if: ${{ inputs.maven_version != '' }}
@@ -197,7 +225,15 @@ jobs:
 
       - name: Build Mock Ops
         working-directory: fleet-mock-ops
-        run: ./mvnw -B package -Dquarkus.container-image.build=false
+        run: ./mvnw -B package
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-mock-ops-test-reports
+          path: fleet-mock-ops/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload Mock Ops package
         uses: actions/upload-artifact@v7.0.2
@@ -243,3 +279,16 @@ jobs:
           name: fleet-dash-package
           path: fleet-dash/dist
           if-no-files-found: error
+
+  wiremock-matrix:
+    name: Verify WireMock option matrix
+    needs: changes
+    if: needs.changes.outputs.wiremock_matrix == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Verify WireMock 3.x option matrix
+        run: fleet-api/tests/verify-wiremock-option-matrix.sh

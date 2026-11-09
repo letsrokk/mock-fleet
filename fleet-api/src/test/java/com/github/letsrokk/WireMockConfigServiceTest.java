@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -515,7 +516,7 @@ class WireMockConfigServiceTest {
 
         verify(namespacedConfigMaps, never()).resource(any());
         verify(namespacedConfigMaps, org.mockito.Mockito.times(2)).withName("user-config");
-        verify(configMapResource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(configMapResource).watch(resourceVersion("100"), notNull());
         assertEquals(List.of("--verbose"), service.wireMockOptions.optionsFor("demo"));
     }
 
@@ -528,8 +529,8 @@ class WireMockConfigServiceTest {
             fixture.service.loadUserConfig();
             fixture.service.startUserConfigWatch();
 
-            verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
-            verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+            verify(fixture.resource).watch(resourceVersion("100"), notNull());
+            verify(fixture.resource).watch(resourceVersion("200"), notNull());
         } finally {
             fixture.service.closeWatch();
         }
@@ -557,7 +558,7 @@ class WireMockConfigServiceTest {
         fixture.service.loadUserConfig();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
     }
 
     @Test
@@ -583,7 +584,7 @@ class WireMockConfigServiceTest {
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), notNull());
     }
 
     @Test
@@ -608,10 +609,10 @@ class WireMockConfigServiceTest {
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
-        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
-        verify(fixture.resource).watch(resourceVersion("300"), any(Watcher.class));
-        verify(fixture.resource, times(3)).watch(any(ListOptions.class), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
+        verify(fixture.resource).watch(resourceVersion("200"), notNull());
+        verify(fixture.resource).watch(resourceVersion("300"), notNull());
+        verify(fixture.resource, times(3)).watch(any(ListOptions.class), any());
         fixture.service.closeWatch();
     }
 
@@ -634,8 +635,8 @@ class WireMockConfigServiceTest {
         fixture.service.startUserConfigWatch();
 
         assertEquals(List.of("--verbose"), fixture.service.wireMockOptions.optionsFor("demo"));
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
-        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
+        verify(fixture.resource).watch(resourceVersion("200"), notNull());
     }
 
     @Test

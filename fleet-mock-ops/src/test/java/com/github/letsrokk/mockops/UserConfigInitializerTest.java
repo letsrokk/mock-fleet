@@ -81,7 +81,7 @@ class UserConfigInitializerTest {
         assertEquals("Validate=false,Prune=false,Delete=false", updated.getValue().getMetadata().getAnnotations()
                 .get("argocd.argoproj.io/sync-options"));
         when(client.configMaps().inNamespace("test").withName("user").get()).thenReturn(updated.getValue());
-        clearInvocations(writer);
+        clearInvocations((Object) writer);
         UserConfigInitializer.initialize(client, "test", "user", "wiremock-options.yaml");
         verifyNoInteractions(writer);
     }
@@ -148,7 +148,7 @@ class UserConfigInitializerTest {
         assertEquals("IgnoreExtraneous", next.getMetadata().getAnnotations().get("argocd.argoproj.io/compare-options"));
         assertEquals("keep", next.getMetadata().getAnnotations().get("helm.sh/resource-policy"));
         when(client.configMaps().inNamespace("test").withName("catalog").get()).thenReturn(next);
-        clearInvocations(writer);
+        clearInvocations((Object) writer);
         VersionCatalogInitializer.initialize(client, new ObjectMapper(), "test", "catalog", seed("[3.6,4.0)"));
         verifyNoInteractions(writer);
     }

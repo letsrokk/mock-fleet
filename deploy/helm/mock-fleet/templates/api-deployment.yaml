@@ -91,7 +91,7 @@ spec:
               value: {{ .Values.fleet.api.maxConcurrentStarts | quote }}
             - name: MOCK_FLEET_QUEUED_START_CAPACITY
               value: {{ .Values.fleet.api.queuedStartCapacity | quote }}
-            - name: QUARKUS_LOG_CONSOLE_JSON
+            - name: QUARKUS_LOG_CONSOLE_JSON_ENABLED
               value: {{ .Values.fleet.api.logging.json | quote }}
             - name: QUARKUS_LOG_CATEGORY_COM_GITHUB_LETSROKK_LEVEL
               value: {{ .Values.fleet.api.logging.level | quote }}
