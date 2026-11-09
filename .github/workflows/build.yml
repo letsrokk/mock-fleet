@@ -44,12 +44,12 @@ jobs:
     steps:
       - name: Checkout
         if: ${{ !inputs.build_all }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Detect changed modules
         id: filter
         if: ${{ !inputs.build_all }}
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@v4.0.3
         with:
           base: ${{ github.event.created && github.event.repository.default_branch || github.ref }}
           filters: |
@@ -81,13 +81,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
 
       - name: Set proxy version
@@ -100,7 +100,7 @@ jobs:
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
       - name: Upload proxy package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-proxy-package
           path: fleet-proxy/target/quarkus-app
@@ -114,13 +114,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
 
       - name: Set API version
@@ -133,7 +133,7 @@ jobs:
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
       - name: Upload API package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-api-package
           path: fleet-api/target/quarkus-app
@@ -147,13 +147,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
 
       - name: Set MCP version
@@ -167,7 +167,7 @@ jobs:
         run: fleet-api/tests/verify-wiremock-option-matrix.sh
 
       - name: Upload MCP package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-mcp-package
           path: fleet-mcp/target/quarkus-app
@@ -181,13 +181,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
 
       - name: Set Mock Ops version
@@ -200,7 +200,7 @@ jobs:
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
       - name: Upload Mock Ops package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-mock-ops-package
           path: fleet-mock-ops/target/quarkus-app
@@ -214,12 +214,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: fleet-dash/package-lock.json
 
@@ -238,7 +238,7 @@ jobs:
         run: npm run build
 
       - name: Upload dashboard package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-dash-package
           path: fleet-dash/dist
