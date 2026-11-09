@@ -4,14 +4,15 @@ import io.quarkiverse.mcp.server.OutputSchemaGenerator;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import jakarta.inject.Singleton;
+import java.lang.reflect.Type;
 
 @Singleton
 public final class ToolOutputSchemaGenerator implements OutputSchemaGenerator {
 
     @Override
-    public Object generate(Class<?> marker) {
+    public Object generate(Type marker) {
         return new JsonObject().put("oneOf", new JsonArray()
-                .add(success(marker))
+                .add(success((Class<?>) marker))
                 .add(errorEnvelope()));
     }
 

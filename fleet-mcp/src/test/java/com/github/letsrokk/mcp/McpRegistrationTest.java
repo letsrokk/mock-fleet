@@ -409,7 +409,7 @@ class McpRegistrationTest {
 
         for (JsonNode registeredTool : tools) {
             JsonNode properties = registeredTool.path("inputSchema").path("properties");
-            properties.fields().forEachRemaining(property -> assertFalse(
+            properties.properties().forEach(property -> assertFalse(
                     property.getValue().path("description").asText().isBlank(),
                     registeredTool.path("name").asText() + "." + property.getKey()));
             if (properties.has("mockId")) {

@@ -63,6 +63,8 @@ final class HttpTransportSupport {
         }
     }
 
+    // Header predicates must reject error responses before the bounded JSON decoder runs.
+    @SuppressWarnings("deprecation")
     static CollectionScan awaitCollection(HttpRequest<Buffer> request, byte[] body, ObjectMapper mapper,
             String collectionField, long position, int limit, long maxBytes, int maxItems) {
         AtomicReference<CollectionScan> completedPage = new AtomicReference<>();

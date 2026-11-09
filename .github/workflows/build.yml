@@ -32,7 +32,7 @@ concurrency:
 jobs:
   changes:
     name: Detect changed modules
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     outputs:
       proxy: ${{ inputs.build_all || steps.filter.outputs.proxy == 'true' }}
@@ -40,16 +40,17 @@ jobs:
       mcp: ${{ inputs.build_all || steps.filter.outputs.mcp == 'true' }}
       mock_ops: ${{ inputs.build_all || steps.filter.outputs.mock_ops == 'true' }}
       dash: ${{ inputs.build_all || steps.filter.outputs.dash == 'true' }}
+      wiremock_matrix: ${{ inputs.build_all || steps.filter.outputs.wiremock_matrix == 'true' }}
 
     steps:
       - name: Checkout
         if: ${{ !inputs.build_all }}
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Detect changed modules
         id: filter
         if: ${{ !inputs.build_all }}
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@v4.0.3
         with:
           base: ${{ github.event.created && github.event.repository.default_branch || github.ref }}
           filters: |
@@ -63,11 +64,13 @@ jobs:
               - 'fleet-mcp/**'
               - 'fleet-api/mvnw'
               - 'fleet-api/.mvn/**'
-              - 'fleet-api/tests/verify-wiremock-option-matrix.sh'
-              - 'fleet-api/src/main/resources/wiremock-option-compatibility.json'
               - '.github/workflows/build.yml'
             mock_ops:
               - 'fleet-mock-ops/**'
+              - '.github/workflows/build.yml'
+            wiremock_matrix:
+              - 'fleet-api/tests/verify-wiremock-option-matrix.sh'
+              - 'fleet-api/src/main/resources/wiremock-option-compatibility.json'
               - '.github/workflows/build.yml'
             dash:
               - 'fleet-dash/**'
@@ -77,18 +80,19 @@ jobs:
     name: Build fleet-proxy
     needs: changes
     if: needs.changes.outputs.proxy == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-proxy/pom.xml
 
       - name: Set proxy version
         if: ${{ inputs.maven_version != '' }}
@@ -99,8 +103,16 @@ jobs:
         working-directory: fleet-proxy
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-proxy-test-reports
+          path: fleet-proxy/target/surefire-reports
+          if-no-files-found: ignore
+
       - name: Upload proxy package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-proxy-package
           path: fleet-proxy/target/quarkus-app
@@ -110,18 +122,19 @@ jobs:
     name: Build fleet-api
     needs: changes
     if: needs.changes.outputs.api == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-api/pom.xml
 
       - name: Set API version
         if: ${{ inputs.maven_version != '' }}
@@ -132,8 +145,16 @@ jobs:
         working-directory: fleet-api
         run: ./mvnw -B package -Dquarkus.container-image.build=false
 
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-api-test-reports
+          path: fleet-api/target/surefire-reports
+          if-no-files-found: ignore
+
       - name: Upload API package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-api-package
           path: fleet-api/target/quarkus-app
@@ -143,18 +164,19 @@ jobs:
     name: Build fleet-mcp
     needs: changes
     if: needs.changes.outputs.mcp == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-mcp/pom.xml
 
       - name: Set MCP version
         if: ${{ inputs.maven_version != '' }}
@@ -163,11 +185,16 @@ jobs:
       - name: Build MCP
         run: ./fleet-api/mvnw -B -f fleet-mcp/pom.xml package -Dquarkus.container-image.build=false
 
-      - name: Verify WireMock 3.x option matrix
-        run: fleet-api/tests/verify-wiremock-option-matrix.sh
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-mcp-test-reports
+          path: fleet-mcp/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload MCP package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-mcp-package
           path: fleet-mcp/target/quarkus-app
@@ -177,18 +204,19 @@ jobs:
     name: Build fleet-mock-ops
     needs: changes
     if: needs.changes.outputs.mock_ops == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up JDK
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           cache: maven
+          cache-dependency-path: fleet-mock-ops/pom.xml
 
       - name: Set Mock Ops version
         if: ${{ inputs.maven_version != '' }}
@@ -197,10 +225,18 @@ jobs:
 
       - name: Build Mock Ops
         working-directory: fleet-mock-ops
-        run: ./mvnw -B package -Dquarkus.container-image.build=false
+        run: ./mvnw -B package
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: fleet-mock-ops-test-reports
+          path: fleet-mock-ops/target/surefire-reports
+          if-no-files-found: ignore
 
       - name: Upload Mock Ops package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-mock-ops-package
           path: fleet-mock-ops/target/quarkus-app
@@ -210,16 +246,16 @@ jobs:
     name: Build fleet-dash
     needs: changes
     if: needs.changes.outputs.dash == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
-          node-version: "24"
+          node-version: "26"
           cache: npm
           cache-dependency-path: fleet-dash/package-lock.json
 
@@ -238,8 +274,21 @@ jobs:
         run: npm run build
 
       - name: Upload dashboard package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: fleet-dash-package
           path: fleet-dash/dist
           if-no-files-found: error
+
+  wiremock-matrix:
+    name: Verify WireMock option matrix
+    needs: changes
+    if: needs.changes.outputs.wiremock_matrix == 'true'
+    runs-on: ubuntu-26.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Verify WireMock 3.x option matrix
+        run: fleet-api/tests/verify-wiremock-option-matrix.sh

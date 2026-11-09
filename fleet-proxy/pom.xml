@@ -8,14 +8,14 @@
     <properties>
         <argLine></argLine>
         <compiler-plugin.version>3.16.0</compiler-plugin.version>
-        <maven.compiler.release>21</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <mockito.version>5.24.0</mockito.version>
         <mockito.agent.path>${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</mockito.agent.path>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.40.1.1</quarkus.platform.version>
+        <quarkus.platform.version>3.40.1.2</quarkus.platform.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.6.1</surefire-plugin.version>
     </properties>
@@ -132,7 +132,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
-                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <argLine>-Xshare:off @{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
@@ -151,7 +152,8 @@
                     </execution>
                 </executions>
                 <configuration>
-                    <argLine>@{argLine} "-javaagent:${mockito.agent.path}"</argLine>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <argLine>-Xshare:off @{argLine} "-javaagent:${mockito.agent.path}"</argLine>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>

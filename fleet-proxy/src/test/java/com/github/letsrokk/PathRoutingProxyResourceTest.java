@@ -139,7 +139,7 @@ class PathRoutingProxyResourceTest {
     void followsRedirectBackThroughTheSameMock() {
         for (int status : List.of(302, 307)) {
             when(fleetApiClient.resolveUpstreamBaseUrl("demo")).thenReturn(
-                    Future.succeededFuture(upstreamBaseUrl),
+                    Future.succeededFuture(upstreamBaseUrl)).thenReturn(
                     Future.succeededFuture("http://127.0.0.1:" + alternateUpstreamServer.actualPort()));
             nextResponse.set(new UpstreamResponse(status, "", Map.of("Location", List.of("/next?c=d"))));
 

@@ -185,7 +185,7 @@ class RegistryV2ClientTest {
     @Test void permitsCrossOriginHttpsBearerRealmAndSendsConfiguredCredentialsSecurely() throws Exception {
         HttpClient http = mock(HttpClient.class);
         List<HttpRequest> requests = new ArrayList<>();
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(invocation -> {
+        when(http.send(any(HttpRequest.class), any())).thenAnswer(invocation -> {
             HttpRequest request = invocation.getArgument(0);
             requests.add(request);
             if (request.uri().getHost().equals("registry.example") && requests.size() == 1) {
@@ -290,7 +290,7 @@ class RegistryV2ClientTest {
                                            RegistryV2Client.Credentials credentials) throws Exception {
         HttpClient http = mock(HttpClient.class);
         AtomicInteger requests = new AtomicInteger();
-        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(invocation -> {
+        when(http.send(any(HttpRequest.class), any())).thenAnswer(invocation -> {
             int request = requests.incrementAndGet();
             if (request == 1) {
                 return response(401, Map.of("WWW-Authenticate", List.of(

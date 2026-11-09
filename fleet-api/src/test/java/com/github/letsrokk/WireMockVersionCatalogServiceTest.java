@@ -17,6 +17,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -35,8 +36,8 @@ class WireMockVersionCatalogServiceTest {
             fixture.service.startWatch();
 
             assertEquals("41", fixture.service.catalog().resourceVersion());
-            verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
-            verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+            verify(fixture.resource).watch(resourceVersion("100"), notNull());
+            verify(fixture.resource).watch(resourceVersion("200"), notNull());
         } finally {
             fixture.service.closeWatch();
         }
@@ -53,7 +54,7 @@ class WireMockVersionCatalogServiceTest {
         verify(fixture.namespaced, times(2)).withName("catalog-name");
         verify(fixture.resource).get();
         verify(fixture.namespaced).withField("metadata.name", "catalog-name");
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
     }
 
     @Test
@@ -66,7 +67,7 @@ class WireMockVersionCatalogServiceTest {
         fixture.service.loadCatalog();
 
         assertEquals("42", fixture.service.catalog().resourceVersion());
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
     }
 
     @Test
@@ -80,7 +81,7 @@ class WireMockVersionCatalogServiceTest {
         fixture.service.startWatch();
 
         assertEquals("42", fixture.service.catalog().resourceVersion());
-        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("200"), notNull());
     }
 
     @Test
@@ -97,9 +98,9 @@ class WireMockVersionCatalogServiceTest {
 
         assertEquals("41", fixture.service.catalog().resourceVersion());
         verify(fixture.resource).get();
-        verify(fixture.resource).watch(resourceVersion("100"), any(Watcher.class));
-        verify(fixture.resource).watch(resourceVersion("200"), any(Watcher.class));
-        verify(fixture.resource).watch(resourceVersion("300"), any(Watcher.class));
+        verify(fixture.resource).watch(resourceVersion("100"), notNull());
+        verify(fixture.resource).watch(resourceVersion("200"), notNull());
+        verify(fixture.resource).watch(resourceVersion("300"), notNull());
     }
 
     @Test
