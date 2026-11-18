@@ -15,7 +15,6 @@
 #
 # JAVA_OPTS and JAVA_OPTS_APPEND supply additional JVM options.
 # JAVA_TOOL_OPTIONS is also honored by the JVM, including remote debugging options.
-# The default maximum heap is 50% of container memory, with an initial heap of 12.5%.
 #
 FROM amazoncorretto:25-al2023
 
@@ -30,4 +29,4 @@ USER 185
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
 
-ENTRYPOINT ["sh", "-c", "exec java -XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=12.5 $JAVA_OPTS $JAVA_OPTS_APPEND -jar \"$JAVA_APP_JAR\" \"$@\"", "--"]
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS $JAVA_OPTS_APPEND -jar \"$JAVA_APP_JAR\" \"$@\"", "--"]
