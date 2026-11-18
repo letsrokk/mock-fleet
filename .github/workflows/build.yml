@@ -89,7 +89,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v6.2.0
         with:
-          distribution: temurin
+          distribution: corretto
           java-version: "25"
           cache: maven
           cache-dependency-path: fleet-proxy/pom.xml
@@ -131,7 +131,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v6.2.0
         with:
-          distribution: temurin
+          distribution: corretto
           java-version: "25"
           cache: maven
           cache-dependency-path: fleet-api/pom.xml
@@ -173,7 +173,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v6.2.0
         with:
-          distribution: temurin
+          distribution: corretto
           java-version: "25"
           cache: maven
           cache-dependency-path: fleet-mcp/pom.xml
@@ -213,7 +213,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v6.2.0
         with:
-          distribution: temurin
+          distribution: corretto
           java-version: "25"
           cache: maven
           cache-dependency-path: fleet-mock-ops/pom.xml

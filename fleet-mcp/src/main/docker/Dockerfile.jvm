@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/openjdk-25:1.24
+FROM amazoncorretto:25-al2023@sha256:8b82be5adeabd374f5438e90635a120868e07ea8e85be6b691eb1c994d53f1e2
 
 ENV LANGUAGE='en_US:en'
 USER root
@@ -16,4 +16,4 @@ USER 185
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
 ENV JAVA_APP_JAR="/workspace/quarkus-run.jar"
 
-ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]
+ENTRYPOINT ["sh", "-c", "exec java -XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=12.5 $JAVA_OPTS $JAVA_OPTS_APPEND -jar \"$JAVA_APP_JAR\" \"$@\"", "--"]
