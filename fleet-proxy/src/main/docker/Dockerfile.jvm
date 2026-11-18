@@ -17,7 +17,7 @@
 # JAVA_TOOL_OPTIONS is also honored by the JVM, including remote debugging options.
 # The default maximum heap is 50% of container memory, with an initial heap of 12.5%.
 #
-FROM amazoncorretto:25-al2023@sha256:8b82be5adeabd374f5438e90635a120868e07ea8e85be6b691eb1c994d53f1e2
+FROM amazoncorretto:25-al2023
 
 ENV LANGUAGE='en_US:en'
 USER root
