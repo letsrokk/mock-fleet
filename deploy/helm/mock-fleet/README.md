@@ -406,7 +406,6 @@ The admission policy accepts zero identity projections or exactly one projection
 | --- | --- | --- |
 | `fleet.proxy.dev.enabled` | `false` | Run proxy in Quarkus dev mode and force one replica. |
 | `fleet.proxy.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when proxy dev mode is enabled. |
-| `fleet.proxy.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | Proxy debug JVM options used in dev mode. |
 | `fleet.proxy.image.repository` | `ghcr.io/letsrokk/mock-fleet/proxy` | Proxy image repository. |
 | `fleet.proxy.image.tag` | `""` | Proxy image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.proxy.image.pullPolicy` | `IfNotPresent` | Proxy image pull policy. |
@@ -449,7 +448,6 @@ The admission policy accepts zero identity projections or exactly one projection
 | --- | --- | --- |
 | `fleet.api.dev.enabled` | `false` | Run API in Quarkus dev mode and force one replica. |
 | `fleet.api.dev.quarkusLaunchDevmode` | `"true"` | Value for `QUARKUS_LAUNCH_DEVMODE` when API dev mode is enabled. |
-| `fleet.api.dev.javaToolOptions` | `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` | API debug JVM options used in dev mode. |
 | `fleet.api.image.repository` | `ghcr.io/letsrokk/mock-fleet/api` | API image repository. |
 | `fleet.api.image.tag` | `""` | API image tag. Defaults to the chart `appVersion` when empty. |
 | `fleet.api.image.pullPolicy` | `IfNotPresent` | API image pull policy. |
@@ -694,7 +692,7 @@ Reconciliation validates the complete registry result, both configuration docume
 | Value | Default | Description |
 | --- | --- | --- |
 | `securityContext.runAsNonRoot` | `true` | Set `runAsNonRoot` on app pods. |
-| `env.javaToolOptions` | `""` | Runtime `JAVA_TOOL_OPTIONS` for API, proxy, and MCP. In API/proxy dev mode, the component’s `dev.javaToolOptions` is used instead. |
+| `env.javaToolOptions` | `""` | Runtime `JAVA_TOOL_OPTIONS` for API, proxy, and MCP in all modes. |
 | `env.userDir` | `/workspace` | Value for `user.dir` in proxy, API, and MCP pods. |
 | `serviceAccount.create` | `true` | Create a service account for `fleet-api`. |
 | `serviceAccount.name` | `""` | Existing service account name, or generated name when empty. |
@@ -711,7 +709,7 @@ Reconciliation validates the complete registry result, both configuration docume
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
 | `hazelcast.gracefulShutdownMaxWaitSeconds` | `30` | Maximum wait for graceful member shutdown. |
 
-API, proxy, and MCP images start Java directly. Their built-in JVM settings use `JDK_JAVA_OPTIONS`; deployment JVM settings use `JAVA_TOOL_OPTIONS`. Move Helm `env.javaOpts` settings to `env.javaToolOptions`. When running an image directly, move `JAVA_OPTS` or `JAVA_OPTS_APPEND` settings to `JAVA_TOOL_OPTIONS`. These old variables and `JAVA_APP_JAR` are no longer read. Replacing `JDK_JAVA_OPTIONS` replaces all image defaults, including API’s Hazelcast module-access flags.
+API, proxy, and MCP images start Java directly. Their built-in JVM settings use `JDK_JAVA_OPTIONS`; deployment JVM settings use `JAVA_TOOL_OPTIONS`. Move Helm `env.javaOpts` settings to `env.javaToolOptions`. When running an image directly, move `JAVA_OPTS` or `JAVA_OPTS_APPEND` settings to `JAVA_TOOL_OPTIONS`. These old variables and `JAVA_APP_JAR` are no longer read. Replacing `JDK_JAVA_OPTIONS` replaces all image defaults, including API’s Hazelcast module-access flags. Dev mode no longer enables the debugger automatically; set `env.javaToolOptions` to `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005` to enable JDWP debugging.
 
 ## Saved User Configuration
 

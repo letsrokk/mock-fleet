@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Breaking change:** JVM images now use Amazon Corretto 25 and start Java directly. API, proxy, and MCP image defaults use `JDK_JAVA_OPTIONS`; `JAVA_OPTS`, `JAVA_OPTS_APPEND`, and `JAVA_APP_JAR` are no longer read. Move Helm `env.javaOpts` to `env.javaToolOptions`, or standalone JVM options to `JAVA_TOOL_OPTIONS`. In API/proxy dev mode, configure the component’s `dev.javaToolOptions` instead. JVM default heap sizing replaces the Red Hat launcher’s memory tuning; set explicit heap options if required.
+- **Breaking change:** Remove `fleet.api.dev.javaToolOptions` and `fleet.proxy.dev.javaToolOptions`. Use `env.javaToolOptions` for JVM options in all modes. Dev mode no longer enables JDWP debugging automatically; set the debugger options explicitly when needed.
+
+- **Breaking change:** JVM images now use Amazon Corretto 25 and start Java directly. API, proxy, and MCP image defaults use `JDK_JAVA_OPTIONS`; `JAVA_OPTS`, `JAVA_OPTS_APPEND`, and `JAVA_APP_JAR` are no longer read. Move Helm `env.javaOpts` to `env.javaToolOptions`, or standalone JVM options to `JAVA_TOOL_OPTIONS`. JVM default heap sizing replaces the Red Hat launcher’s memory tuning; set explicit heap options if required.
 
 - **Breaking change:** HTTP server/client metrics (`http_server_*`, `http_client_*`) are now disabled by default in fleet-api, fleet-proxy, and fleet-mcp. Set Helm `metrics.binders.http=true` or standalone `MOCK_FLEET_METRICS_HTTP_ENABLED=true` and restart the services to retain these metrics for existing dashboards and alerts.
 

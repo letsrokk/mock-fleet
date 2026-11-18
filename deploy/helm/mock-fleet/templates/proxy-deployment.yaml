@@ -67,10 +67,8 @@ spec:
             {{- if .Values.fleet.proxy.dev.enabled }}
             - name: QUARKUS_LAUNCH_DEVMODE
               value: {{ .Values.fleet.proxy.dev.quarkusLaunchDevmode | quote }}
-            - name: JAVA_TOOL_OPTIONS
-              value: {{ .Values.fleet.proxy.dev.javaToolOptions | quote }}
             {{- end }}
-            {{- if and (not .Values.fleet.proxy.dev.enabled) .Values.env.javaToolOptions }}
+            {{- if .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
               value: {{ .Values.env.javaToolOptions | quote }}
             {{- end }}

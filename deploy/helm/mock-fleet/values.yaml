@@ -15,7 +15,6 @@ fleet:
     dev:
       enabled: false
       quarkusLaunchDevmode: "true"
-      javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
       repository: ghcr.io/letsrokk/mock-fleet/proxy
       tag: ""
@@ -70,7 +69,6 @@ fleet:
     dev:
       enabled: false
       quarkusLaunchDevmode: "true"
-      javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
     image:
       repository: ghcr.io/letsrokk/mock-fleet/api
       tag: ""

@@ -33,6 +33,8 @@ make local-destroy DELETE_NAMESPACE=true
 
 `DEV=true` and `DEV=api` both select API remote development. Use `DEV=proxy` for proxy remote development. The Minikube profile enables Fleet Mock Ops. `REBUILD` accepts `dash`, `api`, `proxy`, `mcp`, `mock-ops`, or `all` and combines the forced rebuild with modules detected from working-tree changes. Run `make help` for the complete target and variable summary.
 
+Remote dev mode does not enable the JVM debugger automatically. For debugging with `PORT_FORWARD=true`, set `env.javaToolOptions` in `deploy/helm/mock-fleet/values.minikube.yaml` to `-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005`. These options apply to API, proxy, and MCP in all modes.
+
 ## Local security setup
 
 Local deployment labels its namespace for the `restricted` Pod Security Admission profile at the current server minor version.
