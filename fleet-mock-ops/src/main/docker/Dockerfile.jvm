@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+FROM amazoncorretto:25-al2023
 WORKDIR /work/
 USER root
 COPY target/quarkus-app/lib/ /work/lib/

@@ -52,5 +52,5 @@ storage:
 resourceQuota:
   enabled: true
 
-#env:
-#  javaToolOptions: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+env:
+  javaToolOptions: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"

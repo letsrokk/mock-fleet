@@ -521,10 +521,9 @@
       "type": "object",
       "properties": {
         "enabled": { "type": "boolean" },
-        "quarkusLaunchDevmode": { "type": "string" },
-        "javaToolOptions": { "type": "string" }
+        "quarkusLaunchDevmode": { "type": "string" }
       },
-      "required": ["enabled", "quarkusLaunchDevmode", "javaToolOptions"]
+      "required": ["enabled", "quarkusLaunchDevmode"]
     },
     "resourceQuantity": {
       "type": "string",

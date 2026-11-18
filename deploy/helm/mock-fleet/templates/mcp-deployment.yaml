@@ -92,8 +92,6 @@ spec:
               value: {{ .Values.fleet.mcp.maxCollectionScanBytes | int64 | quote }}
             - name: FLEET_MCP_MAX_COLLECTION_SCAN_ITEMS
               value: {{ .Values.fleet.mcp.maxCollectionScanItems | int64 | quote }}
-            - name: JAVA_OPTS
-              value: {{ .Values.env.javaOpts | quote }}
             {{- if .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
               value: {{ .Values.env.javaToolOptions | quote }}
