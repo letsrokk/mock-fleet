@@ -11,9 +11,14 @@ COPY public/ ./public/
 COPY src/ ./src/
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine
+FROM nginx:1.30.7-alpine-slim
+
+RUN sed -i '/^user /d; s|/run/nginx.pid|/tmp/nginx.pid|' /etc/nginx/nginx.conf \
+    && chown -R 1001:1001 /var/cache/nginx
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist/ /usr/share/nginx/html/__fleet/
+
+USER 1001:1001
 
 EXPOSE 8080
