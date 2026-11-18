@@ -13,8 +13,7 @@
 #
 # docker run -i --rm -p 8080:8080 quarkus/mock-fleet-legacy-jar
 #
-# JAVA_OPTS and JAVA_OPTS_APPEND supply additional JVM options.
-# JAVA_TOOL_OPTIONS is also honored by the JVM, including remote debugging options.
+# JDK_JAVA_OPTIONS supplies image defaults; JAVA_TOOL_OPTIONS supplies runtime JVM options.
 #
 FROM amazoncorretto:25-al2023
 
@@ -26,7 +25,6 @@ COPY target/*-runner.jar /deployments/quarkus-run.jar
 
 EXPOSE 8080
 USER 185
-ENV JAVA_OPTS_APPEND="--add-modules java.se --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.management/sun.management=ALL-UNNAMED --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED -Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
-ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+ENV JDK_JAVA_OPTIONS="--add-modules java.se --add-exports java.base/jdk.internal.ref=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.management/sun.management=ALL-UNNAMED --add-opens jdk.management/com.sun.management.internal=ALL-UNNAMED -Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS $JAVA_OPTS_APPEND -jar \"$JAVA_APP_JAR\" \"$@\"", "--"]
+ENTRYPOINT ["java", "-jar", "/deployments/quarkus-run.jar"]

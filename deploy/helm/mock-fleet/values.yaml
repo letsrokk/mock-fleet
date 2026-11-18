@@ -346,7 +346,7 @@ securityContext:
   runAsNonRoot: true
 
 env:
-  javaOpts: ""
+  javaToolOptions: ""
   userDir: /workspace
 
 serviceAccount:

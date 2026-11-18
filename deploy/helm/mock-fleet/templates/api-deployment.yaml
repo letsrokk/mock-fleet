@@ -164,8 +164,6 @@ spec:
             - name: JAVA_TOOL_OPTIONS
               value: {{ .Values.fleet.api.dev.javaToolOptions | quote }}
             {{- end }}
-            - name: JAVA_OPTS
-              value: {{ .Values.env.javaOpts | quote }}
             {{- if and (not .Values.fleet.api.dev.enabled) .Values.env.javaToolOptions }}
             - name: JAVA_TOOL_OPTIONS
               value: {{ .Values.env.javaToolOptions | quote }}

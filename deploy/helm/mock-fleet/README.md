@@ -694,8 +694,7 @@ Reconciliation validates the complete registry result, both configuration docume
 | Value | Default | Description |
 | --- | --- | --- |
 | `securityContext.runAsNonRoot` | `true` | Set `runAsNonRoot` on app pods. |
-| `env.javaOpts` | `""` | Java options passed to proxy, API, and MCP pods. |
-| `env.javaToolOptions` | unset | Optional non-dev `JAVA_TOOL_OPTIONS` for proxy, API, and MCP pods. |
+| `env.javaToolOptions` | `""` | Runtime `JAVA_TOOL_OPTIONS` for API, proxy, and MCP. In API/proxy dev mode, the component’s `dev.javaToolOptions` is used instead. |
 | `env.userDir` | `/workspace` | Value for `user.dir` in proxy, API, and MCP pods. |
 | `serviceAccount.create` | `true` | Create a service account for `fleet-api`. |
 | `serviceAccount.name` | `""` | Existing service account name, or generated name when empty. |
@@ -711,6 +710,8 @@ Reconciliation validates the complete registry result, both configuration docume
 | `hazelcast.port` | `5701` | Embedded Hazelcast member and headless-service port. |
 | `hazelcast.backupCount` | `1` | Synchronous backup count for distributed mock state. |
 | `hazelcast.gracefulShutdownMaxWaitSeconds` | `30` | Maximum wait for graceful member shutdown. |
+
+API, proxy, and MCP images start Java directly. Their built-in JVM settings use `JDK_JAVA_OPTIONS`; deployment JVM settings use `JAVA_TOOL_OPTIONS`. Move Helm `env.javaOpts` settings to `env.javaToolOptions`. When running an image directly, move `JAVA_OPTS` or `JAVA_OPTS_APPEND` settings to `JAVA_TOOL_OPTIONS`. These old variables and `JAVA_APP_JAR` are no longer read. Replacing `JDK_JAVA_OPTIONS` replaces all image defaults, including API’s Hazelcast module-access flags.
 
 ## Saved User Configuration
 

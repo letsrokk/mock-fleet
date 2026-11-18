@@ -13,7 +13,6 @@ RUN chown -R 185:root /workspace && chmod -R g=u /workspace
 
 EXPOSE 8080
 USER 185
-ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
-ENV JAVA_APP_JAR="/workspace/quarkus-run.jar"
+ENV JDK_JAVA_OPTIONS="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager"
 
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS $JAVA_OPTS_APPEND -jar \"$JAVA_APP_JAR\" \"$@\"", "--"]
+ENTRYPOINT ["java", "-jar", "/workspace/quarkus-run.jar"]
